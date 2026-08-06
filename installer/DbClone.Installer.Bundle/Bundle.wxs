@@ -8,9 +8,9 @@
           Version="$(var.ProductVersion)"
           UpgradeCode="B4E8C3F2-7A5D-4F9B-C6E1-3D6C9B4F8A01"
           IconSourceFile="..\DbClone.Installer.UI\Assets\app.ico"
-          AboutUrl="https://github.com/user-alex-new/DbClone"
-          HelpUrl="https://github.com/user-alex-new/DbClone/issues"
-          UpdateUrl="https://github.com/user-alex-new/DbClone/releases">
+          AboutUrl="https://github.com/AlexNek/DbClone"
+          HelpUrl="https://github.com/AlexNek/DbClone/issues"
+          UpdateUrl="https://github.com/AlexNek/DbClone/releases">
 
     <!-- Custom WPF wizard bootstrapper application (DbClone.Installer.UI).
          Published as a self-contained single-file exe by build-installer-wix.ps1

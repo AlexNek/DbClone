@@ -2,7 +2,7 @@
 
 ## Download
 
-Download the latest installer from [GitHub Releases](https://github.com/user-alex-new/DbClone/releases):
+Download the latest installer from [GitHub Releases](https://github.com/AlexNek/DbClone/releases):
 
 - **`DbClone-Setup-x.y.z.exe`** — standard installer with Start Menu shortcut
 

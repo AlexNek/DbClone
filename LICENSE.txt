@@ -1,6 +1,6 @@
 # DbClone License
 
-Copyright (c) 2025 user-alex-new
+Copyright (c) 2026 Alex Nek
 
 DbClone is distributed under a dual-license model.
 The compiled binary and the source code have separate terms.
@@ -76,8 +76,8 @@ URL for them above, as well as copies of any plain-text lines
 beginning with Required Notice: that the licensor provided
 with the software. For example:
 
-> Required Notice: Copyright user-alex-new
-> (https://github.com/user-alex-new/DbClone)
+> Required Notice: Copyright Alex Nek
+> (https://github.com/AlexNek/DbClone)
 
 #### Changes and New Works License
 
@@ -129,7 +129,7 @@ beginning with Licensor Line of Business: with the software
 that mentions that line of business. For example:
 
 > Licensor Line of Business: DbClone Database Migration Tool
-> (https://github.com/user-alex-new/DbClone)
+> (https://github.com/AlexNek/DbClone)
 
 #### Sales of Business
 

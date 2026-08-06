@@ -4,6 +4,8 @@ A Windows desktop application for cloning and migrating PostgreSQL databases —
 
 Built for moving databases off managed platforms (Supabase, Aiven, Neon, etc.) to vanilla PostgreSQL without losing schema fidelity.
 
+**Documentation:** [https://alexnek.github.io/DbClone/](https://alexnek.github.io/DbClone/)
+
 ## Why DbClone?
 
 You might ask: *"Why not just use `pg_dump` / `pg_restore` / DBeaver / pgAdmin?"*
@@ -91,7 +93,7 @@ After the copy, the built-in **validation stage** performs two levels of verific
 
 ## Installation
 
-Download the latest `DbClone-Setup-x.y.z.exe` from [GitHub Releases](https://github.com/user-alex-new/DbClone/releases) and run it.
+Download the latest `DbClone-Setup-x.y.z.exe` from [GitHub Releases](https://github.com/AlexNek/DbClone/releases) and run it. For detailed guides, see the [user manual](https://alexnek.github.io/DbClone/).
 
 The installer supports silent updates:
 

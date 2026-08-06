@@ -15,7 +15,7 @@ The **source code** is governed by [PolyForm Shield 1.0.0](https://polyformproje
 - **Open source projects** (OSI-approved license, publicly available source) may use, modify, and contribute to the source — as long as the project is not a competing database copy/migration tool.
 - **Commercial or competing use** of the source code requires a separate commercial license. Contact the author for details.
 
-See [LICENSE.txt](https://github.com/user-alex-new/DbClone/blob/main/LICENSE.txt) for the full terms.
+See [LICENSE.txt](https://github.com/AlexNek/DbClone/blob/main/LICENSE.txt) for the full terms.
 
 ### Does it work on macOS or Linux?
 

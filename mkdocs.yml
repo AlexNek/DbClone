@@ -1,8 +1,8 @@
 site_name: DbClone User Manual
 site_description: User manual for DbClone — PostgreSQL database cloning tool
-site_url: https://user-alex-new.github.io/DbClone/
-repo_url: https://github.com/user-alex-new/DbClone
-repo_name: user-alex-new/DbClone
+site_url: https://alexnek.github.io/DbClone/
+repo_url: https://github.com/AlexNek/DbClone
+repo_name: AlexNek/DbClone
 
 theme:
   name: material
@@ -93,4 +93,4 @@ markdown_extensions:
 extra:
   social:
     - icon: fontawesome/brands/github
-      link: https://github.com/user-alex-new/DbClone
+      link: https://github.com/AlexNek/DbClone

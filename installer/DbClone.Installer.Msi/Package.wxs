@@ -26,7 +26,7 @@
 
     <!-- Keep DowngradeErrorMessage <= 255 chars: MSI LaunchCondition.Description
          is an S255 column; longer strings trip ICE03 and get truncated. -->
-    <MajorUpgrade DowngradeErrorMessage="A newer DbClone is installed; this setup (v$(var.ProductVersion)) cannot downgrade it. To repair or change DbClone, re-run the matching installer. To install this version, uninstall it first (Settings &gt; Apps). Latest: github.com/user-alex-new/DbClone/releases"
+    <MajorUpgrade DowngradeErrorMessage="A newer DbClone is installed; this setup (v$(var.ProductVersion)) cannot downgrade it. To repair or change DbClone, re-run the matching installer. To install this version, uninstall it first (Settings &gt; Apps). Latest: github.com/AlexNek/DbClone/releases"
                   AllowSameVersionUpgrades="yes" />
 
     <MediaTemplate EmbedCab="yes" CompressionLevel="high" />

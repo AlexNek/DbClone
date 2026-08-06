@@ -60,7 +60,7 @@ public interface IUpdateService
 public sealed class UpdateService : IUpdateService
 {
     private const string DefaultUrl =
-        "https://api.github.com/repos/user-alex-new/DbClone/releases/latest";
+        "https://api.github.com/repos/AlexNek/DbClone/releases/latest";
 
     /// <summary>
     /// Silent switches for the WiX Burn bundle installer (replaces the legacy

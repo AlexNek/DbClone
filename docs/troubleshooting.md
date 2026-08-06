@@ -217,7 +217,7 @@ C:\Users\{you}\AppData\Local\Programs\DbClone\crash.log
 If you encounter an issue not covered here:
 
 1. Check the log file for detailed error messages
-2. [Open an issue](https://github.com/user-alex-new/DbClone/issues) on GitHub with:
+2. [Open an issue](https://github.com/AlexNek/DbClone/issues) on GitHub with:
     - DbClone version
     - Source/destination PostgreSQL versions
     - Source platform (Supabase, Aiven, vanilla, etc.)
