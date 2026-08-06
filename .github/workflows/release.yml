@@ -39,10 +39,35 @@ jobs:
             "tag=v${{ steps.setup-env.outputs.version }}" >> $env:GITHUB_OUTPUT
           }
 
+      - name: Extract changelog for release
+        id: changelog
+        shell: pwsh
+        run: |
+          $content = Get-Content "CHANGELOG.md" -Raw
+          $version = "${{ steps.setup-env.outputs.version }}"
+          # Try to extract the section for this version
+          $pattern = "(?ms)^## \[$([regex]::Escape($version))\].*?(?=^## \[|\z)"
+          $match = [regex]::Match($content, $pattern)
+          if ($match.Success) {
+            $body = $match.Value.Trim()
+          } else {
+            # Fall back to [Unreleased] section
+            $pattern = "(?ms)^## \[Unreleased\].*?(?=^## \[|\z)"
+            $match = [regex]::Match($content, $pattern)
+            if ($match.Success) {
+              $body = $match.Value.Trim()
+            } else {
+              $body = "See [CHANGELOG.md](https://github.com/AlexNek/DbClone/blob/main/CHANGELOG.md) for details."
+            }
+          }
+          # Write to file to avoid escaping issues
+          $body | Out-File -FilePath "release-notes.md" -Encoding utf8
+
       - name: Create GitHub Release
         uses: softprops/action-gh-release@v3
         with:
           tag_name: ${{ steps.release-tag.outputs.tag }}
+          body_path: release-notes.md
           files: |
             artifacts/DbClone-Setup-*.exe
             artifacts/DbClone-*.msi

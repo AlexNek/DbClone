@@ -163,10 +163,14 @@ Uses [GitVersion 6.x](https://gitversion.net/) with `ContinuousDeployment` mode:
 
 Version bumps via commit messages: `+semver: major`, `+semver: minor`, `+semver: patch`.
 
+## Changelog
+
+See [CHANGELOG.md](CHANGELOG.md) for a full release history. Each [GitHub Release](https://github.com/AlexNek/DbClone/releases) also includes the relevant changelog section and is used by the in-app auto-updater to display what's new.
+
 ## CI/CD
 
 - **CI** — builds, tests, and verifies the installer on every push/PR to `main`/`develop`
-- **Release** — triggered by `v*` tags; publishes a self-contained build, creates a GitHub Release with the installer attached
+- **Release** — triggered by `v*` tags; publishes a self-contained build, creates a GitHub Release with the installer attached and the changelog section as release notes
 
 Full details in [CI-CD.md](CI-CD.md).
 
