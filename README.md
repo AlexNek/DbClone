@@ -95,6 +95,8 @@ After the copy, the built-in **validation stage** performs two levels of verific
 
 Download the latest `DbClone-Setup-x.y.z.exe` from [GitHub Releases](https://github.com/AlexNek/DbClone/releases) and run it. For detailed guides, see the [user manual](https://alexnek.github.io/DbClone/).
 
+> **Note — Windows SmartScreen:** On first run you may see a "Windows protected your PC" warning. This is normal for open-source apps without a paid code-signing certificate. Click **"More info"** → **"Run anyway"** to proceed. The software is safe — you can verify file integrity via the SHA-256 checksum on the Releases page.
+
 The installer supports silent updates:
 
 ```

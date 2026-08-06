@@ -10,6 +10,16 @@ Download the latest installer from [GitHub Releases](https://github.com/AlexNek/
 
 Run the installer and follow the prompts. No admin rights required — installs to your user profile by default.
 
+!!! warning "Windows SmartScreen Warning"
+    On first run you may see a **"Windows protected your PC"** dialog from Microsoft Defender SmartScreen. This happens because the installer is not code-signed with a purchased certificate — it does **not** mean the software is unsafe.
+
+    To proceed:
+
+    1. Click **"More info"**
+    2. Click **"Run anyway"**
+
+    This is standard behavior for open-source applications distributed outside the Microsoft Store. You can verify the file integrity using the SHA-256 checksum published on the [Releases](https://github.com/AlexNek/DbClone/releases) page.
+
 ![Installer Screenshot](../images/installer.png){ loading=lazy }
 
 !!! info "No .NET runtime needed"
