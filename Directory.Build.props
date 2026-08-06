@@ -8,10 +8,12 @@
     <NoWarn>CS1591</NoWarn>
     <LangVersion>latest</LangVersion>
     <IncludeSourceRevisionInInformationalVersion>false</IncludeSourceRevisionInInformationalVersion>
-    <!-- GitVersion owns assembly version attributes; disable SDK duplicates -->
-    <GenerateAssemblyVersionAttribute>false</GenerateAssemblyVersionAttribute>
-    <GenerateAssemblyFileVersionAttribute>false</GenerateAssemblyFileVersionAttribute>
-    <GenerateAssemblyInformationalVersionAttribute>false</GenerateAssemblyInformationalVersionAttribute>
+    <!-- GitVersion.MsBuild 6.x sets $(AssemblyVersion), $(FileVersion), and
+         $(InformationalVersion) as MSBuild properties, then the SDK emits them
+         as [assembly:] attributes via the standard GenerateAssemblyInfo target.
+         Do NOT disable GenerateAssembly*Attribute — that silently produces
+         assemblies with version 0.0.0.0, which causes WPF BAML pack-URI
+         mismatches and a startup crash (FileNotFoundException). -->
   </PropertyGroup>
 
   <ItemGroup>
