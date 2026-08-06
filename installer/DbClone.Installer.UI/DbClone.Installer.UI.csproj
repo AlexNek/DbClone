@@ -16,6 +16,8 @@
   <ItemGroup>
     <Resource Include="Assets\app.ico" />
     <Resource Include="Assets\banner.png" />
+    <Resource Include="Assets\banner.bmp" />
+    <Resource Include="Assets\dialog.bmp" />
   </ItemGroup>
 
   <ItemGroup>

@@ -15,12 +15,20 @@
 
     <Grid>
         <Grid.RowDefinitions>
+            <RowDefinition Height="Auto" />
             <RowDefinition Height="*" />
             <RowDefinition Height="Auto" />
         </Grid.RowDefinitions>
 
+        <!-- Banner -->
+        <Image Grid.Row="0"
+               Source="/Assets/banner.png"
+               Height="80"
+               Stretch="Fill"
+               HorizontalAlignment="Stretch" />
+
         <!-- Page content area -->
-        <ContentControl Grid.Row="0" Margin="0">
+        <ContentControl Grid.Row="1" Margin="0">
             <ContentControl.Style>
                 <Style TargetType="ContentControl">
                     <Style.Triggers>
@@ -79,7 +87,7 @@
         </ContentControl>
 
         <!-- Bottom button bar -->
-        <Border Grid.Row="1" Style="{DynamicResource BottomBarStyle}">
+        <Border Grid.Row="2" Style="{DynamicResource BottomBarStyle}">
             <Grid>
                 <Grid.ColumnDefinitions>
                     <ColumnDefinition Width="*" />

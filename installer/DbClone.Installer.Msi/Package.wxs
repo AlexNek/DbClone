@@ -37,6 +37,8 @@
          instead. -->
     <ui:WixUI Id="WixUI_InstallDir" />
     <WixVariable Id="WixUILicenseRtf" Value="..\DbClone.Installer.UI\LICENSE.rtf" />
+    <WixVariable Id="WixUIBannerBmp" Value="..\DbClone.Installer.UI\Assets\banner.bmp" />
+    <WixVariable Id="WixUIDialogBmp" Value="..\DbClone.Installer.UI\Assets\dialog.bmp" />
 
     <!-- Install directory - set by the bundle via INSTALLFOLDER=<path>, or
          chosen on the wizard's folder page during interactive runs. -->
