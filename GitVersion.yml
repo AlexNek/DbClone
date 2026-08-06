@@ -1,0 +1,28 @@
+mode: ContinuousDeployment
+assembly-versioning-scheme: MajorMinorPatch
+assembly-file-versioning-scheme: MajorMinorPatch
+tag-prefix: '[vV]?'
+major-version-bump-message: '\+semver:\s?(breaking|major)'
+minor-version-bump-message: '\+semver:\s?(feature|minor)'
+patch-version-bump-message: '\+semver:\s?(fix|patch)'
+commit-message-incrementing: Disabled
+branches:
+  master:
+    regex: ^master$
+    tag: ''
+    increment: None
+  main:
+    regex: ^main$
+    tag: ''
+    increment: None
+  develop:
+    regex: ^dev(elop)?(ment)?$
+    tag: 'alpha'
+  feature:
+    regex: ^features?[/-]
+    tag: 'beta'
+  release:
+    regex: ^releases?[/-]
+    tag: 'rc'
+ignore:
+  sha: []

@@ -1,0 +1,122 @@
+{
+  "id": "supabase",
+  "engine": "postgresql",
+  "displayName": "Supabase",
+  "formatVersion": "1.0",
+  "detection": {
+    "hostPatterns": [
+      "*.supabase.co"
+    ]
+  },
+  "defaults": {
+    "port": 5432,
+    "sslMode": "Require"
+  },
+  "versions": [
+    {
+      "versionRange": ">=15.0 <16.0",
+      "systemSchemas": [
+        "pg_catalog",
+        "information_schema",
+        "pg_toast"
+      ],
+      "platformSchemas": [
+        "auth",
+        "storage",
+        "realtime",
+        "_realtime",
+        "supabase_functions",
+        "supabase_migrations",
+        "extensions",
+        "graphql",
+        "graphql_public",
+        "net",
+        "pgsodium",
+        "pgsodium_masks",
+        "vault",
+        "pgbouncer",
+        "_analytics"
+      ],
+      "platformExtensions": [
+        "supabase_vault",
+        "pgsodium",
+        "pg_graphql",
+        "pg_net",
+        "pgjwt",
+        "pgmq",
+        "timescaledb",
+        "plv8"
+      ],
+      "notes": "PostgreSQL 15 includes legacy extensions like timescaledb, plv8, plls, plcoffee, and pgjwt. Both pgjwt and pg_graphql are typically enabled by default on project creation."
+    },
+    {
+      "versionRange": ">=16.0 <17.0",
+      "systemSchemas": [
+        "pg_catalog",
+        "information_schema",
+        "pg_toast"
+      ],
+      "platformSchemas": [
+        "auth",
+        "storage",
+        "realtime",
+        "_realtime",
+        "supabase_functions",
+        "supabase_migrations",
+        "extensions",
+        "graphql",
+        "graphql_public",
+        "net",
+        "pgsodium",
+        "pgsodium_masks",
+        "vault",
+        "pgbouncer",
+        "_analytics"
+      ],
+      "platformExtensions": [
+        "supabase_vault",
+        "pgsodium",
+        "pg_graphql",
+        "pg_net",
+        "pgjwt",
+        "pgmq",
+        "timescaledb",
+        "plv8"
+      ],
+      "notes": "PostgreSQL 16 maintains extension parity with PG 15. It serves as a stable bridge before the breaking changes introduced in the PG 17 bundle."
+    },
+    {
+      "versionRange": ">=17.0 <18.0",
+      "systemSchemas": [
+        "pg_catalog",
+        "information_schema",
+        "pg_toast"
+      ],
+      "platformSchemas": [
+        "auth",
+        "storage",
+        "realtime",
+        "_realtime",
+        "supabase_functions",
+        "supabase_migrations",
+        "extensions",
+        "graphql",
+        "graphql_public",
+        "net",
+        "pgsodium",
+        "pgsodium_masks",
+        "vault",
+        "pgbouncer",
+        "_analytics"
+      ],
+      "platformExtensions": [
+        "supabase_vault",
+        "pgsodium",
+        "pg_graphql",
+        "pg_net",
+        "pgmq"
+      ],
+      "notes": "BREAKING CHANGE: The PG 17 bundle explicitly drops timescaledb, plv8, plls, plcoffee, and pgjwt. Additionally, pg_graphql is now disabled by default on new Supabase projects."
+    }
+  ]
+}

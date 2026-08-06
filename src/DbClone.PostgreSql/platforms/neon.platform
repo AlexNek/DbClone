@@ -1,0 +1,31 @@
+{
+  "id": "neon",
+  "engine": "postgresql",
+  "displayName": "Neon",
+  "formatVersion": "1.0",
+  "detection": {
+    "hostPatterns": [
+      "*.neon.tech"
+    ]
+  },
+  "defaults": {
+    "port": 5432,
+    "sslMode": "Require"
+  },
+  "versions": [
+    {
+      "versionRange": "*",
+      "systemSchemas": [
+        "pg_catalog",
+        "information_schema",
+        "pg_toast"
+      ],
+      "platformSchemas": [],
+      "platformExtensions": [
+        "neon",
+        "neon_utils"
+      ],
+      "notes": "The neon extension handles core storage/compute separation and branching. neon_utils provides monitoring functions (num_cpus(), etc.) for autoscaling observation. Stable across all supported PG major versions (14+)."
+    }
+  ]
+}

@@ -1,0 +1,119 @@
+<UserControl x:Class="DbClone.Installer.Views.MaintenancePage"
+             xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml">
+
+    <UserControl.Resources>
+        <BooleanToVisibilityConverter x:Key="BoolToVisibility" />
+    </UserControl.Resources>
+
+    <!-- ScrollViewer guards against clipping when the window is shrunk
+         or DPI scaling reduces the effective viewport -->
+    <ScrollViewer VerticalScrollBarVisibility="Auto"
+                  HorizontalScrollBarVisibility="Disabled">
+    <StackPanel Margin="36,24,36,12" VerticalAlignment="Top">
+
+        <!-- Title adapts: real install vs registration-only (broken) state -->
+        <TextBlock Margin="0,0,0,8">
+            <TextBlock.Style>
+                <Style TargetType="TextBlock" BasedOn="{StaticResource TitleStyle}">
+                    <Setter Property="Text" Value="DbClone is already installed" />
+                    <Style.Triggers>
+                        <DataTrigger Binding="{Binding IsAppPresent}" Value="False">
+                            <Setter Property="Text" Value="DbClone registration found" />
+                        </DataTrigger>
+                    </Style.Triggers>
+                </Style>
+            </TextBlock.Style>
+        </TextBlock>
+
+        <!-- Healthy install: show version and location -->
+        <TextBlock Style="{DynamicResource BodyStyle}" Margin="0,0,0,4">
+            <TextBlock.Visibility>
+                <Binding Path="IsAppPresent" Converter="{StaticResource BoolToVisibility}" />
+            </TextBlock.Visibility>
+            <Run Text="Installed version: " />
+            <Run Text="{Binding InstalledVersion}" FontWeight="SemiBold"
+                 Foreground="{DynamicResource AccentBrush}" />
+        </TextBlock>
+
+        <TextBlock Style="{DynamicResource CaptionStyle}" Margin="0,0,0,16"
+                   TextTrimming="CharacterEllipsis">
+            <TextBlock.Visibility>
+                <Binding Path="IsAppPresent" Converter="{StaticResource BoolToVisibility}" />
+            </TextBlock.Visibility>
+            <Run Text="Location: " />
+            <Run Text="{Binding InstallFolder, Mode=OneWay}" />
+        </TextBlock>
+
+        <!-- Registration-only install: the folder is gone (deleted manually
+             or a partial uninstall). The notice is composed by the view model
+             and only mentions the actions actually available. -->
+        <TextBlock Text="{Binding MaintenanceNotice}"
+                   Margin="0,0,0,16" TextWrapping="Wrap">
+            <TextBlock.Style>
+                <Style TargetType="TextBlock" BasedOn="{StaticResource BodyStyle}">
+                    <Setter Property="Visibility" Value="Collapsed" />
+                    <Style.Triggers>
+                        <DataTrigger Binding="{Binding IsAppPresent}" Value="False">
+                            <Setter Property="Visibility" Value="Visible" />
+                        </DataTrigger>
+                    </Style.Triggers>
+                </Style>
+            </TextBlock.Style>
+        </TextBlock>
+
+        <TextBlock Text="What would you like to do?"
+                   Style="{DynamicResource BodyStyle}"
+                   Margin="0,0,0,12" />
+
+        <Button Command="{Binding UpdateCommand}"
+                Style="{DynamicResource CardButtonStyle}"
+                Margin="0,0,0,8">
+            <StackPanel>
+                <TextBlock Text="Update" FontSize="14" FontWeight="SemiBold"
+                           Foreground="{DynamicResource TextPrimaryBrush}" />
+                <TextBlock Text="Replace the current installation with this version"
+                           FontSize="12" Foreground="{DynamicResource TextTertiaryBrush}" />
+            </StackPanel>
+        </Button>
+
+        <!-- Repair only when files can actually be restored (this bundle
+             registered or a related MSI present) -->
+        <Button Command="{Binding RepairCommand}"
+                Style="{DynamicResource CardButtonStyle}"
+                Margin="0,0,0,8"
+                Visibility="{Binding CanRepair, Converter={StaticResource BoolToVisibility}}">
+            <StackPanel>
+                <TextBlock Text="Repair" FontSize="14" FontWeight="SemiBold"
+                           Foreground="{DynamicResource TextPrimaryBrush}" />
+                <TextBlock Text="Fix missing or corrupted files"
+                           FontSize="12" Foreground="{DynamicResource TextTertiaryBrush}" />
+            </StackPanel>
+        </Button>
+
+        <Button Command="{Binding UninstallCommand}"
+                Style="{DynamicResource CardButtonStyle}"
+                Margin="0,0,0,8"
+                Visibility="{Binding CanUninstall, Converter={StaticResource BoolToVisibility}}">
+            <StackPanel>
+                <TextBlock Text="Uninstall" FontSize="14" FontWeight="SemiBold"
+                           Foreground="{DynamicResource TextPrimaryBrush}" />
+                <TextBlock Text="Remove DbClone from this computer"
+                           FontSize="12" Foreground="{DynamicResource TextTertiaryBrush}" />
+            </StackPanel>
+        </Button>
+
+        <Button Command="{Binding FreshInstallCommand}"
+                Style="{DynamicResource CardButtonStyle}">
+            <StackPanel>
+                <TextBlock Text="Install to a different folder" FontSize="14" FontWeight="SemiBold"
+                           Foreground="{DynamicResource TextPrimaryBrush}" />
+                <TextBlock Text="Keep the existing installation and run the full wizard"
+                           FontSize="12" Foreground="{DynamicResource TextTertiaryBrush}" />
+            </StackPanel>
+        </Button>
+
+    </StackPanel>
+    </ScrollViewer>
+
+</UserControl>

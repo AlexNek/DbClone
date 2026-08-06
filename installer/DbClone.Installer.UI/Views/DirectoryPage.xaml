@@ -1,0 +1,45 @@
+<UserControl x:Class="DbClone.Installer.Views.DirectoryPage"
+             xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml">
+
+    <StackPanel Margin="36,28,36,16" VerticalAlignment="Top">
+
+        <TextBlock Text="Choose Install Location"
+                   Style="{DynamicResource TitleStyle}"
+                   Margin="0,0,0,10" />
+
+        <TextBlock Style="{DynamicResource BodyStyle}" Margin="0,0,0,24">
+            DbClone will be installed to the following folder.
+            Click Browse to choose a different location.
+        </TextBlock>
+
+        <Grid Margin="0,0,0,20">
+            <Grid.ColumnDefinitions>
+                <ColumnDefinition Width="*" />
+                <ColumnDefinition Width="Auto" />
+            </Grid.ColumnDefinitions>
+
+            <TextBox Grid.Column="0"
+                     Text="{Binding InstallFolder, UpdateSourceTrigger=PropertyChanged}"
+                     Style="{DynamicResource InstallerTextBoxStyle}"
+                     VerticalContentAlignment="Center" />
+
+            <Button Grid.Column="1"
+                    Content="Browse..."
+                    Command="{Binding BrowseFolderCommand}"
+                    Style="{DynamicResource SecondaryButtonStyle}"
+                    Margin="10,0,0,0" />
+        </Grid>
+
+        <CheckBox Content="Create desktop shortcut"
+                  IsChecked="{Binding CreateDesktopShortcut}"
+                  Style="{DynamicResource InstallerCheckBoxStyle}"
+                  Margin="0,0,0,10" />
+
+        <CheckBox Content="Launch DbClone after installation"
+                  IsChecked="{Binding LaunchAfterInstall}"
+                  Style="{DynamicResource InstallerCheckBoxStyle}" />
+
+    </StackPanel>
+
+</UserControl>

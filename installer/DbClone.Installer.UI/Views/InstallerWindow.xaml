@@ -1,0 +1,147 @@
+<Window x:Class="DbClone.Installer.Views.InstallerWindow"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        xmlns:vm="clr-namespace:DbClone.Installer.ViewModels"
+        xmlns:views="clr-namespace:DbClone.Installer.Views"
+        Title="{Binding WindowTitle}"
+        Width="700" Height="560"
+        MinWidth="520" MinHeight="380"
+        WindowStartupLocation="CenterScreen"
+        ResizeMode="CanResizeWithGrip"
+        Background="{DynamicResource WindowBackgroundBrush}"
+        Foreground="{DynamicResource TextPrimaryBrush}"
+        FontFamily="{DynamicResource PrimaryFont}"
+        Icon="/Assets/app.ico">
+
+    <Grid>
+        <Grid.RowDefinitions>
+            <RowDefinition Height="*" />
+            <RowDefinition Height="Auto" />
+        </Grid.RowDefinitions>
+
+        <!-- Page content area -->
+        <ContentControl Grid.Row="0" Margin="0">
+            <ContentControl.Style>
+                <Style TargetType="ContentControl">
+                    <Style.Triggers>
+                        <DataTrigger Binding="{Binding CurrentState}" Value="{x:Static vm:InstallerViewModel+InstallerState.Welcome}">
+                            <Setter Property="Content">
+                                <Setter.Value>
+                                    <views:WelcomePage />
+                                </Setter.Value>
+                            </Setter>
+                        </DataTrigger>
+                        <DataTrigger Binding="{Binding CurrentState}" Value="{x:Static vm:InstallerViewModel+InstallerState.License}">
+                            <Setter Property="Content">
+                                <Setter.Value>
+                                    <views:LicensePage />
+                                </Setter.Value>
+                            </Setter>
+                        </DataTrigger>
+                        <DataTrigger Binding="{Binding CurrentState}" Value="{x:Static vm:InstallerViewModel+InstallerState.Directory}">
+                            <Setter Property="Content">
+                                <Setter.Value>
+                                    <views:DirectoryPage />
+                                </Setter.Value>
+                            </Setter>
+                        </DataTrigger>
+                        <DataTrigger Binding="{Binding CurrentState}" Value="{x:Static vm:InstallerViewModel+InstallerState.Progress}">
+                            <Setter Property="Content">
+                                <Setter.Value>
+                                    <views:ProgressPage />
+                                </Setter.Value>
+                            </Setter>
+                        </DataTrigger>
+                        <DataTrigger Binding="{Binding CurrentState}" Value="{x:Static vm:InstallerViewModel+InstallerState.Maintenance}">
+                            <Setter Property="Content">
+                                <Setter.Value>
+                                    <views:MaintenancePage />
+                                </Setter.Value>
+                            </Setter>
+                        </DataTrigger>
+                        <DataTrigger Binding="{Binding CurrentState}" Value="{x:Static vm:InstallerViewModel+InstallerState.Finish}">
+                            <Setter Property="Content">
+                                <Setter.Value>
+                                    <views:FinishPage />
+                                </Setter.Value>
+                            </Setter>
+                        </DataTrigger>
+                        <DataTrigger Binding="{Binding CurrentState}" Value="{x:Static vm:InstallerViewModel+InstallerState.Failed}">
+                            <Setter Property="Content">
+                                <Setter.Value>
+                                    <views:FailedPage />
+                                </Setter.Value>
+                            </Setter>
+                        </DataTrigger>
+                    </Style.Triggers>
+                </Style>
+            </ContentControl.Style>
+        </ContentControl>
+
+        <!-- Bottom button bar -->
+        <Border Grid.Row="1" Style="{DynamicResource BottomBarStyle}">
+            <Grid>
+                <Grid.ColumnDefinitions>
+                    <ColumnDefinition Width="*" />
+                    <ColumnDefinition Width="Auto" />
+                    <ColumnDefinition Width="Auto" />
+                    <ColumnDefinition Width="Auto" />
+                </Grid.ColumnDefinitions>
+
+                <Button Grid.Column="1"
+                        Content="Cancel"
+                        Command="{Binding CancelCommand}"
+                        Style="{DynamicResource SecondaryButtonStyle}"
+                        Margin="0,0,8,0" />
+
+                <Button Grid.Column="2"
+                        Command="{Binding NavigateBackCommand}"
+                        Style="{DynamicResource SecondaryButtonStyle}"
+                        Margin="0,0,8,0"
+                        Content="Back">
+                    <!-- Hidden where Back is meaningless: maintenance entry page,
+                         running progress, finish and failed screens -->
+                    <Button.Visibility>
+                        <Binding Path="CurrentState" ConverterParameter="Maintenance,Progress,Finish,Failed">
+                            <Binding.Converter>
+                                <vm:StateVisibilityConverter />
+                            </Binding.Converter>
+                        </Binding>
+                    </Button.Visibility>
+                </Button>
+
+                <Button Grid.Column="3"
+                        Command="{Binding NavigateNextCommand}">
+                    <Button.Style>
+                        <Style TargetType="Button" BasedOn="{StaticResource PrimaryButtonStyle}">
+                            <Setter Property="Content" Value="Next" />
+                            <Style.Triggers>
+                                <!-- On the finish screen Next acts as the close action -->
+                                <DataTrigger Binding="{Binding CurrentState}" Value="{x:Static vm:InstallerViewModel+InstallerState.Finish}">
+                                    <Setter Property="Content" Value="Finish" />
+                                </DataTrigger>
+                                <!-- Installation requires accepting the license -->
+                                <MultiDataTrigger>
+                                    <MultiDataTrigger.Conditions>
+                                        <Condition Binding="{Binding CurrentState}" Value="{x:Static vm:InstallerViewModel+InstallerState.License}" />
+                                        <Condition Binding="{Binding LicenseAccepted}" Value="False" />
+                                    </MultiDataTrigger.Conditions>
+                                    <Setter Property="IsEnabled" Value="False" />
+                                </MultiDataTrigger>
+                            </Style.Triggers>
+                        </Style>
+                    </Button.Style>
+                    <!-- Maintenance/progress/failed screens are driven by their own
+                         controls, not by Next -->
+                    <Button.Visibility>
+                        <Binding Path="CurrentState" ConverterParameter="Maintenance,Progress,Failed">
+                            <Binding.Converter>
+                                <vm:StateVisibilityConverter />
+                            </Binding.Converter>
+                        </Binding>
+                    </Button.Visibility>
+                </Button>
+            </Grid>
+        </Border>
+    </Grid>
+</Window>

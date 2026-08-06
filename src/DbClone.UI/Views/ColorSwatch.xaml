@@ -1,0 +1,12 @@
+<UserControl x:Class="DbClone.UI.Views.ColorSwatch"
+             xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:ui="http://schemas.lepo.co/wpfui/2022/xaml"
+             x:Name="Root">
+    <Rectangle Width="{Binding Size, ElementName=Root}"
+               Height="{Binding Size, ElementName=Root}"
+               RadiusX="3" RadiusY="3"
+               Fill="{Binding Color, ElementName=Root, Converter={StaticResource HexColorToBrush}}"
+               Stroke="{ui:ThemeResource ControlStrokeColorDefaultBrush}"
+               StrokeThickness="1.5"/>
+</UserControl>

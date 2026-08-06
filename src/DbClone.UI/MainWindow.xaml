@@ -1,0 +1,343 @@
+<ui:FluentWindow
+    x:Class="DbClone.UI.MainWindow"
+    xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+    xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+    xmlns:ui="http://schemas.lepo.co/wpfui/2022/xaml"
+    xmlns:views="clr-namespace:DbClone.UI.Views"
+    Title="DbClone — PostgreSQL Database Copy Tool"
+    Width="1280"
+    Height="860"
+    MinWidth="900"
+    MinHeight="650"
+    Icon="Assets/app.ico"
+    WindowStartupLocation="CenterScreen"
+    ExtendsContentIntoTitleBar="True">
+
+    <!--  ===== KEYBOARD SHORTCUTS =====  -->
+    <Window.InputBindings>
+        <KeyBinding
+            Key="S"
+            Command="{Binding Copy.StartCopyCommand}"
+            Modifiers="Control" />
+        <KeyBinding
+            Key="C"
+            Command="{Binding Compare.CompareDatabasesCommand}"
+            Modifiers="Control+Shift" />
+        <KeyBinding Key="Escape" Command="{Binding StopActiveOperationCommand}" />
+        <KeyBinding
+            Key="L"
+            Command="{Binding Log.ClearLogCommand}"
+            Modifiers="Control" />
+        <KeyBinding
+            Key="P"
+            Command="{Binding PauseActiveOperationCommand}"
+            Modifiers="Control" />
+    </Window.InputBindings>
+
+    <Grid Background="{ui:ThemeResource ApplicationBackgroundBrush}">
+        <Grid.RowDefinitions>
+            <RowDefinition Height="Auto" />   
+            <!--  Title bar  -->
+            <RowDefinition Height="Auto" />   
+            <!--  Toolbar  -->
+            <RowDefinition Height="Auto" />   
+            <!--  Error banner  -->
+            <RowDefinition Height="*" />      
+            <!--  Main content  -->
+            <RowDefinition Height="Auto" />   
+            <!--  Status bar  -->
+        </Grid.RowDefinitions>
+
+        <!--  ===== TITLE BAR =====  -->
+        <ui:TitleBar Grid.Row="0" Title="{Binding RelativeSource={RelativeSource AncestorType=ui:FluentWindow}, Path=Title}">
+            <ui:TitleBar.Icon>
+                <ui:ImageIcon Source="/Assets/app.ico" />
+            </ui:TitleBar.Icon>
+        </ui:TitleBar>
+
+        <!--  ===== TOOLBAR =====  -->
+        <views:ToolbarView Grid.Row="1" DataContext="{Binding Toolbar}" />
+
+        <!--  ===== NOTIFICATION BANNER (shows active workflow's messages) =====  -->
+        <StackPanel Grid.Row="2">
+            <ui:InfoBar
+                Margin="8,4,8,0"
+                DataContext="{Binding DataContext.ActiveState, RelativeSource={RelativeSource AncestorType=Window}}"
+                IsClosable="True"
+                IsOpen="{Binding IsBannerOpen, Mode=TwoWay}"
+                Severity="{Binding BannerSeverity}"
+                Title="{Binding BannerTitle}"
+                Message="{Binding BannerMessage}" />
+
+            <!--  Update available banner (non-blocking).
+                  Note: WPF-UI 4.3's InfoBar template does NOT render the Content
+                  property, so the Update button is overlaid on top instead.  -->
+            <Grid Margin="8,4,8,0">
+                <ui:InfoBar
+                    IsClosable="True"
+                    IsOpen="{Binding IsUpdateAvailable}"
+                    Severity="Success"
+                    Title="Update available"
+                    Message="{Binding UpdateMessage}" />
+                <ui:Button
+                    Margin="0,0,52,0"
+                    HorizontalAlignment="Right"
+                    VerticalAlignment="Center"
+                    Appearance="Primary"
+                    Command="{Binding InstallUpdateCommand}"
+                    Content="Update"
+                    Visibility="{Binding IsUpdateAvailable, Converter={StaticResource BoolToVis}}" />
+            </Grid>
+        </StackPanel>
+
+        <!--  ===== MAIN CONTENT =====  -->
+        <Grid x:Name="MainContentGrid" Grid.Row="3">
+            <Grid.RowDefinitions>
+                <RowDefinition Height="Auto" />   
+                <!--  Mode info bar  -->
+                <RowDefinition Height="Auto" />   
+                <!--  Schema objects strip  -->
+                <RowDefinition Height="*" />      
+                <!--  Scrollable content  -->
+                <RowDefinition Height="Auto" />   
+                <!--  Splitter + toggle  -->
+                <RowDefinition x:Name="LogRow" Height="0" />  
+                <!--  Log pane  -->
+            </Grid.RowDefinitions>
+
+            <!--  Copy mode info bar  -->
+            <Border
+                Grid.Row="0"
+                Padding="12,3"
+                Background="{ui:ThemeResource ControlFillColorDefaultBrush}"
+                BorderBrush="{ui:ThemeResource ControlStrokeColorDefaultBrush}"
+                BorderThickness="0,0,0,1">
+                <Grid>
+                    <!--  Copy mode strip  -->
+                    <TextBlock VerticalAlignment="Center" FontSize="11" Foreground="{ui:ThemeResource TextFillColorSecondaryBrush}">
+                        <TextBlock.Style>
+                            <Style TargetType="TextBlock">
+                                <Setter Property="Visibility" Value="Visible" />
+                                <Style.Triggers>
+                                    <DataTrigger Binding="{Binding Toolbar.SelectedMode}" Value="Compare">
+                                        <Setter Property="Visibility" Value="Collapsed" />
+                                    </DataTrigger>
+                                </Style.Triggers>
+                            </Style>
+                        </TextBlock.Style>
+                        <Run FontWeight="SemiBold" Text="Mode:" />
+                        <Run Text="{Binding Settings.SelectedCopyMode, Mode=OneWay}" />
+                        <Run Text=" | " />
+                        <Run FontWeight="SemiBold" Text="Verify:" />
+                        <Run Text="{Binding Settings.SelectedVerifyMode, Mode=OneWay}" />
+                        <Run Text=" | " />
+                        <Run FontWeight="SemiBold" Text="Copy:" />
+                        <Run Text="{Binding Settings.CopyObjectsSummary, Mode=OneWay}" />
+                        <Run Text=" | " />
+                        <Run FontWeight="SemiBold" Text="Platform:" />
+                        <Run Text="{Binding Settings.CopyPlatformSchemasSummary, Mode=OneWay}" />
+                    </TextBlock>
+                    <!--  Compare mode strip  -->
+                    <TextBlock VerticalAlignment="Center" FontSize="11" Foreground="{ui:ThemeResource TextFillColorSecondaryBrush}">
+                        <TextBlock.Style>
+                            <Style TargetType="TextBlock">
+                                <Setter Property="Visibility" Value="Collapsed" />
+                                <Style.Triggers>
+                                    <DataTrigger Binding="{Binding Toolbar.SelectedMode}" Value="Compare">
+                                        <Setter Property="Visibility" Value="Visible" />
+                                    </DataTrigger>
+                                </Style.Triggers>
+                            </Style>
+                        </TextBlock.Style>
+                        <Run FontWeight="SemiBold" Text="Verify:" />
+                        <Run Text="{Binding Settings.SelectedVerifyMode, Mode=OneWay}" />
+                        <Run Text=" | " />
+                        <Run FontWeight="SemiBold" Text="Platform:" />
+                        <Run Text="{Binding Settings.ComparePlatformSchemasSummary, Mode=OneWay}" />
+                    </TextBlock>
+                </Grid>
+            </Border>
+
+            <!--  Schema objects strip (shows active workflow's objects)  -->
+            <Border
+                Grid.Row="1"
+                Padding="8,4"
+                Background="{ui:ThemeResource ControlFillColorDefaultBrush}"
+                BorderBrush="{ui:ThemeResource ControlStrokeColorDefaultBrush}"
+                BorderThickness="0,0,0,1"
+                DataContext="{Binding DataContext.ActiveState, RelativeSource={RelativeSource AncestorType=Window}}"
+                Visibility="{Binding HasRun, Converter={StaticResource BoolToVis}}">
+                <views:ObjectsPanelView DataContext="{Binding ObjectsPanel}" />
+            </Border>
+
+            <!--  Scrollable content  -->
+            <ScrollViewer
+                Grid.Row="2"
+                Padding="16,16,16,16"
+                VerticalScrollBarVisibility="Auto">
+                <Grid>
+                    <Grid.RowDefinitions>
+                        <RowDefinition Height="Auto" />
+                        <RowDefinition Height="Auto" />
+                        <RowDefinition Height="Auto" />
+                        <RowDefinition Height="Auto" />
+                    </Grid.RowDefinitions>
+
+                    <!--  Connection group selector  -->
+                    <Grid Grid.Row="0" Margin="0,0,0,8" DataContext="{Binding Connections}">
+                        <ComboBox
+                            ItemsSource="{Binding ConnectionGroups}"
+                            SelectedItem="{Binding SelectedConnectionGroup}"
+                            MinWidth="200">
+                            <ComboBox.ItemTemplate>
+                                <DataTemplate>
+                                    <views:ColorIndicator Color="{Binding Color}" Label="{Binding Name}"/>
+                                </DataTemplate>
+                            </ComboBox.ItemTemplate>
+                        </ComboBox>
+                        <TextBlock
+                            Text="Select connection group"
+                            VerticalAlignment="Center"
+                            Margin="10,0,0,0"
+                            Foreground="{ui:ThemeResource TextFillColorTertiaryBrush}"
+                            IsHitTestVisible="False">
+                            <TextBlock.Style>
+                                <Style TargetType="TextBlock">
+                                    <Setter Property="Visibility" Value="Collapsed" />
+                                    <Style.Triggers>
+                                        <DataTrigger Binding="{Binding SelectedConnectionGroup}" Value="{x:Null}">
+                                            <Setter Property="Visibility" Value="Visible" />
+                                        </DataTrigger>
+                                    </Style.Triggers>
+                                </Style>
+                            </TextBlock.Style>
+                        </TextBlock>
+                    </Grid>
+
+                    <!--  Connection panels  -->
+                    <Grid Grid.Row="1" ColumnDefinitions="*,Auto,*">
+                        <views:ConnectionView Grid.Column="0" DataContext="{Binding Context.Source}" />
+
+                        <!--  Group action buttons between source and destination  -->
+                        <StackPanel Grid.Column="1" Orientation="Vertical" VerticalAlignment="Center" Margin="8,0" DataContext="{Binding Connections}">
+                            <ui:Button
+                                Appearance="Transparent"
+                                Command="{Binding CreateGroupFromCurrentCommand}"
+                                ToolTip="Create group from current connections"
+                                Padding="4"
+                                Margin="0,0,0,6">
+                                <ui:SymbolIcon Symbol="ArrowUp24" FontSize="16" />
+                            </ui:Button>
+                            <ui:Button
+                                Appearance="Transparent"
+                                Command="{Binding EditCurrentGroupCommand}"
+                                ToolTip="Edit current group"
+                                Padding="4">
+                                <ui:SymbolIcon Symbol="Edit24" FontSize="16" />
+                            </ui:Button>
+                        </StackPanel>
+
+                        <views:ConnectionView Grid.Column="2" DataContext="{Binding Context.Destination}" />
+                    </Grid>
+
+                    <!--  Progress (DataContext switches by mode)  -->
+                    <views:ProgressView Grid.Row="2">
+                        <views:ProgressView.Style>
+                            <Style TargetType="views:ProgressView">
+                                <Setter Property="DataContext" Value="{Binding DataContext.Copy, RelativeSource={RelativeSource AncestorType=Window}}" />
+                                <Style.Triggers>
+                                    <DataTrigger Binding="{Binding DataContext.Toolbar.SelectedMode, RelativeSource={RelativeSource AncestorType=Window}}" Value="Compare">
+                                        <Setter Property="DataContext" Value="{Binding DataContext.Compare, RelativeSource={RelativeSource AncestorType=Window}}" />
+                                    </DataTrigger>
+                                </Style.Triggers>
+                            </Style>
+                        </views:ProgressView.Style>
+                    </views:ProgressView>
+
+                    <!--  Comparison results (visible only in Compare mode)  -->
+                    <views:ComparisonResultsView Grid.Row="3" DataContext="{Binding Compare}">
+                        <views:ComparisonResultsView.Style>
+                            <Style TargetType="views:ComparisonResultsView">
+                                <Setter Property="Visibility" Value="Collapsed" />
+                                <Style.Triggers>
+                                    <DataTrigger Binding="{Binding DataContext.Toolbar.SelectedMode, RelativeSource={RelativeSource AncestorType=Window}}" Value="Compare">
+                                        <Setter Property="Visibility" Value="Visible" />
+                                    </DataTrigger>
+                                </Style.Triggers>
+                            </Style>
+                        </views:ComparisonResultsView.Style>
+                    </views:ComparisonResultsView>
+                </Grid>
+            </ScrollViewer>
+
+            <!--  ===== SPLITTER + COLLAPSE/EXPAND BUTTONS =====  -->
+            <GridSplitter
+                Grid.Row="3"
+                Height="6"
+                HorizontalAlignment="Stretch"
+                Background="{ui:ThemeResource ControlStrokeColorDefaultBrush}"
+                Cursor="SizeNS"
+                ResizeBehavior="PreviousAndNext" />
+
+            <!--  Collapse button (visible when expanded)  -->
+            <ui:Button
+                Grid.Row="3"
+                Width="16"
+                Height="16"
+                Margin="0,0,4,0"
+                Padding="0"
+                HorizontalAlignment="Right"
+                VerticalAlignment="Center"
+                Appearance="Transparent"
+                Command="{Binding Log.ToggleLogPaneCommand}"
+                ToolTip="Collapse Log Panel">
+                <ui:Button.Style>
+                    <Style BasedOn="{StaticResource {x:Type ui:Button}}" TargetType="ui:Button">
+                        <Setter Property="Visibility" Value="Collapsed" />
+                        <Style.Triggers>
+                            <!--  Visible when the active workflow's log pane is expanded  -->
+                            <DataTrigger Binding="{Binding DataContext.ActiveState.IsLogPaneExpanded, RelativeSource={RelativeSource AncestorType=Window}}" Value="True">
+                                <Setter Property="Visibility" Value="Visible" />
+                            </DataTrigger>
+                        </Style.Triggers>
+                    </Style>
+                </ui:Button.Style>
+                <ui:SymbolIcon FontSize="10" Symbol="ChevronDown24" />
+            </ui:Button>
+
+            <!--  Expand button (visible when collapsed)  -->
+            <ui:Button
+                Grid.Row="3"
+                Width="16"
+                Height="16"
+                Margin="0,0,4,0"
+                Padding="0"
+                HorizontalAlignment="Right"
+                VerticalAlignment="Center"
+                Appearance="Transparent"
+                Command="{Binding Log.ToggleLogPaneCommand}"
+                ToolTip="Expand Log Panel">
+                <ui:Button.Style>
+                    <Style BasedOn="{StaticResource {x:Type ui:Button}}" TargetType="ui:Button">
+                        <Setter Property="Visibility" Value="Visible" />
+                        <Style.Triggers>
+                            <!--  Hidden when the active workflow's log pane is expanded  -->
+                            <DataTrigger Binding="{Binding DataContext.ActiveState.IsLogPaneExpanded, RelativeSource={RelativeSource AncestorType=Window}}" Value="True">
+                                <Setter Property="Visibility" Value="Collapsed" />
+                            </DataTrigger>
+                        </Style.Triggers>
+                    </Style>
+                </ui:Button.Style>
+                <ui:SymbolIcon FontSize="10" Symbol="ChevronRight24" />
+            </ui:Button>
+
+            <!--  ===== LOG PANE =====  -->
+            <views:LogPaneView x:Name="LogPane" Grid.Row="4" DataContext="{Binding Log}" />
+
+        </Grid>
+
+        <!--  ===== STATUS BAR =====  -->
+        <views:StatusBarView Grid.Row="4" />
+
+    </Grid>
+</ui:FluentWindow>

@@ -1,0 +1,96 @@
+site_name: DbClone User Manual
+site_description: User manual for DbClone — PostgreSQL database cloning tool
+site_url: https://user-alex-new.github.io/DbClone/
+repo_url: https://github.com/user-alex-new/DbClone
+repo_name: user-alex-new/DbClone
+
+theme:
+  name: material
+  language: en
+  palette:
+    - media: "(prefers-color-scheme: light)"
+      scheme: default
+      primary: blue grey
+      accent: teal
+      toggle:
+        icon: material/brightness-7
+        name: Switch to dark mode
+    - media: "(prefers-color-scheme: dark)"
+      scheme: slate
+      primary: blue grey
+      accent: teal
+      toggle:
+        icon: material/brightness-4
+        name: Switch to light mode
+  font:
+    text: Inter
+    code: JetBrains Mono
+  features:
+    - navigation.instant
+    - navigation.sections
+    - navigation.expand
+    - navigation.top
+    - search.highlight
+    - search.suggest
+    - content.code.copy
+    - toc.follow
+  icon:
+    repo: fontawesome/brands/github
+
+nav:
+  - Home: index.md
+  - Getting Started:
+      - Installation: getting-started/installation.md
+      - First Copy: getting-started/first-copy.md
+  - Connections:
+      - Managing Connections: connections/managing-connections.md
+      - Connection Formats: connections/connection-formats.md
+      - Import & Export: connections/import-export.md
+  - Copy Modes:
+      - Overview: copy-modes/overview.md
+      - Full Copy: copy-modes/full.md
+      - Resume: copy-modes/resume.md
+      - Update: copy-modes/update.md
+      - Backup: copy-modes/backup.md
+  - Pipeline & Progress:
+      - Pipeline Stages: pipeline/stages.md
+      - Reading the Progress Panel: pipeline/progress-panel.md
+      - Validation & Re-Copy: pipeline/validation.md
+  - Database Comparison: comparison.md
+  - Keyboard Shortcuts: keyboard-shortcuts.md
+  - Options Reference: options.md
+  - Troubleshooting: troubleshooting.md
+  - FAQ: faq.md
+  - Possible Future Features: roadmap.md
+
+plugins:
+  - search
+  - glightbox
+
+markdown_extensions:
+  - admonition
+  - pymdownx.details
+  - pymdownx.superfences:
+      custom_fences:
+        - name: mermaid
+          class: mermaid
+          format: !!python/name:pymdownx.superfences.fence_code_format
+  - pymdownx.tabbed:
+      alternate_style: true
+  - pymdownx.highlight:
+      anchor_linenums: true
+  - pymdownx.inlinehilite
+  - pymdownx.emoji:
+      emoji_index: !!python/name:material.extensions.emoji.twemoji
+      emoji_generator: !!python/name:material.extensions.emoji.to_svg
+  - pymdownx.keys
+  - attr_list
+  - md_in_html
+  - tables
+  - toc:
+      permalink: true
+
+extra:
+  social:
+    - icon: fontawesome/brands/github
+      link: https://github.com/user-alex-new/DbClone

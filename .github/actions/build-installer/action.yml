@@ -1,0 +1,28 @@
+name: Build and upload WiX installer
+description: Build the WiX installer artifacts and optionally upload them.
+
+inputs:
+  version:
+    description: Product version string (MajorMinorPatch).
+    required: true
+  upload:
+    description: Whether to upload the artifacts (true) or only verify the build (false).
+    required: false
+    default: 'true'
+
+runs:
+  using: composite
+  steps:
+    - name: Build WiX installer
+      shell: pwsh
+      run: ./build-installer-wix.ps1 -Version ${{ inputs.version }}
+
+    - name: Upload installer artifact
+      if: ${{ inputs.upload == 'true' }}
+      uses: actions/upload-artifact@v6
+      with:
+        name: DbClone-Setup-${{ inputs.version }}
+        path: |
+          artifacts/DbClone-Setup-*.exe
+          artifacts/DbClone-*.msi
+        retention-days: 7

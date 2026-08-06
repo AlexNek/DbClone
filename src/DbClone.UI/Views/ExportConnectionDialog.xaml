@@ -1,0 +1,92 @@
+<ui:FluentWindow x:Class="DbClone.UI.Views.ExportConnectionDialog"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        xmlns:ui="http://schemas.lepo.co/wpfui/2022/xaml"
+        xmlns:models="clr-namespace:DbClone.UI.Models"
+        Title="Export Connection"
+        Width="560" Height="490"
+        Background="{ui:ThemeResource ApplicationBackgroundBrush}"
+        WindowStartupLocation="CenterOwner"
+        ShowInTaskbar="False"
+        ResizeMode="NoResize"
+        ExtendsContentIntoTitleBar="True"
+        WindowBackdropType="Mica">
+
+    <Grid Margin="20" Background="{ui:ThemeResource ApplicationBackgroundBrush}">
+        <Grid.RowDefinitions>
+            <RowDefinition Height="Auto"/>
+            <RowDefinition Height="Auto"/>
+            <RowDefinition Height="Auto"/>
+            <RowDefinition Height="Auto"/>
+            <RowDefinition Height="Auto"/>
+            <RowDefinition Height="*"/>
+            <RowDefinition Height="Auto"/>
+        </Grid.RowDefinitions>
+
+        <ui:TitleBar Grid.Row="0" Title="Export Connection"/>
+
+        <!-- Header -->
+        <StackPanel Grid.Row="1" Margin="0,0,0,14">
+            <TextBlock Text="Export Connection" FontSize="18" FontWeight="SemiBold"/>
+            <TextBlock Text="Choose a format and export the connection string"
+                       FontSize="12" Foreground="{DynamicResource TextFillColorSecondaryBrush}" Margin="0,4,0,0"/>
+        </StackPanel>
+
+        <!-- Format selection -->
+        <StackPanel Grid.Row="2" Margin="0,0,0,12">
+            <TextBlock Text="Format" FontSize="12" Margin="0,0,0,4"/>
+            <ComboBox ItemsSource="{Binding AvailableFormats}"
+                      SelectedItem="{Binding SelectedFormat}"
+                      DisplayMemberPath="DisplayName"
+                      HorizontalAlignment="Stretch"
+                      FontSize="12"
+                      Height="36"/>
+            <CheckBox Content="Set as default for clipboard"
+                      IsChecked="{Binding SetAsDefault}"
+                      Margin="0,6,0,0" FontSize="11"/>
+        </StackPanel>
+
+        <!-- Output mode -->
+        <StackPanel Grid.Row="3" Margin="0,0,0,12">
+            <TextBlock Text="Output" FontSize="12" Margin="0,0,0,6"/>
+            <RadioButton Content="Copy to Clipboard" GroupName="OutputMode"
+                         IsChecked="True" Margin="0,0,0,4"
+                         Checked="ClipboardRadioChecked"/>
+            <RadioButton Content="Save to File" GroupName="OutputMode"
+                         Checked="FileRadioChecked"/>
+        </StackPanel>
+
+        <!-- File path (visible only in File mode) -->
+        <DockPanel Grid.Row="4" Margin="0,0,0,12" x:Name="FilePathPanel" Visibility="Collapsed">
+            <ui:Button DockPanel.Dock="Right" Content="Browse…" Margin="8,0,0,0"
+                       Height="30" Click="BrowseClick"/>
+            <ui:TextBox Text="{Binding FilePath, UpdateSourceTrigger=PropertyChanged}"
+                        PlaceholderText="C:\path\to\connection.txt" Height="30"/>
+        </DockPanel>
+
+        <!-- Preview -->
+        <Border Grid.Row="5" BorderBrush="{DynamicResource ControlStrokeColorDefaultBrush}"
+                BorderThickness="1" CornerRadius="6" Padding="12" Margin="0,0,0,12"
+                MinHeight="80">
+            <DockPanel>
+                <TextBlock DockPanel.Dock="Top" Text="Preview" FontSize="12"
+                           FontWeight="SemiBold" Margin="0,0,0,8"/>
+                <TextBox Text="{Binding Preview, Mode=OneWay}"
+                         IsReadOnly="True" TextWrapping="Wrap"
+                         FontFamily="Cascadia Code, Consolas, monospace"
+                         FontSize="11" VerticalScrollBarVisibility="Auto"
+                         Background="Transparent" BorderThickness="0"/>
+            </DockPanel>
+        </Border>
+
+        <!-- Footer buttons -->
+        <StackPanel Grid.Row="6" Orientation="Horizontal" HorizontalAlignment="Right">
+            <ui:Button Content="Cancel" Width="80" Height="32" Margin="0,0,8,0"
+                       Click="CancelClick"/>
+            <ui:Button Content="Export" Width="80" Height="32"
+                       Appearance="Primary"
+                       IsEnabled="{Binding CanExport}"
+                       Click="ExportClick"/>
+        </StackPanel>
+    </Grid>
+</ui:FluentWindow>

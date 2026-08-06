@@ -1,0 +1,21 @@
+<Project Sdk="WixToolset.Sdk/5.0.2">
+
+  <PropertyGroup>
+    <OutputName>DbClone</OutputName>
+    <!-- Overridden by the build script per target platform (-p:InstallerPlatform=...) -->
+    <InstallerPlatform Condition="'$(InstallerPlatform)' == ''">x64</InstallerPlatform>
+  </PropertyGroup>
+
+  <PropertyGroup>
+    <DefineConstants>
+      PublishDir=..\..\src\DbClone.UI\bin\publish;
+      ProductVersion=$(Version)
+    </DefineConstants>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <!-- Full interactive wizard (install + maintenance) for standalone runs -->
+    <PackageReference Include="WixToolset.UI.wixext" Version="5.0.2" />
+  </ItemGroup>
+
+</Project>

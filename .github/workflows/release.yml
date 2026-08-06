@@ -1,0 +1,49 @@
+name: Release Installer
+
+on:
+  push:
+    tags:
+      - 'v*'
+      - 'V*'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  build-installer:
+    runs-on: windows-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v5
+        with:
+          fetch-depth: 0
+
+      - name: Setup environment
+        id: setup-env
+        uses: ./.github/actions/setup-env
+
+      - name: Build and upload installer
+        uses: ./.github/actions/build-installer
+        with:
+          version: ${{ steps.setup-env.outputs.version }}
+
+      - name: Determine release tag
+        id: release-tag
+        shell: pwsh
+        run: |
+          if ("${{ github.ref_type }}" -eq "tag") {
+            "tag=${{ github.ref_name }}" >> $env:GITHUB_OUTPUT
+          } else {
+            "tag=v${{ steps.setup-env.outputs.version }}" >> $env:GITHUB_OUTPUT
+          }
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v3
+        with:
+          tag_name: ${{ steps.release-tag.outputs.tag }}
+          files: |
+            artifacts/DbClone-Setup-*.exe
+            artifacts/DbClone-*.msi
+          generate_release_notes: true

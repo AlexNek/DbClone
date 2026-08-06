@@ -1,0 +1,64 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<Wix xmlns="http://wixtoolset.org/schemas/v4/wxs"
+     xmlns:util="http://wixtoolset.org/schemas/v4/wxs/util">
+
+  <Bundle Name="DbClone $(var.ProductVersion)"
+          ProviderKey="0A456B98-678F-49F7-887D-484F24F29398"
+          Manufacturer="DbClone Contributors"
+          Version="$(var.ProductVersion)"
+          UpgradeCode="B4E8C3F2-7A5D-4F9B-C6E1-3D6C9B4F8A01"
+          IconSourceFile="..\DbClone.Installer.UI\Assets\app.ico"
+          AboutUrl="https://github.com/user-alex-new/DbClone"
+          HelpUrl="https://github.com/user-alex-new/DbClone/issues"
+          UpdateUrl="https://github.com/user-alex-new/DbClone/releases">
+
+    <!-- Custom WPF wizard bootstrapper application (DbClone.Installer.UI).
+         Published as a self-contained single-file exe by build-installer-wix.ps1
+         before this project builds. Handles full UI, silent /passive /quiet
+         runs (app autoupdate) and ARP uninstall/repair actions. -->
+    <BootstrapperApplication
+      SourceFile="..\DbClone.Installer.UI\bin\publish\DbClone.Installer.UI.exe" />
+
+    <!-- Detect existing Inno Setup installation by registry. Writes directly into
+         InstallFolder so the Options page editbox and the MSI use the previous path.
+         The search only sets the variable when the value is found; on clean machines
+         the formatted default below applies instead. -->
+    <util:RegistrySearch
+      Id="InnoInstallPath"
+      Root="HKLM"
+      Key="Software\Microsoft\Windows\CurrentVersion\Uninstall\{A3F7C2E1-9B4D-4E8A-B6F1-2D5C8A3E7F90}_is1"
+      Value="InstallLocation"
+      Variable="InstallFolder" />
+
+    <!-- Default install location; the Options page editbox is bound to this variable.
+         Type="formatted" makes Burn resolve [ProgramFiles64Folder] when the value is
+         read (a plain string Variable would keep the brackets literally). -->
+    <Variable Name="InstallFolder"
+              Type="formatted"
+              Value="[ProgramFiles64Folder]DbClone" />
+
+    <Variable Name="InstallDesktopShortcut"
+              Type="numeric"
+              Value="0"
+              Persisted="yes" />
+
+    <!-- Install chain -->
+    <Chain DisableSystemRestore="yes">
+
+      <!-- DbClone MSI -->
+      <MsiPackage Id="DbCloneMsi"
+                  SourceFile="!(bindpath.DbClone.Installer.Msi)\DbClone.msi">
+        <!-- INSTALLFOLDER is only passed for fresh installs (incl. the Inno
+             migration case, where InstallFolder holds the old path). On
+             update/repair the MSI major upgrade keeps the existing location
+             on its own - overriding it here would relocate the product. -->
+        <MsiProperty Name="INSTALLFOLDER" Value="[InstallFolder]"
+                     Condition="NOT WixBundleInstalled" />
+        <MsiProperty Name="INSTALLDESKTOPSHORTCUT" Value="[InstallDesktopShortcut]" />
+      </MsiPackage>
+
+    </Chain>
+
+  </Bundle>
+
+</Wix>

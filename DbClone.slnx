@@ -1,0 +1,13 @@
+<Solution>
+  <Folder Name="/src/">
+    <Project Path="src/DbClone.Application/DbClone.Application.csproj" />
+    <Project Path="src/DbClone.PostgreSql/DbClone.PostgreSql.csproj" />
+    <Project Path="src/DbClone.UI/DbClone.UI.csproj" />
+  </Folder>
+  <Folder Name="/tests/">
+    <Project Path="tests/Application.Tests/Application.Tests.csproj" />
+    <Project Path="tests/Integration.Tests/Integration.Tests.csproj" />
+    <Project Path="tests/PostgreSql.Tests/PostgreSql.Tests.csproj" />
+    <Project Path="tests/UI.Tests/UI.Tests.csproj" />
+  </Folder>
+</Solution>

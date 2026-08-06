@@ -1,0 +1,42 @@
+<UserControl x:Class="DbClone.Installer.Views.FailedPage"
+             xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml">
+
+    <StackPanel Margin="36,50,36,16" VerticalAlignment="Center"
+                HorizontalAlignment="Center">
+
+        <!-- Error icon -->
+        <Border Width="60" Height="60"
+                CornerRadius="30"
+                Background="{DynamicResource ErrorBrush}"
+                HorizontalAlignment="Center"
+                Margin="0,0,0,24">
+            <TextBlock Text="✕"
+                       FontSize="28" FontWeight="Bold"
+                       Foreground="#1E1E2E"
+                       HorizontalAlignment="Center"
+                       VerticalAlignment="Center" />
+        </Border>
+
+        <TextBlock Text="Installation Failed"
+                   Style="{DynamicResource TitleStyle}"
+                   HorizontalAlignment="Center"
+                   Margin="0,0,0,10" />
+
+        <TextBlock Text="{Binding StatusMessage}"
+                   Style="{DynamicResource BodyStyle}"
+                   HorizontalAlignment="Center"
+                   TextAlignment="Center"
+                   MaxWidth="400"
+                   Margin="0,0,0,20" />
+
+        <TextBlock Style="{DynamicResource CaptionStyle}"
+                   HorizontalAlignment="Center"
+                   TextAlignment="Center"
+                   MaxWidth="400">
+            Check the log file for details, or try running the installer again.
+        </TextBlock>
+
+    </StackPanel>
+
+</UserControl>

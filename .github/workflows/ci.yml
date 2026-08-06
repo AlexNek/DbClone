@@ -1,0 +1,39 @@
+name: CI
+
+on:
+  push:
+    branches: [main, develop]
+  pull_request:
+    branches: [main, develop]
+  workflow_dispatch:
+
+jobs:
+  build-and-test:
+    runs-on: windows-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v5
+        with:
+          fetch-depth: 0
+
+      - name: Setup environment
+        id: setup-env
+        uses: ./.github/actions/setup-env
+
+      - name: Restore
+        run: dotnet restore DbClone.slnx
+
+      - name: Build
+        run: dotnet build DbClone.slnx -c Release --no-restore
+
+      - name: Test
+        run: |
+          dotnet test tests/Application.Tests --no-restore -c Release --verbosity normal
+          dotnet test tests/PostgreSql.Tests --no-restore -c Release --verbosity normal
+
+      - name: Build and verify installer
+        uses: ./.github/actions/build-installer
+        with:
+          version: ${{ steps.setup-env.outputs.version }}
+          upload: 'false'

@@ -1,0 +1,78 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<Wix xmlns="http://wixtoolset.org/schemas/v4/wxs"
+     xmlns:ui="http://wixtoolset.org/schemas/v4/wxs/ui">
+
+  <!-- Single source of truth. This MSI defines the entire product (files,
+       shortcuts, registry, upgrade rules, install-location detection) and is
+       built into BOTH distribution formats from the same sources:
+       - Individual users: the Burn bundle exe (DbClone-Setup-*.exe) wraps
+         this MSI with the custom WPF wizard.
+       - Enterprise deployments: this MSI is used directly, with its full
+         interactive wizard (Welcome > License > Install folder > Progress >
+         Finish) or silently: msiexec /i DbClone-x.y.z.msi /qn
+         INSTALLFOLDER=D:\Apps\DbClone. Re-running the same package (or
+         Modify/Uninstall in Apps & features) shows the maintenance dialogs
+         (Change / Repair / Remove); a freshly built MSI has a new ProductCode
+         and therefore runs the upgrade wizard instead. -->
+  <Package Name="DbClone $(var.ProductVersion)"
+           Manufacturer="DbClone Contributors"
+           Version="$(var.ProductVersion)"
+           UpgradeCode="A3F7C2E1-9B4D-4E8A-B6F1-2D5C8A3E7F90"
+           Scope="perMachine"
+           InstallerVersion="500"
+           Compressed="yes">
+
+    <SummaryInformation Description="DbClone - PostgreSQL Database Copy Tool" />
+
+    <!-- Keep DowngradeErrorMessage <= 255 chars: MSI LaunchCondition.Description
+         is an S255 column; longer strings trip ICE03 and get truncated. -->
+    <MajorUpgrade DowngradeErrorMessage="A newer DbClone is installed; this setup (v$(var.ProductVersion)) cannot downgrade it. To repair or change DbClone, re-run the matching installer. To install this version, uninstall it first (Settings &gt; Apps). Latest: github.com/user-alex-new/DbClone/releases"
+                  AllowSameVersionUpgrades="yes" />
+
+    <MediaTemplate EmbedCab="yes" CompressionLevel="high" />
+
+    <!-- Full interactive wizard for standalone runs (fresh install and
+         maintenance); when executed via the bundle, Burn runs the MSI
+         silently so this UI never appears - the bundle's WPF wizard leads
+         instead. -->
+    <ui:WixUI Id="WixUI_InstallDir" />
+    <WixVariable Id="WixUILicenseRtf" Value="..\DbClone.Installer.UI\LICENSE.rtf" />
+
+    <!-- Install directory - set by the bundle via INSTALLFOLDER=<path>, or
+         chosen on the wizard's folder page during interactive runs. -->
+    <Property Id="INSTALLFOLDER" Secure="yes" />
+    <Property Id="WIXUI_INSTALLDIR" Value="INSTALLFOLDER" />
+
+    <!-- Desktop shortcut switch (condition of the DesktopShortcut component).
+         Default 0 = off, matching the bundle wizard default and the legacy
+         Inno task. The bundle overrides it from the wizard checkbox; it is
+         Secure so both paths evaluate the component identically. -->
+    <Property Id="INSTALLDESKTOPSHORTCUT" Secure="yes" Value="0" />
+
+    <!-- Detect a legacy Inno Setup install (same AppId as the MSI UpgradeCode).
+         When found and this is a fresh install, pre-fill INSTALLFOLDER with the
+         old location so standalone runs upgrade in place. When running via the
+         bundle, INSTALLFOLDER is passed on the command line and wins instead
+         (command-line properties are not overwritten by SetProperty). -->
+    <Property Id="INNOINSTALLLOCATION" Secure="yes">
+      <RegistrySearch Id="InnoInstallPath"
+                      Root="HKLM"
+                      Key="Software\Microsoft\Windows\CurrentVersion\Uninstall\{A3F7C2E1-9B4D-4E8A-B6F1-2D5C8A3E7F90}_is1"
+                      Name="InstallLocation"
+                      Type="raw"
+                      Bitness="always64" />
+    </Property>
+    <SetProperty Id="INSTALLFOLDER"
+                 Value="[INNOINSTALLLOCATION]"
+                 After="AppSearch"
+                 Sequence="first"
+                 Condition="INNOINSTALLLOCATION AND NOT Installed" />
+
+    <Feature Id="Main" Title="DbClone" Level="1">
+      <ComponentGroupRef Id="PublishFiles" />
+      <ComponentGroupRef Id="Shortcuts" />
+    </Feature>
+
+  </Package>
+
+</Wix>

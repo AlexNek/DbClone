@@ -1,0 +1,39 @@
+<UserControl x:Class="DbClone.Installer.Views.WelcomePage"
+             xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml">
+
+    <UserControl.Resources>
+        <BooleanToVisibilityConverter x:Key="BoolToVisibility" />
+    </UserControl.Resources>
+
+    <StackPanel Margin="36,44,36,16" VerticalAlignment="Top">
+
+        <Image Source="/Assets/app.ico"
+               Width="56" Height="56"
+               HorizontalAlignment="Left"
+               Margin="0,0,0,24"
+               RenderOptions.BitmapScalingMode="HighQuality" />
+
+        <TextBlock Text="Welcome to DbClone Setup"
+                   Style="{DynamicResource TitleStyle}"
+                   Margin="0,0,0,14" />
+
+        <TextBlock Style="{DynamicResource BodyStyle}" Margin="0,0,0,24">
+            This wizard will guide you through the installation of DbClone,
+            a fast and reliable PostgreSQL database copy tool.
+        </TextBlock>
+
+        <!-- Post-uninstall notice (set by the view model before re-detect) -->
+        <TextBlock Text="{Binding StatusMessage}"
+                   Style="{DynamicResource CaptionStyle}"
+                   Foreground="{DynamicResource AccentBrush}"
+                   Visibility="{Binding HasStatusMessage, Converter={StaticResource BoolToVisibility}}"
+                   Margin="0,0,0,16" />
+
+        <TextBlock Style="{DynamicResource CaptionStyle}">
+            Click Next to continue, or Cancel to exit.
+        </TextBlock>
+
+    </StackPanel>
+
+</UserControl>

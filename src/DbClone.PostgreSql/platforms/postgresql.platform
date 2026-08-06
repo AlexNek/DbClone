@@ -1,0 +1,22 @@
+{
+  "id": "postgresql",
+  "engine": "postgresql",
+  "displayName": "PostgreSQL",
+  "formatVersion": "1.0",
+  "defaults": {
+    "port": 5432,
+    "sslMode": "Prefer"
+  },
+  "versions": [
+    {
+      "versionRange": "*",
+      "systemSchemas": [
+        "pg_catalog",
+        "information_schema",
+        "pg_toast"
+      ],
+      "platformSchemas": [],
+      "platformExtensions": []
+    }
+  ]
+}

@@ -1,0 +1,32 @@
+{
+  "id": "aiven",
+  "engine": "postgresql",
+  "displayName": "Aiven",
+  "formatVersion": "1.0",
+  "detection": {
+    "hostPatterns": [
+      "*.aivencloud.com"
+    ]
+  },
+  "defaults": {
+    "port": 11521,
+    "sslMode": "Require"
+  },
+  "versions": [
+    {
+      "versionRange": "*",
+      "systemSchemas": [
+        "pg_catalog",
+        "information_schema",
+        "pg_toast"
+      ],
+      "platformSchemas": [
+        "aiven_extras"
+      ],
+      "platformExtensions": [
+        "aiven_extras"
+      ],
+      "notes": "The aiven_extras extension grants avnadmin superuser-like capabilities (logical replication management, auto_explain configuration). Creates its own aiven_extras schema. Stable across all supported PG major versions (14+)."
+    }
+  ]
+}

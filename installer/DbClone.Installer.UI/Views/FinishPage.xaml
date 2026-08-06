@@ -1,0 +1,43 @@
+<UserControl x:Class="DbClone.Installer.Views.FinishPage"
+             xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml">
+
+    <UserControl.Resources>
+        <BooleanToVisibilityConverter x:Key="BoolToVisibility" />
+    </UserControl.Resources>
+
+    <StackPanel Margin="36,50,36,16" VerticalAlignment="Center"
+                HorizontalAlignment="Center">
+
+        <!-- Success icon -->
+        <Border Width="60" Height="60"
+                CornerRadius="30"
+                Background="{DynamicResource SuccessBrush}"
+                HorizontalAlignment="Center"
+                Margin="0,0,0,24">
+            <TextBlock Text="✓"
+                       FontSize="28" FontWeight="Bold"
+                       Foreground="#1E1E2E"
+                       HorizontalAlignment="Center"
+                       VerticalAlignment="Center" />
+        </Border>
+
+        <TextBlock Text="Setup Complete"
+                   Style="{DynamicResource TitleStyle}"
+                   HorizontalAlignment="Center"
+                   Margin="0,0,0,10" />
+
+        <TextBlock Text="{Binding FinishMessage}"
+                   Style="{DynamicResource BodyStyle}"
+                   HorizontalAlignment="Center"
+                   Margin="0,0,0,24" />
+
+        <CheckBox Content="Launch DbClone"
+                  IsChecked="{Binding LaunchAfterInstall}"
+                  Visibility="{Binding ShowLaunchOption, Converter={StaticResource BoolToVisibility}}"
+                  Style="{DynamicResource InstallerCheckBoxStyle}"
+                  HorizontalAlignment="Center" />
+
+    </StackPanel>
+
+</UserControl>

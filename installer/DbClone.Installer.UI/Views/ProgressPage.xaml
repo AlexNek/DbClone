@@ -1,0 +1,26 @@
+<UserControl x:Class="DbClone.Installer.Views.ProgressPage"
+             xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml">
+
+    <StackPanel Margin="36,60,36,16" VerticalAlignment="Center">
+
+        <TextBlock Text="{Binding StatusMessage}"
+                   Style="{DynamicResource TitleStyle}"
+                   HorizontalAlignment="Center"
+                   Margin="0,0,0,28" />
+
+        <ProgressBar Value="{Binding ProgressPercent}"
+                     Minimum="0" Maximum="100"
+                     Height="6"
+                     Margin="20,0,20,14"
+                     Background="{DynamicResource ProgressBarBackgroundBrush}"
+                     Foreground="{DynamicResource ProgressBarForegroundBrush}" />
+
+        <TextBlock HorizontalAlignment="Center"
+                   Style="{DynamicResource CaptionStyle}">
+            <Run Text="{Binding ProgressPercent, StringFormat={}{0}%}" />
+        </TextBlock>
+
+    </StackPanel>
+
+</UserControl>

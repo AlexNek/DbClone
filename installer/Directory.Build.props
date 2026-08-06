@@ -1,0 +1,12 @@
+<Project>
+  <!--
+    Override root Directory.Build.props for installer projects.
+    The WiX projects don't need GitVersion or the shared TargetFramework.
+    The Installer.UI project sets its own TargetFramework.
+  -->
+  <PropertyGroup>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <LangVersion>latest</LangVersion>
+  </PropertyGroup>
+</Project>

@@ -1,0 +1,416 @@
+<UserControl
+    x:Class="DbClone.UI.Views.ToolbarView"
+    xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+    xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+    xmlns:conv="clr-namespace:DbClone.UI.Converters"
+    xmlns:ui="http://schemas.lepo.co/wpfui/2022/xaml">
+
+    <UserControl.Resources>
+        <conv:EnumToBoolConverter x:Key="EnumToBoolConverter" />
+    </UserControl.Resources>
+
+    <Border
+        Background="Transparent"
+        BorderBrush="{ui:ThemeResource ControlStrokeColorDefaultBrush}"
+        BorderThickness="0,0,0,1">
+        <StackPanel Margin="8,4" Orientation="Horizontal">
+
+            <!--  ═══ Mode Selector (segmented switcher) ═══  -->
+            <Border
+                x:Name="ModeSelectorTrack"
+                Margin="0,0,8,0"
+                Padding="3"
+                Background="{ui:ThemeResource ControlFillColorDefaultBrush}"
+                BorderBrush="{ui:ThemeResource ControlStrokeColorDefaultBrush}"
+                BorderThickness="1"
+                CornerRadius="16"
+                IsEnabled="{Binding Context.IsBusy, Converter={StaticResource InvertBoolConverter}}">
+                <Grid>
+                    <Grid.ColumnDefinitions>
+                        <ColumnDefinition Width="Auto" />
+                        <ColumnDefinition Width="Auto" />
+                    </Grid.ColumnDefinitions>
+                    <Border
+                        x:Name="CopyTab"
+                        Grid.Column="0"
+                        Padding="14,5"
+                        CornerRadius="12"
+                        Cursor="Hand"
+                        MouseLeftButtonDown="CopyTab_Click"
+                        Background="{ui:ThemeResource SystemAccentColorPrimaryBrush}">
+                        <TextBlock
+                            x:Name="CopyTabText"
+                            Text="Copy"
+                            FontSize="12"
+                            FontWeight="SemiBold"
+                            Foreground="White"
+                            HorizontalAlignment="Center" />
+                    </Border>
+                    <Border
+                        x:Name="CompareTab"
+                        Grid.Column="1"
+                        Padding="14,5"
+                        CornerRadius="12"
+                        Cursor="Hand"
+                        MouseLeftButtonDown="CompareTab_Click"
+                        Background="Transparent">
+                        <TextBlock
+                            x:Name="CompareTabText"
+                            Text="Compare"
+                            FontSize="12"
+                            FontWeight="Normal"
+                            Foreground="{ui:ThemeResource TextFillColorSecondaryBrush}"
+                            HorizontalAlignment="Center" />
+                    </Border>
+                </Grid>
+            </Border>
+
+            <!--  ═══ Copy group (visible in Copy mode) ═══  -->
+            <StackPanel Orientation="Horizontal">
+                <StackPanel.Style>
+                    <Style TargetType="StackPanel">
+                        <Setter Property="Visibility" Value="Visible" />
+                        <Style.Triggers>
+                            <DataTrigger Binding="{Binding SelectedMode}" Value="Compare">
+                                <Setter Property="Visibility" Value="Collapsed" />
+                            </DataTrigger>
+                        </Style.Triggers>
+                    </Style>
+                </StackPanel.Style>
+                <ui:Button
+                    AutomationProperties.Name="Start Copy"
+                    Command="{Binding Copy.StartCopyCommand}"
+                    Style="{StaticResource CommandBarPrimaryButtonStyle}"
+                    ToolTip="Start Copy (Ctrl+S)">
+                    <ui:Button.Icon>
+                        <ui:SymbolIcon Symbol="Play16" />
+                    </ui:Button.Icon>
+                </ui:Button>
+                <ui:Button
+                    AutomationProperties.Name="Pause or Resume"
+                    Command="{Binding Copy.PauseCommand}"
+                    IsEnabled="{Binding Context.IsBusy}"
+                    Style="{StaticResource CommandBarButtonStyle}"
+                    ToolTip="Pause/Resume (Ctrl+P)">
+                    <ui:Button.Icon>
+                        <ui:SymbolIcon Symbol="Pause16" />
+                    </ui:Button.Icon>
+                </ui:Button>
+                <ui:Button
+                    AutomationProperties.Name="Stop Operation"
+                    Command="{Binding Copy.StopCommand}"
+                    IsEnabled="{Binding Context.IsBusy}"
+                    Style="{StaticResource CommandBarButtonStyle}"
+                    ToolTip="Stop (Escape)">
+                    <ui:Button.Icon>
+                        <ui:SymbolIcon Symbol="Dismiss16" />
+                    </ui:Button.Icon>
+                </ui:Button>
+                <!--  Copy options popup  -->
+                <Grid>
+                    <ui:Button
+                        x:Name="CopyOptionsButton"
+                        AutomationProperties.Name="Copy Options"
+                        Click="CopyOptionsButton_Click"
+                        Content="Copy Options"
+                        Style="{StaticResource CommandBarButtonStyle}"
+                        ToolTip="Copy Options">
+                        <ui:Button.Icon>
+                            <ui:SymbolIcon Symbol="Settings16" />
+                        </ui:Button.Icon>
+                    </ui:Button>
+                    <Popup
+                        x:Name="CopyOptionsPopup"
+                        AllowsTransparency="True"
+                        Placement="Bottom"
+                        PlacementTarget="{Binding ElementName=CopyOptionsButton}"
+                        StaysOpen="False">
+                        <Border
+                            Width="280"
+                            Margin="0,2,0,0"
+                            Padding="16"
+                            Background="{ui:ThemeResource SolidBackgroundFillColorBaseBrush}"
+                            BorderBrush="{ui:ThemeResource ControlStrokeColorDefaultBrush}"
+                            BorderThickness="1"
+                            CornerRadius="8">
+                            <Border.Effect>
+                                <DropShadowEffect
+                                    BlurRadius="16"
+                                    Direction="270"
+                                    Opacity="0.3"
+                                    ShadowDepth="4"
+                                    Color="Black" />
+                            </Border.Effect>
+                            <StackPanel>
+                                <TextBlock
+                                    Margin="0,0,0,8"
+                                    FontWeight="SemiBold"
+                                    Text="Copy Objects" />
+                                <WrapPanel>
+                                    <CheckBox
+                                        Margin="0,0,12,4"
+                                        Content="Data"
+                                        IsChecked="{Binding Settings.CopyData}" />
+                                    <CheckBox
+                                        Margin="0,0,12,4"
+                                        Content="Indexes"
+                                        IsChecked="{Binding Settings.CopyIndexes}"
+                                        ToolTip="Copies secondary indexes. Primary key indexes are always created with the table structure and cannot be skipped." />
+                                    <CheckBox
+                                        Margin="0,0,12,4"
+                                        Content="Views"
+                                        IsChecked="{Binding Settings.CopyViews}" />
+                                    <CheckBox
+                                        Margin="0,0,12,4"
+                                        Content="Functions"
+                                        IsChecked="{Binding Settings.CopyFunctions}" />
+                                    <CheckBox
+                                        Margin="0,0,12,4"
+                                        Content="Triggers"
+                                        IsChecked="{Binding Settings.CopyTriggers}" />
+                                </WrapPanel>
+                                <TextBlock
+                                    Margin="0,12,0,8"
+                                    FontWeight="SemiBold"
+                                    Text="Schema Filtering" />
+                                <CheckBox
+                                    Margin="0,0,0,4"
+                                    Content="Platform Schemas"
+                                    IsChecked="{Binding Settings.CopyPlatformSchemas}"
+                                    ToolTip="Include platform-managed schemas (e.g. Supabase auth, storage, realtime) in copy and comparison. Uncheck to exclude schemas owned by non-login service roles. System schemas (pg_catalog, information_schema) are always excluded." />
+                                <TextBlock
+                                    Margin="0,12,0,8"
+                                    FontWeight="SemiBold"
+                                    Text="Copy Mode" />
+                                <RadioButton
+                                    Margin="0,0,0,4"
+                                    Content="Full Copy"
+                                    GroupName="CopyMode"
+                                    IsChecked="{Binding Settings.SelectedCopyMode, Converter={StaticResource EnumToBoolConverter}, ConverterParameter=Full}" />
+                                <RadioButton
+                                    Margin="0,0,0,4"
+                                    Content="Backup Mode"
+                                    GroupName="CopyMode"
+                                    IsChecked="{Binding Settings.SelectedCopyMode, Converter={StaticResource EnumToBoolConverter}, ConverterParameter=Backup}" />
+                                <RadioButton
+                                    Margin="0,0,0,4"
+                                    Content="Resume Interrupted Copy"
+                                    GroupName="CopyMode"
+                                    IsChecked="{Binding Settings.SelectedCopyMode, Converter={StaticResource EnumToBoolConverter}, ConverterParameter=Resume}" />
+                                <RadioButton
+                                    Margin="0,0,0,4"
+                                    Content="Update Existing Rows"
+                                    GroupName="CopyMode"
+                                    IsChecked="{Binding Settings.SelectedCopyMode, Converter={StaticResource EnumToBoolConverter}, ConverterParameter=Update}" />
+                                <TextBlock
+                                    Margin="0,12,0,8"
+                                    FontWeight="SemiBold"
+                                    Text="Verify Mode" />
+                                <RadioButton
+                                    Margin="0,0,0,4"
+                                    Content="Row Count"
+                                    GroupName="CopyVerifyMode"
+                                    IsChecked="{Binding Settings.SelectedVerifyMode, Converter={StaticResource EnumToBoolConverter}, ConverterParameter=RowCount}" />
+                                <RadioButton
+                                    Margin="0,0,0,4"
+                                    Content="Checksum"
+                                    GroupName="CopyVerifyMode"
+                                    IsChecked="{Binding Settings.SelectedVerifyMode, Converter={StaticResource EnumToBoolConverter}, ConverterParameter=Checksum}" />
+                                <RadioButton
+                                    Margin="0,0,0,4"
+                                    Content="Full"
+                                    GroupName="CopyVerifyMode"
+                                    IsChecked="{Binding Settings.SelectedVerifyMode, Converter={StaticResource EnumToBoolConverter}, ConverterParameter=Full}" />
+                                <TextBlock
+                                    Margin="0,12,0,0"
+                                    FontSize="11"
+                                    Foreground="{ui:ThemeResource TextFillColorSecondaryBrush}"
+                                    Text="{Binding Settings.VerifyModeLimitation}"
+                                    TextWrapping="Wrap" />
+                            </StackPanel>
+                        </Border>
+                    </Popup>
+                </Grid>
+            </StackPanel>
+
+            <!--  ═══ Compare group (visible in Compare mode) ═══  -->
+            <StackPanel Orientation="Horizontal">
+                <StackPanel.Style>
+                    <Style TargetType="StackPanel">
+                        <Setter Property="Visibility" Value="Collapsed" />
+                        <Style.Triggers>
+                            <DataTrigger Binding="{Binding SelectedMode}" Value="Compare">
+                                <Setter Property="Visibility" Value="Visible" />
+                            </DataTrigger>
+                        </Style.Triggers>
+                    </Style>
+                </StackPanel.Style>
+                <ui:Button
+                    AutomationProperties.Name="Run Compare"
+                    Command="{Binding Compare.CompareDatabasesCommand}"
+                    Style="{StaticResource CommandBarPrimaryButtonStyle}"
+                    ToolTip="Run Compare (Ctrl+Shift+C)">
+                    <ui:Button.Icon>
+                        <ui:SymbolIcon Symbol="Play16" />
+                    </ui:Button.Icon>
+                </ui:Button>
+                <ui:Button
+                    AutomationProperties.Name="Pause or Resume Compare"
+                    Command="{Binding Compare.PauseCompareCommand}"
+                    IsEnabled="{Binding Context.IsBusy}"
+                    Style="{StaticResource CommandBarButtonStyle}"
+                    ToolTip="Pause/Resume Compare (Ctrl+P)">
+                    <ui:Button.Icon>
+                        <ui:SymbolIcon Symbol="Pause16" />
+                    </ui:Button.Icon>
+                </ui:Button>
+                <ui:Button
+                    AutomationProperties.Name="Stop Compare"
+                    Command="{Binding Compare.StopCompareCommand}"
+                    IsEnabled="{Binding Context.IsBusy}"
+                    Style="{StaticResource CommandBarButtonStyle}"
+                    ToolTip="Stop Compare (Escape)">
+                    <ui:Button.Icon>
+                        <ui:SymbolIcon Symbol="Dismiss16" />
+                    </ui:Button.Icon>
+                </ui:Button>
+                <!--  Compare options popup  -->
+                <Grid>
+                    <ui:Button
+                        x:Name="CompareOptionsButton"
+                        AutomationProperties.Name="Compare Options"
+                        Click="CompareOptionsButton_Click"
+                        Content="Compare Options"
+                        Style="{StaticResource CommandBarButtonStyle}"
+                        ToolTip="Compare Options">
+                        <ui:Button.Icon>
+                            <ui:SymbolIcon Symbol="Settings16" />
+                        </ui:Button.Icon>
+                    </ui:Button>
+                    <Popup
+                        x:Name="CompareOptionsPopup"
+                        AllowsTransparency="True"
+                        Placement="Bottom"
+                        PlacementTarget="{Binding ElementName=CompareOptionsButton}"
+                        StaysOpen="False">
+                        <Border
+                            Width="280"
+                            Margin="0,2,0,0"
+                            Padding="16"
+                            Background="{ui:ThemeResource SolidBackgroundFillColorBaseBrush}"
+                            BorderBrush="{ui:ThemeResource ControlStrokeColorDefaultBrush}"
+                            BorderThickness="1"
+                            CornerRadius="8">
+                            <Border.Effect>
+                                <DropShadowEffect
+                                    BlurRadius="16"
+                                    Direction="270"
+                                    Opacity="0.3"
+                                    ShadowDepth="4"
+                                    Color="Black" />
+                            </Border.Effect>
+                            <StackPanel>
+                                <TextBlock
+                                    Margin="0,0,0,8"
+                                    FontWeight="SemiBold"
+                                    Text="Verify Mode" />
+                                <RadioButton
+                                    Margin="0,0,0,4"
+                                    Content="Row Count"
+                                    GroupName="CompareVerifyMode"
+                                    IsChecked="{Binding Settings.SelectedVerifyMode, Converter={StaticResource EnumToBoolConverter}, ConverterParameter=RowCount}" />
+                                <RadioButton
+                                    Margin="0,0,0,4"
+                                    Content="Checksum"
+                                    GroupName="CompareVerifyMode"
+                                    IsChecked="{Binding Settings.SelectedVerifyMode, Converter={StaticResource EnumToBoolConverter}, ConverterParameter=Checksum}" />
+                                <RadioButton
+                                    Margin="0,0,0,4"
+                                    Content="Full"
+                                    GroupName="CompareVerifyMode"
+                                    IsChecked="{Binding Settings.SelectedVerifyMode, Converter={StaticResource EnumToBoolConverter}, ConverterParameter=Full}" />
+                                <TextBlock
+                                    Margin="0,12,0,0"
+                                    FontSize="11"
+                                    Foreground="{ui:ThemeResource TextFillColorSecondaryBrush}"
+                                    Text="{Binding Settings.VerifyModeLimitation}"
+                                    TextWrapping="Wrap" />
+                                <TextBlock
+                                    Margin="0,12,0,8"
+                                    FontWeight="SemiBold"
+                                    Text="Schema Filtering" />
+                                <CheckBox
+                                    Margin="0,0,0,4"
+                                    Content="Platform Schemas"
+                                    IsChecked="{Binding Settings.ComparePlatformSchemas}"
+                                    ToolTip="Include platform-managed schemas in comparison. Uncheck to exclude schemas owned by non-login service roles." />
+                            </StackPanel>
+                        </Border>
+                    </Popup>
+                </Grid>
+                <ui:Button
+                    AutomationProperties.Name="Report"
+                    Command="{Binding Compare.ViewReportCommand}"
+                    Content="Report"
+                    Style="{StaticResource CommandBarButtonStyle}"
+                    ToolTip="View comparison report">
+                    <ui:Button.Icon>
+                        <ui:SymbolIcon Symbol="Document16" />
+                    </ui:Button.Icon>
+                </ui:Button>
+            </StackPanel>
+
+            <Border
+                Width="1"
+                Margin="6,2"
+                Background="{ui:ThemeResource ControlStrokeColorDefaultBrush}" />
+
+            <!--  ═══ Utility group (always visible) ═══  -->
+            <ui:Button
+                AutomationProperties.Name="Open Connection Manager"
+                Command="{Binding OpenConnectionManagerCommand}"
+                Content="Connections"
+                Style="{StaticResource CommandBarButtonStyle}"
+                ToolTip="Connection Manager">
+                <ui:Button.Icon>
+                    <ui:SymbolIcon Symbol="Database16" />
+                </ui:Button.Icon>
+            </ui:Button>
+            <ui:Button
+                AutomationProperties.Name="Test Connections"
+                Command="{Binding ValidateConfigurationCommand}"
+                Content="Test Connections"
+                Style="{StaticResource CommandBarButtonStyle}"
+                ToolTip="Test source and destination connections">
+                <ui:Button.Icon>
+                    <ui:SymbolIcon Symbol="ApprovalsApp16" />
+                </ui:Button.Icon>
+            </ui:Button>
+            <ui:Button
+                AutomationProperties.Name="Open Log Folder"
+                Command="{Binding Log.OpenLogFolderCommand}"
+                Content="Logs"
+                Style="{StaticResource CommandBarButtonStyle}"
+                ToolTip="Open application log folder">
+                <ui:Button.Icon>
+                    <ui:SymbolIcon Symbol="FolderOpen16" />
+                </ui:Button.Icon>
+            </ui:Button>
+
+            <Border
+                Width="1"
+                Margin="6,2"
+                Background="{ui:ThemeResource ControlStrokeColorDefaultBrush}" />
+
+            <ui:Button
+                AutomationProperties.Name="About"
+                Command="{Binding ShowAboutCommand}"
+                Style="{StaticResource CommandBarButtonStyle}"
+                ToolTip="About DbClone">
+                <ui:Button.Icon>
+                    <ui:SymbolIcon Symbol="Info16" />
+                </ui:Button.Icon>
+            </ui:Button>
+        </StackPanel>
+    </Border>
+</UserControl>

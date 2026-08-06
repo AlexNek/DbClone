@@ -1,0 +1,60 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<Wix xmlns="http://wixtoolset.org/schemas/v4/wxs">
+
+  <Fragment>
+    <ComponentGroup Id="Shortcuts">
+
+      <!-- Registry: store install path for detection by bootstrapper -->
+      <Component Id="RegistryInstallPath" Directory="INSTALLFOLDER" Guid="*">
+        <RegistryValue Root="HKLM"
+                       Key="Software\DbClone"
+                       Name="InstallPath"
+                       Type="string" Value="[INSTALLFOLDER]"
+                       KeyPath="yes" />
+        <RegistryValue Root="HKLM"
+                       Key="Software\DbClone"
+                       Name="Version"
+                       Type="string" Value="$(var.ProductVersion)" />
+      </Component>
+
+      <!-- Start Menu shortcut -->
+      <Component Id="StartMenuShortcut" Directory="DbCloneMenuFolder" Guid="*">
+        <Shortcut Id="DbCloneStartMenu"
+                  Name="DbClone"
+                  Description="PostgreSQL Database Copy Tool"
+                  Target="[INSTALLFOLDER]DbClone.exe"
+                  WorkingDirectory="INSTALLFOLDER"
+                  Icon="AppIcon" />
+        <RemoveFolder Id="RemoveDbCloneMenuFolder" On="uninstall" />
+        <RegistryValue Root="HKCU"
+                       Key="Software\DbClone"
+                       Name="StartMenuShortcut"
+                       Type="integer" Value="1"
+                       KeyPath="yes" />
+      </Component>
+
+      <!-- Desktop shortcut (optional, controlled by bootstrapper) -->
+      <Component Id="DesktopShortcut" Directory="DesktopFolder" Guid="*"
+                 Condition="INSTALLDESKTOPSHORTCUT">
+        <Shortcut Id="DbCloneDesktop"
+                  Name="DbClone"
+                  Description="PostgreSQL Database Copy Tool"
+                  Target="[INSTALLFOLDER]DbClone.exe"
+                  WorkingDirectory="INSTALLFOLDER"
+                  Icon="AppIcon" />
+        <RegistryValue Root="HKCU"
+                       Key="Software\DbClone"
+                       Name="DesktopShortcut"
+                       Type="integer" Value="1"
+                       KeyPath="yes" />
+      </Component>
+
+    </ComponentGroup>
+
+    <StandardDirectory Id="DesktopFolder" />
+
+    <Icon Id="AppIcon" SourceFile="$(var.PublishDir)\DbClone.exe" />
+
+  </Fragment>
+
+</Wix>

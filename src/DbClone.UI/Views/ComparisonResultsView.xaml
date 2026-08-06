@@ -1,0 +1,210 @@
+<UserControl
+    x:Class="DbClone.UI.Views.ComparisonResultsView"
+    xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+    xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+    xmlns:ui="http://schemas.lepo.co/wpfui/2022/xaml"
+    xmlns:converters="clr-namespace:DbClone.UI.Converters">
+
+    <UserControl.Resources>
+        <converters:GreaterThanZeroToVisibilityConverter x:Key="GreaterThanZeroVis" />
+    </UserControl.Resources>
+
+    <StackPanel Margin="0,12,0,0" Visibility="{Binding HasCompareResults, Converter={StaticResource BoolToVis}}">
+
+        <!--  ═══ Overall Status Banner ═══  -->
+        <ui:InfoBar
+            Margin="0,0,0,12"
+            IsClosable="False"
+            IsOpen="True"
+            Title="{Binding OverallCompareStatus}"
+            Message="{Binding CompareSummary}"
+            Severity="{Binding CompareStatusSeverity}" />
+
+        <!--  ═══ Summary Card ═══  -->
+        <ui:Card Margin="0,0,0,12" Padding="16">
+            <StackPanel>
+                <TextBlock Style="{StaticResource SectionHeaderTextBlockStyle}" Text="Comparison Results" />
+                <StackPanel Margin="0,8,0,0" Orientation="Horizontal">
+                    <Border Style="{StaticResource StatusBadgeBorderStyle}">
+                        <TextBlock>
+                            <Run Foreground="{StaticResource StatusIdenticalBrush}" Text="🟢" />
+                            <Run Text=" Identical: " />
+                            <Run FontWeight="SemiBold" Text="{Binding TotalIdentical}" />
+                        </TextBlock>
+                    </Border>
+                    <Border
+                        Style="{StaticResource StatusBadgeBorderStyle}"
+                        ToolTip="Objects that match but carry a non-structural note (e.g. schema owner differs)"
+                        Visibility="{Binding TotalNotices, Converter={StaticResource GreaterThanZeroVis}}">
+                        <TextBlock>
+                            <Run Foreground="{StaticResource StatusNoticeBrush}" Text="🔵" />
+                            <Run Text=" Notices: " />
+                            <Run FontWeight="SemiBold" Text="{Binding TotalNotices}" />
+                        </TextBlock>
+                    </Border>
+                    <Border Style="{StaticResource StatusBadgeBorderStyle}">
+                        <TextBlock>
+                            <Run Foreground="{StaticResource StatusDifferentBrush}" Text="🟡" />
+                            <Run Text=" Different: " />
+                            <Run FontWeight="SemiBold" Text="{Binding TotalDifferent}" />
+                        </TextBlock>
+                    </Border>
+                    <Border Style="{StaticResource StatusBadgeBorderStyle}">
+                        <TextBlock>
+                            <Run Foreground="{StaticResource StatusMissingBrush}" Text="🔴" />
+                            <Run Text=" Missing Src: " />
+                            <Run FontWeight="SemiBold" Text="{Binding TotalMissingSource}" />
+                        </TextBlock>
+                    </Border>
+                    <Border Style="{StaticResource StatusBadgeBorderStyle}">
+                        <TextBlock>
+                            <Run Foreground="{StaticResource StatusMissingBrush}" Text="🔴" />
+                            <Run Text=" Missing Dst: " />
+                            <Run FontWeight="SemiBold" Text="{Binding TotalMissingDest}" />
+                        </TextBlock>
+                    </Border>
+                    <Border Style="{StaticResource StatusBadgeBorderStyle}">
+                        <TextBlock>
+                            <Run Foreground="{StaticResource StatusSkippedBrush}" Text="⚪" />
+                            <Run Text=" Skipped: " />
+                            <Run FontWeight="SemiBold" Text="{Binding TotalSkipped}" />
+                        </TextBlock>
+                    </Border>
+                    <Border Style="{StaticResource StatusBadgeBorderStyle}">
+                        <TextBlock>
+                            <Run Foreground="{StaticResource StatusMissingBrush}" Text="⚠" />
+                            <Run Text=" Errors: " />
+                            <Run FontWeight="SemiBold" Text="{Binding TotalErrors}" />
+                        </TextBlock>
+                    </Border>
+                    <Border Style="{StaticResource StatusBadgeBorderStyle}">
+                        <TextBlock>
+                            <Run Foreground="{ui:ThemeResource TextFillColorSecondaryBrush}" Text="Duration: " />
+                            <Run FontWeight="SemiBold" Text="{Binding CompareDuration}" />
+                        </TextBlock>
+                    </Border>
+                </StackPanel>
+
+                <!--  ═══ Object-type breakdown for missing counts ═══  -->
+                <TextBlock
+                    Margin="0,6,0,0"
+                    Foreground="{ui:ThemeResource TextFillColorSecondaryBrush}"
+                    TextTrimming="CharacterEllipsis"
+                    Visibility="{Binding TotalMissingDest, Converter={StaticResource GreaterThanZeroVis}}">
+                    <Run Text="Missing in dest:" />
+                    <Run FontWeight="SemiBold" Text="{Binding MissingDestBreakdown, Mode=OneWay}" />
+                </TextBlock>
+                <TextBlock
+                    Margin="0,2,0,0"
+                    Foreground="{ui:ThemeResource TextFillColorSecondaryBrush}"
+                    TextTrimming="CharacterEllipsis"
+                    Visibility="{Binding TotalMissingSource, Converter={StaticResource GreaterThanZeroVis}}">
+                    <Run Text="Missing in source:" />
+                    <Run FontWeight="SemiBold" Text="{Binding MissingSourceBreakdown, Mode=OneWay}" />
+                </TextBlock>
+            </StackPanel>
+        </ui:Card>
+
+        <!--  ═══ Quick Filter ═══  -->
+        <StackPanel Margin="0,0,0,8" Orientation="Horizontal">
+            <ui:Button
+                Margin="0,0,4,0"
+                Command="{Binding FilterCompareAllCommand}"
+                Content="All"
+                Style="{StaticResource CommandBarButtonStyle}" />
+            <ui:Button
+                Margin="0,0,4,0"
+                Command="{Binding FilterCompareDifferentCommand}"
+                Content="Different"
+                Style="{StaticResource CommandBarButtonStyle}" />
+            <ui:Button
+                Margin="0,0,4,0"
+                Command="{Binding FilterCompareMissingCommand}"
+                Content="Missing"
+                Style="{StaticResource CommandBarButtonStyle}" />
+            <ui:Button
+                Margin="0,0,4,0"
+                Command="{Binding FilterCompareSkippedCommand}"
+                Content="Skipped"
+                Style="{StaticResource CommandBarButtonStyle}" />
+            <ui:Button
+                Margin="0,0,4,0"
+                Command="{Binding FilterCompareErrorsCommand}"
+                Content="Errors"
+                Style="{StaticResource CommandBarButtonStyle}" />
+            <ui:Button
+                Margin="0,0,12,0"
+                Command="{Binding FilterCompareIdenticalCommand}"
+                Content="Identical"
+                Style="{StaticResource CommandBarButtonStyle}" />
+            <ComboBox
+                MinWidth="140"
+                DisplayMemberPath="Display"
+                ItemsSource="{Binding ObjectTypeFilters}"
+                SelectedItem="{Binding SelectedObjectTypeFilter}" />
+            <ComboBox
+                MinWidth="130"
+                Margin="8,0,0,0"
+                DisplayMemberPath="Display"
+                ItemsSource="{Binding SchemaFilters}"
+                SelectedItem="{Binding SelectedSchemaFilter}" />
+        </StackPanel>
+
+        <!--  ═══ Results Grid ═══  -->
+        <ui:Card Padding="0">
+            <DataGrid
+                MinHeight="150"
+                MaxHeight="500"
+                AutoGenerateColumns="False"
+                Background="Transparent"
+                BorderThickness="0"
+                CanUserResizeColumns="True"
+                CanUserSortColumns="True"
+                HeadersVisibility="Column"
+                IsReadOnly="True"
+                ItemsSource="{Binding CompareResultItems}"
+                SelectedItem="{Binding SelectedCompareResultItem}"
+                RowHeaderWidth="0">
+                <DataGrid.ContextMenu>
+                    <ContextMenu>
+                        <MenuItem Command="{Binding CopyCompareRowCommand}" Header="Copy Row" />
+                        <MenuItem Command="{Binding CopyAllCompareResultsCommand}" Header="Copy All" />
+                    </ContextMenu>
+                </DataGrid.ContextMenu>
+                <DataGrid.Columns>
+                    <DataGridTextColumn
+                        Width="1.2*"
+                        Binding="{Binding ObjectTypeDisplay}"
+                        Header="Type" />
+                    <DataGridTextColumn
+                        Width="3*"
+                        Binding="{Binding TableName}"
+                        Header="Object Name" />
+                    <DataGridTextColumn
+                        Width="1.5*"
+                        Binding="{Binding StatusText}"
+                        Header="Compare Status" />
+                    <DataGridTextColumn
+                        Width="1*"
+                        Binding="{Binding SourceCountDisplay}"
+                        Header="Source Rows" />
+                    <DataGridTextColumn
+                        Width="1*"
+                        Binding="{Binding DestCountDisplay}"
+                        Header="Dest Rows" />
+                    <DataGridTextColumn
+                        Width="3*"
+                        Binding="{Binding Details}"
+                        Header="Details">
+                        <DataGridTextColumn.ElementStyle>
+                            <Style TargetType="TextBlock">
+                                <Setter Property="TextWrapping" Value="Wrap" />
+                                <Setter Property="ToolTip" Value="{Binding Details}" />
+                            </Style>
+                        </DataGridTextColumn.ElementStyle>
+                    </DataGridTextColumn>
+                </DataGrid.Columns>
+            </DataGrid>
+        </ui:Card>
+    </StackPanel>
+</UserControl>

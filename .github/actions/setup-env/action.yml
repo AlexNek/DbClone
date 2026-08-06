@@ -1,0 +1,24 @@
+name: Setup build environment
+description: Checkout, install GitVersion, resolve the version, install the .NET SDK.
+
+outputs:
+  version:
+    description: Resolved MajorMinorPatch version from GitVersion.
+    value: ${{ steps.gitversion.outputs.majorMinorPatch }}
+
+runs:
+  using: composite
+  steps:
+    - name: Install GitVersion
+      uses: gittools/actions/gitversion/setup@v4.7.0
+      with:
+        versionSpec: '6.x'
+
+    - name: Determine Version
+      id: gitversion
+      uses: gittools/actions/gitversion/execute@v4.7.0
+
+    - name: Setup .NET
+      uses: actions/setup-dotnet@v5
+      with:
+        dotnet-version: '10.0.x'

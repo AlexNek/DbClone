@@ -1,0 +1,25 @@
+<Project Sdk="WixToolset.Sdk/5.0.2">
+
+  <PropertyGroup>
+    <OutputType>Bundle</OutputType>
+    <OutputName>DbClone-Setup-$(Version)</OutputName>
+    <!-- Overridden by the build script per target platform (-p:InstallerPlatform=...) -->
+    <InstallerPlatform Condition="'$(InstallerPlatform)' == ''">x64</InstallerPlatform>
+  </PropertyGroup>
+
+  <PropertyGroup>
+    <DefineConstants>
+      ProductVersion=$(Version)
+    </DefineConstants>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="WixToolset.BootstrapperApplications.wixext" Version="5.0.2" />
+    <PackageReference Include="WixToolset.Util.wixext" Version="5.0.2" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\DbClone.Installer.Msi\DbClone.Installer.Msi.wixproj" />
+  </ItemGroup>
+
+</Project>

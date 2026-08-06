@@ -1,0 +1,20 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<Wix xmlns="http://wixtoolset.org/schemas/v4/wxs">
+
+  <!--
+    File components are harvested from the publish output.
+
+    To harvest files, run:
+      wix build -arch x64 -d PublishDir=..\..\src\DbClone.UI\bin\publish
+
+    WiX v5 supports inline directory harvesting via Files element.
+    This collects all files from the publish directory into INSTALLFOLDER.
+  -->
+
+  <Fragment>
+    <ComponentGroup Id="PublishFiles" Directory="INSTALLFOLDER">
+      <Files Include="$(var.PublishDir)\**" />
+    </ComponentGroup>
+  </Fragment>
+
+</Wix>
