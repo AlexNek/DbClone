@@ -1,13 +1,19 @@
 # Changelog
 
-All notable changes to DbClone will be documented in this file.
+All notable changes to DbClone will be documented in this file. Date format: YYYY-MM-DD
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
+not jet
 
-## [1.0.0] - 2026-07-08
+## [1.0.1] - 2026-08-07
+
+### Added
+- Help button in toolbar (and F1 shortcut) to open online documentation
+
+## [1.0.0] - 2026-08-07
 
 ### Added
 - Initial release
@@ -26,5 +32,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Auto-update — checks GitHub Releases on startup; non-blocking banner notification
 - Fluent Design UI powered by WPF-UI
 
-[Unreleased]: https://github.com/AlexNek/DbClone/compare/v1.0.0...HEAD
+[Unreleased]: https://github.com/AlexNek/DbClone/compare/v1.0.1...HEAD
+[1.0.1]: https://github.com/AlexNek/DbClone/releases/tag/v1.0.1
 [1.0.0]: https://github.com/AlexNek/DbClone/releases/tag/v1.0.0

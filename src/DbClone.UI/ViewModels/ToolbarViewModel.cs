@@ -1,3 +1,5 @@
+using System.Diagnostics;
+
 using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
 
@@ -158,6 +160,12 @@ public sealed partial class ToolbarViewModel : ObservableObject
                              Owner = System.Windows.Application.Current.MainWindow
                          };
         window.ShowDialog();
+    }
+
+    [RelayCommand]
+    private void OpenHelp()
+    {
+        Process.Start(new ProcessStartInfo(AppInfo.DocumentationUrl) { UseShellExecute = true });
     }
 
     [RelayCommand]

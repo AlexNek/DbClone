@@ -23,6 +23,8 @@ public static class AppInfo
             ? product
             : DefaultProductName;
 
+    public static string DocumentationUrl { get; } = "https://alexnek.github.io/DbClone/";
+
     public static string RepositoryUrl { get; } = "https://github.com/AlexNek/DbClone";
 
     /// <summary>Short version string, e.g. "1.2.3" or "1.2.3 (build 44)".</summary>

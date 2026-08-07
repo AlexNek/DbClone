@@ -32,6 +32,9 @@
             Key="P"
             Command="{Binding PauseActiveOperationCommand}"
             Modifiers="Control" />
+        <KeyBinding
+            Key="F1"
+            Command="{Binding Toolbar.OpenHelpCommand}" />
     </Window.InputBindings>
 
     <Grid Background="{ui:ThemeResource ApplicationBackgroundBrush}">
