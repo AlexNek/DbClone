@@ -15,6 +15,7 @@ DbClone supports the following keyboard shortcuts. They work regardless of the a
 
 | Shortcut | Action | Notes |
 |---|---|---|
+| ++f1++ | **Open Documentation** | Opens the online user manual in your default browser |
 | ++ctrl+l++ | **Clear Log** | Clears all entries in the log pane |
 
 !!! tip
