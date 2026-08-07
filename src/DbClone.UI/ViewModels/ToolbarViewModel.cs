@@ -165,7 +165,18 @@ public sealed partial class ToolbarViewModel : ObservableObject
     [RelayCommand]
     private void OpenHelp()
     {
-        Process.Start(new ProcessStartInfo(AppInfo.DocumentationUrl) { UseShellExecute = true });
+        try
+        {
+            Process.Start(new ProcessStartInfo(AppInfo.DocumentationUrl) { UseShellExecute = true });
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Failed to open documentation URL");
+            ActiveState.ShowBanner(
+                "Could not open documentation",
+                ex.Message,
+                InfoBarSeverity.Error);
+        }
     }
 
     [RelayCommand]
