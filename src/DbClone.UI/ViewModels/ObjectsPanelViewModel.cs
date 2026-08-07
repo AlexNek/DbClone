@@ -89,11 +89,13 @@ public sealed class ObjectsPanelViewModel : ObservableObject
             Items.Add(new ObjectItem(objectType, count, EObjectStatus.Pending));
     }
 
-    /// <summary>Marks an object type as done.</summary>
+    /// <summary>Marks an object type as done.
+    /// Does not overwrite a Failed status — once failed, it stays failed.</summary>
     public void SetDone(EDatabaseObjectType objectType)
     {
         var item = Items.FirstOrDefault(i => i.ObjectType == objectType);
-        if (item != null) item.Status = EObjectStatus.Done;
+        if (item != null && item.Status != EObjectStatus.Failed)
+            item.Status = EObjectStatus.Done;
     }
 
     /// <summary>Marks an object type as failed (finished with errors).</summary>
@@ -103,11 +105,13 @@ public sealed class ObjectsPanelViewModel : ObservableObject
         if (item != null) item.Status = EObjectStatus.Failed;
     }
 
-    /// <summary>Marks an object type as in-progress.</summary>
+    /// <summary>Marks an object type as in-progress.
+    /// Does not overwrite a Failed status — once failed, it stays failed.</summary>
     public void SetInProgress(EDatabaseObjectType objectType)
     {
         var item = Items.FirstOrDefault(i => i.ObjectType == objectType);
-        if (item != null) item.Status = EObjectStatus.InProgress;
+        if (item != null && item.Status != EObjectStatus.Failed)
+            item.Status = EObjectStatus.InProgress;
     }
 }
 

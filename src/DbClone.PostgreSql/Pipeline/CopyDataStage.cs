@@ -291,7 +291,8 @@ public sealed class CopyDataStage : ICopyStage
                 details.Add(StageDetail.FailedWarning(failed));
             }
 
-            return new StageResult(Name, true, TimeSpan.Zero, stats.TablesCopied, details);
+            var success = copier.FailedTables.Count == 0;
+            return new StageResult(Name, success, TimeSpan.Zero, stats.TablesCopied, details);
         }
         catch (Exception ex)
         {
