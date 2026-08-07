@@ -28,6 +28,7 @@ branches:
     regex: ^(?!master$|main$|dev(elop)?(ment)?$|features?[/-]|releases?[/-]).*
     source-branches: ['master', 'main']
     tag: 'beta'
-    increment: Inherit
+    increment: None
+    is-release-branch: false
 ignore:
   sha: []
