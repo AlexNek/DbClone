@@ -9,6 +9,22 @@ outputs:
 runs:
   using: composite
   steps:
+    - name: Ensure full git history with branches and tags
+      shell: bash
+      run: |
+        # Fetch all tags (needed for GitVersion to find version source)
+        git fetch --tags --force origin
+        # Create local master branch ref if it doesn't exist (needed for source-branches resolution)
+        if git rev-parse --verify origin/master >/dev/null 2>&1; then
+          git branch master origin/master 2>/dev/null || true
+        elif git rev-parse --verify origin/main >/dev/null 2>&1; then
+          git branch main origin/main 2>/dev/null || true
+        fi
+        echo "--- Local branches ---"
+        git branch
+        echo "--- Tags ---"
+        git tag
+
     - name: Install GitVersion
       uses: gittools/actions/gitversion/setup@v4.7.0
       with:
@@ -17,6 +33,9 @@ runs:
     - name: Determine Version
       id: gitversion
       uses: gittools/actions/gitversion/execute@v4.7.0
+      with:
+        overrideConfig: |
+          next-version=1.0.0
 
     - name: Setup .NET
       uses: actions/setup-dotnet@v5

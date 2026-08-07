@@ -403,6 +403,15 @@
                 Background="{ui:ThemeResource ControlStrokeColorDefaultBrush}" />
 
             <ui:Button
+                AutomationProperties.Name="Help"
+                Command="{Binding OpenHelpCommand}"
+                Style="{StaticResource CommandBarButtonStyle}"
+                ToolTip="Open Documentation (F1)">
+                <ui:Button.Icon>
+                    <ui:SymbolIcon Symbol="BookOpen16" />
+                </ui:Button.Icon>
+            </ui:Button>
+            <ui:Button
                 AutomationProperties.Name="About"
                 Command="{Binding ShowAboutCommand}"
                 Style="{StaticResource CommandBarButtonStyle}"

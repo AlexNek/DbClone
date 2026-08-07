@@ -1,3 +1,5 @@
+using System.Diagnostics;
+
 using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
 
@@ -158,6 +160,23 @@ public sealed partial class ToolbarViewModel : ObservableObject
                              Owner = System.Windows.Application.Current.MainWindow
                          };
         window.ShowDialog();
+    }
+
+    [RelayCommand]
+    private void OpenHelp()
+    {
+        try
+        {
+            Process.Start(new ProcessStartInfo(AppInfo.DocumentationUrl) { UseShellExecute = true });
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Failed to open documentation URL");
+            ActiveState.ShowBanner(
+                "Could not open documentation",
+                ex.Message,
+                InfoBarSeverity.Error);
+        }
     }
 
     [RelayCommand]
