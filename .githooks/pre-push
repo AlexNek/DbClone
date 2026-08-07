@@ -1,0 +1,25 @@
+#!/bin/sh
+#
+# Pre-push hook: reject pushing tags that contain uppercase letters.
+# Install with: git config core.hooksPath .githooks
+#
+
+remote="$1"
+
+while read local_ref local_oid remote_ref remote_oid
+do
+  # Check if this is a tag push
+  case "$local_ref" in
+    refs/tags/*)
+      tag_name="${local_ref#refs/tags/}"
+      # Check for uppercase characters
+      if echo "$tag_name" | grep -q '[A-Z]'; then
+        echo >&2 "ERROR: Tag '$tag_name' contains uppercase letters."
+        echo >&2 "       Use lowercase tags only (e.g., v1.0.0 instead of V1.0.0)."
+        exit 1
+      fi
+      ;;
+  esac
+done
+
+exit 0
