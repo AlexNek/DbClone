@@ -25,10 +25,15 @@ branches:
     regex: ^releases?[/-]
     tag: 'rc'
   unknown:
-    regex: ^(?!master$|main$|dev(elop)?(ment)?$|features?[/-]|releases?[/-]).*
+    regex: ^(?!master$|main$|dev(elop)?(ment)?$|features?[/-]|releases?[/-]|pull[/-]).*
     source-branches: ['master', 'main']
     tag: 'beta'
     increment: None
     is-release-branch: false
+  pull-request:
+    regex: ^(pull|pull\-requests)[/-]
+    source-branches: ['master', 'main']
+    tag: 'pull'
+    increment: None
 ignore:
   sha: []

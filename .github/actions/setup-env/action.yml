@@ -33,6 +33,9 @@ runs:
     - name: Determine Version
       id: gitversion
       uses: gittools/actions/gitversion/execute@v4.7.0
+      with:
+        overrideConfig: |
+          next-version=1.0.0
 
     - name: Setup .NET
       uses: actions/setup-dotnet@v5
