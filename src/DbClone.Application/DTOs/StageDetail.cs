@@ -39,6 +39,10 @@ public sealed record StageDetail(
     public static StageDetail SkippedWarning(string objectName, string? reason = null) =>
         new(ELogLevel.Warning, EStageMessageKind.Skipped, objectName, ReasonProps(reason));
 
+    /// <summary>Object was skipped due to a prior error (treated as error for reporting).</summary>
+    public static StageDetail SkippedError(string objectName, string? reason = null) =>
+        new(ELogLevel.Error, EStageMessageKind.Skipped, objectName, ReasonProps(reason));
+
     /// <summary>Object creation deferred to a later stage.</summary>
     public static StageDetail Deferred(string objectName, string? reason = null) =>
         new(ELogLevel.Warning, EStageMessageKind.Deferred, objectName, ReasonProps(reason));
@@ -107,6 +111,18 @@ public sealed record StageDetail(
                 [PropKeys.Total] = total,
                 [PropKeys.Matched] = succeeded,
                 [PropKeys.Failed] = failed
+            });
+
+    /// <summary>Aggregate summary with total, succeeded, failed, and skipped counts.</summary>
+    public static StageDetail Summary(int total, int succeeded, int failed, int skipped) =>
+        new(failed > 0 || skipped > 0 ? ELogLevel.Warning : ELogLevel.Info,
+            EStageMessageKind.Summary,
+            Properties: new Dictionary<string, object>
+            {
+                [PropKeys.Total] = total,
+                [PropKeys.Matched] = succeeded,
+                [PropKeys.Failed] = failed,
+                [PropKeys.Skipped] = skipped
             });
 
     /// <summary>Object count for a database object type (used by ObjectsPanel).</summary>

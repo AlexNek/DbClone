@@ -7,7 +7,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+
+## [1.0.3] - 2026-08-08
+
 ### Fixed
+- Indexes skipped due to failed parent tables are now explicitly reported as "SKIPPED" in the stage output instead of being silently omitted or mislabeled as "FAIL"
+- SyncSequencesStage now documents skipped owned sequences within its own stage output instead of only showing them as orphaned FAIL lines at the end of the log
+- Index stage ObjectsProcessed count now includes skipped indexes so the log line matches the header bar total
 - Documentation corrections to match the shipped app: installer switches and install location, log file paths, options panel contents, backup naming pattern and Backup Name field, connection groups, import/export formats, report export buttons
 
 

@@ -46,6 +46,9 @@ internal static class StageDetailRenderer
             EStageMessageKind.Failed => error.ObjectName is not null
                 ? $"{error.ObjectName}{(reason is not null ? $": {reason}" : "")}"
                 : reason ?? "Stage failed",
+            EStageMessageKind.Skipped => error.ObjectName is not null
+                ? $"{error.ObjectName}{(reason is not null ? $": {reason}" : "")}"
+                : reason ?? "Skipped",
             EStageMessageKind.Exception => reason ?? "Unexpected error",
             EStageMessageKind.ConnectionFailed => error.Properties is not null &&
                 error.Properties.TryGetValue(PropKeys.Side, out var s)
@@ -88,10 +91,16 @@ internal static class StageDetailRenderer
     {
         var matched = d.Get<int>(PropKeys.Matched);
         var failed = d.Get<int>(PropKeys.Failed);
+        var skipped = d.Has(PropKeys.Skipped) ? d.Get<int>(PropKeys.Skipped) : 0;
 
         if (d.Has(PropKeys.Total))
         {
             var total = d.Get<int>(PropKeys.Total);
+
+            if (skipped > 0 && failed > 0)
+                return $"{total} total: {matched} succeeded, {failed} failed, {skipped} skipped";
+            if (skipped > 0)
+                return $"{total} total: {matched} succeeded, {skipped} skipped";
             return failed > 0
                 ? $"Retried {total}: {matched} succeeded, {failed} failed"
                 : $"All {matched} succeeded";

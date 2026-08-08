@@ -55,6 +55,8 @@ public sealed class SyncSequencesStage : ICopyStage
         var destExec = new PgSqlExecutor(destConn, _loggerFactory.CreateLogger<PgSqlExecutor>());
 
         var synced = 0;
+        var skipped = 0;
+        var details = new List<StageDetail>();
         foreach (var seq in model.Sequences)
         {
             var sourceSeqName = $"{seq.SchemaName}.{seq.Name}";
@@ -84,15 +86,18 @@ public sealed class SyncSequencesStage : ICopyStage
 
                     if (resolved is null)
                     {
+                        skipped++;
+                        var reason =
+                            $"Owning column {seq.OwnerTable}.{seq.OwnerColumn} has no sequence on destination";
+                        details.Add(StageDetail.SkippedWarning(sourceSeqName, reason));
                         context.Warnings.Add(
                             new CopyWarning(
                                 Name,
-                                EStageMessageKind.Failed,
+                                EStageMessageKind.Skipped,
                                 sourceSeqName,
                                 new Dictionary<string, object>
                                 {
-                                    [PropKeys.Reason] =
-                                        $"Owning column {seq.OwnerTable}.{seq.OwnerColumn} has no sequence on destination"
+                                    [PropKeys.Reason] = reason
                                 }));
                         continue;
                     }
@@ -114,22 +119,30 @@ public sealed class SyncSequencesStage : ICopyStage
             }
             catch (Exception ex)
             {
+                skipped++;
+                var userMsg = PgExceptionHelper.GetUserMessage(ex);
+                details.Add(StageDetail.FailedWarning(sourceSeqName, userMsg));
                 context.Warnings.Add(
                     new CopyWarning(
                         Name,
                         EStageMessageKind.Failed,
                         sourceSeqName,
-                        new Dictionary<string, object> { [PropKeys.Reason] = PgExceptionHelper.GetUserMessage(ex) }));
+                        new Dictionary<string, object> { [PropKeys.Reason] = userMsg }));
             }
         }
 
         context.Statistics = context.Statistics with { SequencesSynced = synced };
+
+        details.Insert(0, StageDetail.Statistic("Sequences synced", synced));
+        if (skipped > 0)
+            details.Insert(1, StageDetail.Statistic("Sequences skipped", skipped));
+
         return new StageResult(
             Name,
             true,
             TimeSpan.Zero,
-            synced,
-                [StageDetail.Statistic("Sequences synced", synced)]);
+            synced + skipped,
+            details);
     }
 
     /// <summary>

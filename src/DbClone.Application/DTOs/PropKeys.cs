@@ -45,6 +45,9 @@ public static class PropKeys
     /// <summary>Total count (int).</summary>
     public const string Total = "total";
 
+    /// <summary>Skipped count (int).</summary>
+    public const string Skipped = "skipped";
+
     /// <summary>Detail suffix (validation context, e.g. " (100 rows)").</summary>
     public const string Detail = "detail";
 
