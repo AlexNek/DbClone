@@ -56,6 +56,7 @@ public sealed class SyncSequencesStage : ICopyStage
 
         var synced = 0;
         var skipped = 0;
+        var failed = 0;
         var details = new List<StageDetail>();
         foreach (var seq in model.Sequences)
         {
@@ -119,7 +120,7 @@ public sealed class SyncSequencesStage : ICopyStage
             }
             catch (Exception ex)
             {
-                skipped++;
+                failed++;
                 var userMsg = PgExceptionHelper.GetUserMessage(ex);
                 details.Add(StageDetail.FailedWarning(sourceSeqName, userMsg));
                 context.Warnings.Add(
@@ -136,12 +137,14 @@ public sealed class SyncSequencesStage : ICopyStage
         details.Insert(0, StageDetail.Statistic("Sequences synced", synced));
         if (skipped > 0)
             details.Insert(1, StageDetail.Statistic("Sequences skipped", skipped));
+        if (failed > 0)
+            details.Insert(skipped > 0 ? 2 : 1, StageDetail.Statistic("Sequences failed", failed));
 
         return new StageResult(
             Name,
             true,
             TimeSpan.Zero,
-            synced + skipped,
+            synced + skipped + failed,
             details);
     }
 

@@ -91,16 +91,25 @@ internal static class StageDetailRenderer
     {
         var matched = d.Get<int>(PropKeys.Matched);
         var failed = d.Get<int>(PropKeys.Failed);
-        var skipped = d.Has(PropKeys.Skipped) ? d.Get<int>(PropKeys.Skipped) : 0;
 
         if (d.Has(PropKeys.Total))
         {
             var total = d.Get<int>(PropKeys.Total);
 
-            if (skipped > 0 && failed > 0)
-                return $"{total} total: {matched} succeeded, {failed} failed, {skipped} skipped";
-            if (skipped > 0)
-                return $"{total} total: {matched} succeeded, {skipped} skipped";
+            // Four-count summary (from Summary(total, succeeded, failed, skipped))
+            if (d.Has(PropKeys.Skipped))
+            {
+                var skipped = d.Get<int>(PropKeys.Skipped);
+                if (skipped > 0 && failed > 0)
+                    return $"{total} total: {matched} succeeded, {failed} failed, {skipped} skipped";
+                if (skipped > 0)
+                    return $"{total} total: {matched} succeeded, {skipped} skipped";
+                if (failed > 0)
+                    return $"{total} total: {matched} succeeded, {failed} failed";
+                return $"All {matched} succeeded";
+            }
+
+            // Three-count retry summary (from Summary(total, succeeded, failed))
             return failed > 0
                 ? $"Retried {total}: {matched} succeeded, {failed} failed"
                 : $"All {matched} succeeded";
