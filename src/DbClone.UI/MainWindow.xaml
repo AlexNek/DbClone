@@ -72,25 +72,8 @@
                 Title="{Binding BannerTitle}"
                 Message="{Binding BannerMessage}" />
 
-            <!--  Update available banner (non-blocking).
-                  Note: WPF-UI 4.3's InfoBar template does NOT render the Content
-                  property, so the Update button is overlaid on top instead.  -->
-            <Grid Margin="8,4,8,0">
-                <ui:InfoBar
-                    IsClosable="True"
-                    IsOpen="{Binding IsUpdateAvailable}"
-                    Severity="Success"
-                    Title="Update available"
-                    Message="{Binding UpdateMessage}" />
-                <ui:Button
-                    Margin="0,0,52,0"
-                    HorizontalAlignment="Right"
-                    VerticalAlignment="Center"
-                    Appearance="Primary"
-                    Command="{Binding InstallUpdateCommand}"
-                    Content="Update"
-                    Visibility="{Binding IsUpdateAvailable, Converter={StaticResource BoolToVis}}" />
-            </Grid>
+            <!--  Update available banner (self-contained component)  -->
+            <views:UpdateInfoBarView DataContext="{Binding Update}" />
         </StackPanel>
 
         <!--  ===== MAIN CONTENT =====  -->
