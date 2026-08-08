@@ -5,7 +5,8 @@ DbClone includes a standalone comparison feature that lets you diff two database
 ## Opening the Comparison
 
 1. Select source and destination connections on the main screen
-2. Click **Compare** in the toolbar
+2. Switch the toolbar to **Compare** mode
+3. Click the run button (▶) — or press ++ctrl+shift+c++
 
 ![Compare Button](images/compare-button.png){ loading=lazy }
 
@@ -71,14 +72,12 @@ Same as validation modes:
 
 ## Export Report
 
-After comparison, export results as:
+After comparison, click **Report** in the toolbar to open the comparison report window. From its toolbar you can export results as:
 
 - **HTML** — formatted report for sharing
 - **Markdown** — for documentation or version control
 - **JSON** — machine-readable format
-- **Plain Text** — simple text summary
-
-Click **Export** in the comparison results panel.
+- **Copy to Clipboard** — plain text summary
 
 ## Use Cases
 

@@ -4,15 +4,15 @@ This guide walks you through cloning a database in under 5 minutes.
 
 ## Step 1: Add Source Connection
 
-1. Click **Manage Connections** in the toolbar
-2. Click **+ New Connection**
-3. Paste your connection URI or fill in the fields:
+1. Click **Connections** in the toolbar
+2. Click **New**
+3. Fill in the fields (or import a connection string via **Import from Clipboard**):
     - Host: `your-server.example.com`
     - Port: `5432`
     - Database: `my_app_db`
     - Username: `postgres`
     - Password: `••••••••`
-4. Click **Test** to verify the connection
+4. Click **Test Connection** to verify the connection
 5. Click **Save**
 
 ![Add Connection](../images/add-connection.png){ loading=lazy }
@@ -33,7 +33,7 @@ Back on the main screen, select your source and destination from the dropdowns.
 ## Step 4: Start the Copy
 
 1. Leave the default settings (Full mode, all objects selected)
-2. Click **Start Copy**
+2. Click the **Start Copy** button (▶) — or press ++ctrl+s++
 3. If the destination has existing data, DbClone will ask for confirmation before cleaning it
 
 ![Copy in Progress](../images/copy-progress.png){ loading=lazy }

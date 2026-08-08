@@ -23,7 +23,7 @@ For each table in the source:
 |-------------|-----------|--------|
 | 1000 | 1000 | ✅ Skip — already copied |
 | 1000 | 500 | 🔄 Truncate + re-copy |
-| 1000 | 0 | 🔄 Copy (table was empty) |
+| 1000 | 0 | 🔄 Truncate + re-copy (destination table exists but is empty) |
 
 ## Example Scenario
 

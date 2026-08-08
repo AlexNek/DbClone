@@ -7,6 +7,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+- Documentation corrections to match the shipped app: installer switches and install location, log file paths, options panel contents, backup naming pattern and Backup Name field, connection groups, import/export formats, report export buttons
+
 
 ## [1.0.2] - 2026-08-08
 

@@ -32,29 +32,27 @@ A backup contains every connection (host, port, database, username, password, SS
 
 ## Export a Single Connection
 
-Export a connection to share with team members or transfer to another machine.
+Export a connection string to share with team members or use in another tool.
 
-1. Right-click a connection → **Export**
-2. Choose output format:
-    - **URI** — standard `postgres://` format
-    - **Key-Value** — `Host=...;Port=...` format
-    - **JSON** — structured format with all fields
-3. Choose destination:
-    - **Clipboard** — copies to clipboard
-    - **File** — saves to a `.json` or `.txt` file
+1. Select a connection and click **Export**
+2. Choose a format — Npgsql/.NET, PostgreSQL URI, libpq/psql, JDBC, SQLAlchemy (Python), Prisma, Node.js (pg), Supabase URI, Supabase (env), or Environment Variable
+3. Optionally tick **Set as default for clipboard** — the quick **Export to Clipboard** action (connection list menu) uses this format
+4. Choose the output:
+    - **Copy to Clipboard**
+    - **Save to File** (with **Browse...** to pick a location)
+5. Click **Export** — a live preview shows exactly what will be exported
 
 !!! warning "Passwords in exports"
-    Exported connections include the password in plain text. Handle exported files securely.
+    Exported connection strings include the password in plain text. Handle exported files securely.
 
 ## Import a Single Connection
 
-Import connections from a file or clipboard.
+Import a connection from a pasted connection string.
 
 1. Click **Import** in the Connection Manager
-2. Paste or browse to your connection data
-3. DbClone auto-detects the format (URI, key-value, or JSON)
-4. Choose whether to create a new connection or overwrite an existing one
-5. Click **Import**
+2. Paste your connection string — the format is detected automatically (or click **Detect Format**)
+3. Review the parsed values preview (host, port, database, user, SSL mode)
+4. Click **Import** — the connection is added as a new entry
 
 ![Import Connection](../images/import-connection.png){ loading=lazy }
 
@@ -62,17 +60,26 @@ Import connections from a file or clipboard.
 
 | Format | Example |
 |--------|---------|
-| URI | `postgres://user:pass@host:5432/db` |
-| Key-Value | `Host=host;Port=5432;Database=db;Username=user;Password=pass` |
-| JSON | `{"host": "host", "port": 5432, ...}` |
+| PostgreSQL URI | `postgres://user:pass@host:5432/db` |
+| Npgsql / .NET key-value | `Host=host;Port=5432;Database=db;Username=user;Password=pass` |
+| libpq / psql | `host=host port=5432 dbname=db user=user password=pass` |
+| JDBC | `jdbc:postgresql://host:5432/db?user=user&password=pass` |
+| Node.js (pg) | `pg://user:pass@host:5432/db` |
+| Supabase URI / Supabase (env) | Supabase connection strings and environment snippets |
+| Environment Variable | `DATABASE_URL=postgres://user:pass@host:5432/db` |
+
+!!! note "Export-only formats"
+    SQLAlchemy (Python) and Prisma formats are available when **exporting** a connection, but cannot be imported.
 
 ## Bulk Operations
 
-You can import multiple connections at once from a JSON array:
+To move multiple connections at once, use **Export All** / **Import All** (see the backup section above). The backup file is a JSON document containing all connections and groups:
 
 ```json
-[
-  {"name": "Dev", "host": "localhost", "port": 5432, "database": "app_dev", "username": "dev"},
-  {"name": "Staging", "host": "staging.example.com", "port": 5432, "database": "app", "username": "deployer"}
-]
+{
+  "Connections": [ ... ],
+  "Groups": [ ... ],
+  "ExportedAt": "2026-01-15T10:30:00",
+  "Version": 1
+}
 ```

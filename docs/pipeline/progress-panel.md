@@ -18,17 +18,20 @@ The top-level phase indicator shows where DbClone is in the overall workflow:
 | Creating Backup Database | (Backup mode only) Creating the target database |
 | Preparing Destination | Checking destination state |
 | Cleaning Destination | Dropping existing objects |
+| Waiting for Confirmation | Prompt asking whether to clean a non-empty destination |
 | Running Pipeline | Executing copy stages |
 | Complete | All done, successfully |
 | Failed | Stopped due to errors |
 | Cancelled | User cancelled the operation |
+
+Once the pipeline is running, the phase label reflects the current stage — e.g. **Creating Schema**, **Copying Data**, **Creating Indexes**, **Creating Objects**, or **Validating**.
 
 ### 2. Stage Progress
 
 Shows the current pipeline stage and overall percentage:
 
 ```
-Stage: CopyData (12/20)  ████████████░░░░░░  60%
+Stage: Copy Data (12/20)  ████████████░░░░░░  60%
 ```
 
 ### 3. Table Progress (during CopyData)
@@ -42,7 +45,7 @@ When copying data, you see per-table details:
 
 ### 4. Objects Panel
 
-The right sidebar shows object categories with status indicators:
+A horizontal strip of category chips along the top of the content area (right of the mode info bar) shows object categories with status indicators:
 
 - ⏳ Pending
 - 🔄 In progress

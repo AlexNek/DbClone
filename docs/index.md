@@ -34,5 +34,5 @@ Standard tools (`pg_dump`, `pg_restore`, DBeaver, pgAdmin) work for simple Postg
 ## System Requirements
 
 - Windows 10 or 11 (x64)
-- Source and destination must be PostgreSQL (any version ≥ 9.6)
+- Source and destination must be PostgreSQL (tested against PostgreSQL 14+ as used by managed platforms; older versions may work but are not verified)
 - No .NET runtime needed — ships self-contained

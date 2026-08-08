@@ -10,14 +10,12 @@ Toggle which object types to include in the copy:
 |--------|---------|-------------|
 | **Copy Data** | ✅ On | Copy table rows (disable for schema-only clone) |
 | **Copy Indexes** | ✅ On | Create secondary indexes. Primary key indexes are always created with the table structure and cannot be skipped |
-| **Copy Constraints** | ✅ On | Create foreign keys and check constraints |
+| **Copy Views** | ✅ On | Create views |
 | **Copy Functions** | ✅ On | Create functions and procedures |
 | **Copy Triggers** | ✅ On | Create triggers |
-| **Copy Views** | ✅ On | Create views |
-| **Copy Materialized Views** | ✅ On | Create materialized views |
-| **Copy Sequences** | ✅ On | Create sequences |
-| **Copy RLS Policies** | ✅ On | Create row-level security policies |
-| **Copy Comments** | ✅ On | Copy object comments |
+
+!!! note "Always copied"
+    Constraints (foreign keys / check constraints), sequences, materialized views, RLS policies, and object comments are always copied — the current UI has no toggles for them.
 
 ## Schema Filtering
 
@@ -69,15 +67,15 @@ Controls how DbClone validates the copy after data transfer:
 | **Checksum** | Compare MD5 hash of table content (thorough) |
 | **Full** | Row count + checksum |
 
-## Advanced Options
+## Advanced Behavior
 
-These are available in the settings or as future enhancements:
+These values are built into DbClone and are not user-configurable (they may become options in a future release):
 
-| Option | Description |
+| Option | Behavior |
 |--------|-------------|
-| Batch size | Rows per COPY batch (default: streaming) |
-| Command timeout | SQL command timeout in minutes (default: 5) |
-| Connection keepalive | Heartbeat interval to prevent proxy timeouts |
+| Batch size | 5000 rows per batch — used for progress reporting and for the INSERT fallback when binary COPY fails |
+| Command timeout | Built-in, per-operation values: 30 seconds for general SQL, 5 minutes for long-running DDL and data-transfer commands, 10 seconds for connection probes |
+| Connection keepalive | A heartbeat query (`SELECT 1`) is sent between pipeline stages to prevent proxy idle timeouts |
 
 ## Settings Persistence
 

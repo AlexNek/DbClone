@@ -8,7 +8,7 @@ Download the latest installer from [GitHub Releases](https://github.com/AlexNek/
 
 ## Install
 
-Run the installer and follow the prompts. No admin rights required — installs to your user profile by default.
+Run the installer and follow the prompts. Admin rights are required — DbClone installs for all users to `C:\Program Files\DbClone`.
 
 !!! warning "Windows SmartScreen Warning"
     On first run you may see a **"Windows protected your PC"** dialog from Microsoft Defender SmartScreen. This happens because the installer is not code-signed with a purchased certificate — it does **not** mean the software is unsafe.
@@ -27,10 +27,17 @@ Run the installer and follow the prompts. No admin rights required — installs 
 
 ## Silent Install
 
-For deployment scripts or automation:
+The installer is a WiX Burn bootstrapper. For deployment scripts or automation:
 
 ```batch
-DbClone-Setup-x.y.z.exe /VERYSILENT /SUPPRESSMSGBOXES /NORESTART
+DbClone-Setup-x.y.z.exe /quiet      :: fully silent, no UI
+DbClone-Setup-x.y.z.exe /passive    :: progress UI only, no interaction
+```
+
+To install the MSI directly without the wizard:
+
+```batch
+msiexec /i DbClone-x.y.z.msi /qn
 ```
 
 ## Auto-Update
@@ -39,7 +46,7 @@ DbClone checks for updates automatically on startup (after a 3-second delay). Wh
 
 Updates are applied in-place — no uninstall needed.
 
-You can also check manually via **Help → About → Check for Updates**.
+You can also check manually: click the **About** button (ⓘ icon) in the toolbar, then click **Check for Updates** in the About dialog.
 
 ## Uninstall
 

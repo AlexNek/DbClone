@@ -1,6 +1,6 @@
 # Connection Formats
 
-DbClone supports multiple connection string formats. You can paste any of these into the connection manager.
+DbClone supports multiple connection string formats. You can import any of these through the Connection Manager (**Import from Clipboard** or the **Import** button).
 
 ## URI Format
 

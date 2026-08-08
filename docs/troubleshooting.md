@@ -187,13 +187,15 @@ If `false`, apply Solution B to `template1` as well.
 
 ## Log Files
 
-DbClone writes detailed logs to a `logs` folder next to the application executable:
+DbClone writes detailed logs to a `logs` folder in your roaming profile:
 
 ```
-{install_directory}\logs\
+%APPDATA%\DbClone\logs\
 ```
 
-For example: `C:\Users\{you}\AppData\Local\Programs\DbClone\logs\`
+Typical path: `C:\Users\{you}\AppData\Roaming\DbClone\logs\`
+
+(When running a Debug build from the source tree, logs are written next to the executable instead.)
 
 Log files are rotated daily. Each contains:
 
@@ -204,10 +206,10 @@ Log files are rotated daily. Each contains:
 
 ### Crash Log
 
-If DbClone crashes on startup, a `crash.log` file is written to the installation directory:
+If DbClone crashes on startup, a `crash.log` file is written to your local profile:
 
 ```
-C:\Users\{you}\AppData\Local\Programs\DbClone\crash.log
+C:\Users\{you}\AppData\Local\DbClone\crash.log
 ```
 
 ---

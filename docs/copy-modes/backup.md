@@ -10,7 +10,7 @@ Backup mode creates a timestamped copy of your database into a new database on t
 
 ## What Happens
 
-1. **Creates a new database** — auto-named with timestamp (e.g., `my_app_backup_20260723_1430`)
+1. **Creates a new database** — auto-named with timestamp (e.g., `my_app_backup_20260723_143015`)
 2. **Runs a Full copy** into the newly created database
 3. **Leaves the original destination untouched**
 
@@ -19,10 +19,12 @@ Backup mode creates a timestamped copy of your database into a new database on t
 The backup database name follows the pattern:
 
 ```
-{original_name}_backup_{YYYYMMDD}_{HHmm}
+{prefix}_backup_{YYYYMMDD}_{HHMMSS}
 ```
 
-You can customize the backup name in the options panel before starting.
+The prefix is the source connection's **Backup Name** field; if it is empty, the source database name is used.
+
+You customize the prefix per connection: open the Connection Manager (toolbar → **Connections**) and fill in the **Backup Name** field (e.g., `crm` produces `crm_backup_20260723_143015`).
 
 ![Backup Name](../images/backup-name.png){ loading=lazy }
 
