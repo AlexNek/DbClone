@@ -60,36 +60,18 @@ public sealed class PgConnectionStringService : IConnectionStringService
     private static bool TryParseUri(string value, out ConnectionStringFields fields)
     {
         fields = default!;
-        try
-        {
-            var uri = new Uri(value);
-            var host = uri.Host;
-            var port = uri.Port > 0 ? uri.Port : 5432;
 
-            var database = string.Empty;
-            if (!string.IsNullOrEmpty(uri.AbsolutePath) && uri.AbsolutePath != "/")
-            {
-                database = uri.AbsolutePath.TrimStart('/');
-            }
-
-            var username = "postgres";
-            var password = string.Empty;
-            if (!string.IsNullOrEmpty(uri.UserInfo))
-            {
-                var parts = uri.UserInfo.Split(':', 2);
-                username = Uri.UnescapeDataString(parts[0]);
-                if (parts.Length > 1)
-                {
-                    password = Uri.UnescapeDataString(parts[1]);
-                }
-            }
-
-            fields = new ConnectionStringFields(host, port, database, username, password, "Prefer");
-            return true;
-        }
-        catch
-        {
+        var parsed = Formats.PostgresUriParser.TryParse(value);
+        if (parsed is null)
             return false;
-        }
+
+        fields = new ConnectionStringFields(
+            parsed.Host,
+            parsed.Port,
+            parsed.Database,
+            parsed.Username ?? "postgres",
+            parsed.Password ?? string.Empty,
+            "Prefer");
+        return true;
     }
 }

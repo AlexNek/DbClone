@@ -1,5 +1,3 @@
-using System.Web;
-
 using DbClone.Application.Enums;
 using DbClone.Application.Interfaces;
 using DbClone.Application.Models;
@@ -44,55 +42,32 @@ public sealed class PostgreSqlUriFormat : IConnectionFormat
 
     public DatabaseConnection Parse(string text)
     {
-        var uri = new Uri(text);
-
-        var host = uri.Host;
-        var port = uri.Port > 0 ? uri.Port : 5432;
-
-        var database = string.Empty;
-        if (!string.IsNullOrEmpty(uri.AbsolutePath) && uri.AbsolutePath != "/")
-            database = uri.AbsolutePath.TrimStart('/');
-
-        var username = "postgres";
-        string? password = null;
-        if (!string.IsNullOrEmpty(uri.UserInfo))
-        {
-            var parts = uri.UserInfo.Split(':', 2);
-            username = Uri.UnescapeDataString(parts[0]);
-            if (parts.Length > 1)
-                password = Uri.UnescapeDataString(parts[1]);
-        }
+        var parsed = PostgresUriParser.TryParse(text)
+                     ?? throw new FormatException($"Cannot parse PostgreSQL URI: {text}");
 
         var sslMode = ESslMode.Prefer;
         var options = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
 
-        if (!string.IsNullOrEmpty(uri.Query))
+        foreach (var (key, value) in parsed.QueryParams)
         {
-            var query = HttpUtility.ParseQueryString(uri.Query);
-            foreach (string? key in query)
+            if (key.Equals("sslmode", StringComparison.OrdinalIgnoreCase))
             {
-                if (key is null) continue;
-                var value = query[key] ?? string.Empty;
-
-                if (key.Equals("sslmode", StringComparison.OrdinalIgnoreCase))
-                {
-                    sslMode = ParseSslMode(value);
-                }
-                else
-                {
-                    options[key] = value;
-                }
+                sslMode = ParseSslMode(value);
+            }
+            else
+            {
+                options[key] = value;
             }
         }
 
         var connection = new DatabaseConnection
                              {
                                  Provider = EDatabaseProvider.PostgreSql,
-                                 Host = host,
-                                 Port = port,
-                                 Database = database,
-                                 Username = username,
-                                 Password = password,
+                                 Host = parsed.Host,
+                                 Port = parsed.Port,
+                                 Database = parsed.Database,
+                                 Username = parsed.Username ?? "postgres",
+                                 Password = parsed.Password,
                                  SslMode = sslMode
                              };
 

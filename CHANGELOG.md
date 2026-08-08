@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.0.4] - 2026-08-09
+
+### Fixed
+- Connection import now handles unencoded special characters (`@`, `#`, `&`, `?`, `:`, `/`, spaces) in passwords when pasting a URI — no manual percent-encoding required
+- Connection import now resolves the correct host when a URI contains `@` in both the password and a query-parameter value (scored candidate parsing instead of rightmost-`@` only)
+
 ## [1.0.3] - 2026-08-08
 
 ### Added
