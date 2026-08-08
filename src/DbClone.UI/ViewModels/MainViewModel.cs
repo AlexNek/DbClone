@@ -33,8 +33,6 @@ public sealed partial class MainViewModel : ObservableObject
 
     private readonly ISettingsService _settingsService;
 
-    private readonly IUpdateService _updateService;
-
     /// <summary>The two workflow components behind their common contract.</summary>
     private readonly IWorkflowViewModel[] _workflows;
 
@@ -45,12 +43,7 @@ public sealed partial class MainViewModel : ObservableObject
     [ObservableProperty]
     private string _memoryUsage = "";
 
-    // ── Update banner state ──────────────────────────────────────────────────────
-    [ObservableProperty]
-    private bool _isUpdateAvailable;
 
-    [ObservableProperty]
-    private string _updateMessage = "";
 
     // ── Child ViewModels (composite pattern) ────────────────────────────────────
     /// <summary>
@@ -91,6 +84,8 @@ public sealed partial class MainViewModel : ObservableObject
 
     public ToolbarViewModel Toolbar { get; }
 
+    public UpdateInfoBarViewModel Update { get; }
+
     public MainViewModel(
         ICopyEngine copyEngine,
         IDialogService dialogService,
@@ -110,7 +105,6 @@ public sealed partial class MainViewModel : ObservableObject
     {
         _connectionStore = connectionStore;
         _settingsService = settingsService;
-        _updateService = updateService;
 
         // Load settings
         Settings = settingsService.Load();
@@ -254,8 +248,8 @@ public sealed partial class MainViewModel : ObservableObject
         source.PropertyChanged += OnConnectionPropertyChanged;
         destination.PropertyChanged += OnConnectionPropertyChanged;
 
-        // Update banner — surfaced as a non-blocking inline banner, not a modal dialog
-        updateService.UpdateCheckCompleted += OnUpdateCheckCompleted;
+        // Update banner — self-contained component with its own ViewModel
+        Update = new UpdateInfoBarViewModel(updateService);
 
         // Auto-switch toolbar mode when an operation starts (e.g. Ctrl+Shift+C from Copy mode)
         Compare.PropertyChanged += (_, e) =>
@@ -286,24 +280,7 @@ public sealed partial class MainViewModel : ObservableObject
                 _ => false
             };
 
-    private void OnUpdateCheckCompleted(object? sender, UpdateCheckCompletedEventArgs e)
-    {
-        if (e.Result.IsUpdateAvailable)
-        {
-            IsUpdateAvailable = true;
-            UpdateMessage = e.Result.Version is { } version
-                                ? $"Version {version} is available. Click Update to install."
-                                : "A new version is available. Click Update to install.";
-        }
-        else if (e.ReportErrors)
-        {
-            // Explicit manual check found nothing — clear any stale banner.
-            IsUpdateAvailable = false;
-        }
-    }
 
-    [RelayCommand]
-    private void InstallUpdate() => _updateService.InstallUpdate();
 
     private void OnConnectionPropertyChanged(
         object? sender,

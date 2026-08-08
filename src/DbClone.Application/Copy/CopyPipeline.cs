@@ -109,7 +109,8 @@ public sealed class CopyPipeline : ICopyPipeline
                     {
                         var firstFailure = result.Details.FirstOrDefault(
                             d => d.Level == ELogLevel.Error && d.Kind is EStageMessageKind.Failed
-                                or EStageMessageKind.Exception or EStageMessageKind.StillMismatched);
+                                or EStageMessageKind.Exception or EStageMessageKind.StillMismatched
+                                or EStageMessageKind.Skipped);
 
                         context.Errors.Add(
                             new CopyError(

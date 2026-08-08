@@ -69,6 +69,7 @@ public sealed class CreateIndexesStage : ICopyStage
 
         var totalIndexes = 0;
         var failedIndexes = 0;
+        var skippedIndexes = 0;
         var details = new List<StageDetail>();
 
         foreach (var table in model.Tables)
@@ -77,14 +78,14 @@ public sealed class CreateIndexesStage : ICopyStage
                 PgIdentifierQuoter.QuoteSchemaQualified(table.SchemaName, table.Name);
 
             // Tables that failed to create → their indexes cannot be created either.
-            // Report explicitly so the error count matches what Compare would show.
+            // Report explicitly as skipped so the user sees why the count differs.
             if (context.SkippedTables.Contains(qualifiedTableName))
             {
                 foreach (var idx in table.Indexes.Where(i => !i.IsPrimary))
                 {
-                    failedIndexes++;
+                    skippedIndexes++;
                     var idxName = $"{table.SchemaName}.{table.Name}.{idx.Name}";
-                    details.Add(StageDetail.Failed(idxName, "parent table was not created"));
+                    details.Add(StageDetail.SkippedError(idxName, "parent table was not created"));
                 }
 
                 continue;
@@ -128,13 +129,15 @@ public sealed class CreateIndexesStage : ICopyStage
                                      context.Statistics.IndexesCreated + totalIndexes
                                  };
 
-        details.Insert(0, StageDetail.Summary(totalIndexes, failedIndexes));
+        var processedTotal = totalIndexes + failedIndexes + skippedIndexes;
+        details.Insert(0, StageDetail.Summary(processedTotal, totalIndexes, failedIndexes, skippedIndexes));
 
+        var success = failedIndexes == 0 && skippedIndexes == 0;
         return new StageResult(
             Name,
-            failedIndexes == 0,
+            success,
             TimeSpan.Zero,
-            totalIndexes,
+            processedTotal,
             details);
     }
 }

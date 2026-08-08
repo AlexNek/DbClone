@@ -1,0 +1,39 @@
+<UserControl
+    x:Class="DbClone.UI.Views.UpdateInfoBarView"
+    xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+    xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+    xmlns:ui="http://schemas.lepo.co/wpfui/2022/xaml">
+
+    <!--  Single self-contained component: InfoBar + action buttons.
+          WPF-UI 4.3's InfoBar template does NOT render the Content property,
+          so the buttons are overlaid on top via Grid layering.  -->
+    <Grid Margin="8,4,8,0">
+        <ui:InfoBar
+            IsClosable="True"
+            IsOpen="{Binding IsOpen, Mode=TwoWay}"
+            Severity="Success"
+            Title="Update available"
+            Message="{Binding Message}" />
+
+        <!--  Action buttons (visible only when the bar is open)  -->
+        <StackPanel
+            Margin="0,0,52,0"
+            HorizontalAlignment="Right"
+            VerticalAlignment="Center"
+            Orientation="Horizontal"
+            Visibility="{Binding IsOpen, Converter={StaticResource BoolToVis}}">
+
+            <ui:Button
+                Margin="0,0,8,0"
+                Appearance="Secondary"
+                Command="{Binding ViewReleaseNotesCommand}"
+                Content="What's new"
+                Visibility="{Binding HasChangelog, Converter={StaticResource BoolToVis}}" />
+
+            <ui:Button
+                Appearance="Primary"
+                Command="{Binding InstallUpdateCommand}"
+                Content="Update" />
+        </StackPanel>
+    </Grid>
+</UserControl>
