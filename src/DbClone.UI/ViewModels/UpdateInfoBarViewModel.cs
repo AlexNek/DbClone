@@ -63,9 +63,10 @@ public sealed partial class UpdateInfoBarViewModel : ObservableObject
                           ? $"Version {version} is available."
                           : "A new version is available.";
         }
-        else if (e.ReportErrors)
+        else if (e.ReportErrors && !e.IsError)
         {
-            // Explicit manual check found nothing — clear any stale banner.
+            // Confirmed successful check found no update — clear any stale banner.
+            // On failure, preserve the existing banner so the user doesn't lose it.
             IsOpen = false;
             ChangelogUrl = null;
         }

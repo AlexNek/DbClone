@@ -23,16 +23,20 @@ public sealed record UpdateCheckResult(
 /// <summary>Event args raised when an update check completes.</summary>
 public sealed class UpdateCheckCompletedEventArgs : EventArgs
 {
-    public UpdateCheckCompletedEventArgs(UpdateCheckResult result, bool reportErrors)
+    public UpdateCheckCompletedEventArgs(UpdateCheckResult result, bool reportErrors, bool isError = false)
     {
         Result = result;
         ReportErrors = reportErrors;
+        IsError = isError;
     }
 
     public UpdateCheckResult Result { get; }
 
     /// <summary>True when the check was triggered by an explicit user action.</summary>
     public bool ReportErrors { get; }
+
+    /// <summary>True when the check failed (network error, parse failure, etc.).</summary>
+    public bool IsError { get; }
 }
 
 /// <summary>
@@ -190,7 +194,7 @@ public sealed class UpdateService : IUpdateService
             LastCheck = new UpdateCheckResult(false, null, null, null);
             UpdateCheckCompleted?.Invoke(
                 this,
-                new UpdateCheckCompletedEventArgs(LastCheck, _reportErrors));
+                new UpdateCheckCompletedEventArgs(LastCheck, _reportErrors, isError: true));
             return;
         }
 
