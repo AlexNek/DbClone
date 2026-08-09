@@ -65,13 +65,19 @@ public sealed class PgConnectionStringService : IConnectionStringService
         if (parsed is null)
             return false;
 
+        // URI values like "verify-ca" need the hyphen removed to match the SslMode enum
+        var sslMode = parsed.QueryParams.TryGetValue("sslmode", out var rawSslMode)
+            && Enum.TryParse<SslMode>(rawSslMode.Replace("-", string.Empty), true, out var parsedSslMode)
+                          ? parsedSslMode
+                          : SslMode.Prefer;
+
         fields = new ConnectionStringFields(
             parsed.Host,
             parsed.Port,
             parsed.Database,
             parsed.Username ?? "postgres",
             parsed.Password ?? string.Empty,
-            "Prefer");
+            sslMode.ToString());
         return true;
     }
 }

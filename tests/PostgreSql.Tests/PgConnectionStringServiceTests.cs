@@ -44,4 +44,50 @@ public class PgConnectionStringServiceTests
         fields.Username.Should().Be("test_user");
         fields.Password.Should().Be("s3cret");
     }
+
+    [Theory]
+    [InlineData("disable", "Disable")]
+    [InlineData("require", "Require")]
+    [InlineData("verify-ca", "VerifyCA")]
+    [InlineData("verify-full", "VerifyFull")]
+    public void TryParse_UriWithSslMode_MapsToSslModeName(string sslValue, string expected)
+    {
+        // Arrange — hyphenated URI values must be normalized to the enum name
+        var input = $"postgresql://user:pass@host.example.com:5432/mydb?sslmode={sslValue}";
+
+        // Act
+        var success = _sut.TryParse(input, out var fields);
+
+        // Assert
+        success.Should().BeTrue();
+        fields.SslMode.Should().Be(expected);
+    }
+
+    [Fact]
+    public void TryParse_UriWithoutSslMode_DefaultsToPrefer()
+    {
+        // Arrange
+        var input = "postgresql://user:pass@host.example.com:5432/mydb";
+
+        // Act
+        var success = _sut.TryParse(input, out var fields);
+
+        // Assert
+        success.Should().BeTrue();
+        fields.SslMode.Should().Be("Prefer");
+    }
+
+    [Fact]
+    public void TryParse_UriWithUnknownSslMode_DefaultsToPrefer()
+    {
+        // Arrange
+        var input = "postgresql://user:pass@host.example.com:5432/mydb?sslmode=bogus";
+
+        // Act
+        var success = _sut.TryParse(input, out var fields);
+
+        // Assert
+        success.Should().BeTrue();
+        fields.SslMode.Should().Be("Prefer");
+    }
 }

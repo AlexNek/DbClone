@@ -114,6 +114,28 @@ public class PostgresUriParserTests
         result!.Port.Should().Be(5432);
     }
 
+    [Theory]
+    [InlineData("postgres://user:pass@host.example.com:0/db")]
+    [InlineData("postgres://user:pass@host.example.com:65536/db")]
+    [InlineData("postgres://user:pass@host.example.com:99999999999999/db")]
+    public void TryParse_InvalidOrOversizedPort_ReturnsNull(string input)
+    {
+        // Must not escape as an exception (overflow on huge numbers),
+        // and out-of-range ports must be rejected
+        var result = PostgresUriParser.TryParse(input);
+
+        result.Should().BeNull();
+    }
+
+    [Fact]
+    public void TryParse_PortAtUpperBound_ParsesCorrectly()
+    {
+        var result = PostgresUriParser.TryParse("postgres://user:pass@host.example.com:65535/db");
+
+        result.Should().NotBeNull();
+        result!.Port.Should().Be(65535);
+    }
+
     [Fact]
     public void TryParse_WithSslModeQuery_ParsesQueryParams()
     {

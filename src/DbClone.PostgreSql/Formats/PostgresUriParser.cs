@@ -1,3 +1,4 @@
+using System.Globalization;
 using System.Text.RegularExpressions;
 
 namespace DbClone.PostgreSql.Formats;
@@ -130,9 +131,20 @@ internal static partial class PostgresUriParser
             host = host[1..^1];
         }
 
-        var port = match.Groups["port"].Success
-                       ? int.Parse(match.Groups["port"].Value)
-                       : DefaultPort;
+        var port = DefaultPort;
+        if (match.Groups["port"].Success)
+        {
+            if (!int.TryParse(
+                    match.Groups["port"].Value,
+                    NumberStyles.None,
+                    CultureInfo.InvariantCulture,
+                    out port)
+                || port < 1
+                || port > 65535)
+            {
+                return null;
+            }
+        }
 
         var database = string.Empty;
         if (match.Groups["rest"].Success)
