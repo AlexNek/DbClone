@@ -12,7 +12,29 @@ postgres://username:password@hostname:5432/database_name?sslmode=require
 
 ### Special Characters in Passwords
 
-Passwords with special characters must be URL-encoded in URI format:
+DbClone handles special characters in passwords automatically — you can paste a URI with an unencoded password and it will be parsed correctly.
+
+The typical workflow: copy the URI template from your provider's dashboard (which usually contains a `[YOUR-PASSWORD]` placeholder), replace the placeholder with your real password, and paste the result. Your password goes in raw — no percent-encoding needed:
+
+```
+postgres://user:p@ss#word@host:5432/mydb
+```
+
+The parser uses a tolerant approach: it scores every possible `@` split (preferring a real-looking host — dotted name, port, database path — over a bare word) and picks the best reading, so the password is identified correctly even when it contains `@`, `#`, `&`, `?`, `:`, `/`, or spaces. Special characters in query-parameter values are tolerated too:
+
+```
+postgres://user:p@ss@host:5432/mydb?application_name=my@app
+```
+
+Pre-encoded URIs (as produced by most cloud dashboards) also work:
+
+```
+postgres://user:p%40ss%23word@host:5432/mydb
+```
+
+Both forms import to the same result — password field shows `p@ss#word`.
+
+Common percent-encoding reference:
 
 | Character | Encoded |
 |-----------|---------|
@@ -21,16 +43,15 @@ Passwords with special characters must be URL-encoded in URI format:
 | `%` | `%25` |
 | `/` | `%2F` |
 | `:` | `%3A` |
+| `&` | `%26` |
+| `?` | `%3F` |
 | space | `%20` |
 
-Example with special password `p@ss#word`:
-
-```
-postgres://user:p%40ss%23word@host:5432/mydb
-```
-
 !!! tip
-    If you fill in the individual fields instead of pasting a URI, DbClone handles encoding automatically.
+    If you fill in the individual fields instead of pasting a URI, DbClone handles encoding automatically on export.
+
+!!! note
+    If both your password and a query-parameter value contain `@` **and** the host has no port, path, or dots, parsing is inherently ambiguous — percent-encode the password (`%40`) to remove any doubt.
 
 ## Key-Value Format
 

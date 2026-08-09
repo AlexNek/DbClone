@@ -130,6 +130,22 @@ public class PostgreSqlUriFormatTests
     }
 
     [Fact]
+    public void Parse_NoUserInfo_DefaultsUsernameToPostgres()
+    {
+        // Arrange — URI without userinfo; the format must apply the "postgres" default
+        var input = "postgresql://host.example.com:5432/mydb";
+
+        // Act
+        var conn = _sut.Parse(input);
+
+        // Assert
+        conn.Username.Should().Be("postgres");
+        conn.Password.Should().BeNull();
+        conn.Host.Should().Be("host.example.com");
+        conn.Database.Should().Be("mydb");
+    }
+
+    [Fact]
     public void Parse_NoPassword_PasswordIsNull()
     {
         // Arrange
@@ -219,6 +235,83 @@ public class PostgreSqlUriFormatTests
 
         // Assert
         conn.Password.Should().Be("p@ss:w0rd");
+    }
+
+    [Fact]
+    public void Parse_UnencodedAtInPassword_ParsesCorrectly()
+    {
+        // Arrange — user pastes URI without encoding the @ in the password
+        var input = "postgres://user:p@ssword@localhost:5432/mydb";
+
+        // Act
+        var conn = _sut.Parse(input);
+
+        // Assert
+        conn.Password.Should().Be("p@ssword");
+        conn.Host.Should().Be("localhost");
+        conn.Port.Should().Be(5432);
+        conn.Database.Should().Be("mydb");
+        conn.Username.Should().Be("user");
+    }
+
+    [Fact]
+    public void Parse_UnencodedHashInPassword_ParsesCorrectly()
+    {
+        // Arrange — # in password is not encoded
+        var input = "postgres://user:p#ssword@localhost:5432/mydb";
+
+        // Act
+        var conn = _sut.Parse(input);
+
+        // Assert
+        conn.Password.Should().Be("p#ssword");
+        conn.Host.Should().Be("localhost");
+    }
+
+    [Fact]
+    public void Parse_UnencodedAtAndHashInPassword_ParsesCorrectly()
+    {
+        // Arrange — both @ and # unencoded in password
+        var input = "postgres://user:p@ss#word@localhost:5432/mydb";
+
+        // Act
+        var conn = _sut.Parse(input);
+
+        // Assert
+        conn.Password.Should().Be("p@ss#word");
+        conn.Host.Should().Be("localhost");
+        conn.Port.Should().Be(5432);
+        conn.Database.Should().Be("mydb");
+    }
+
+    [Fact]
+    public void Parse_ColonInPassword_ParsesCorrectly()
+    {
+        // Arrange — password contains colons: a:b:c
+        var input = "postgres://user:a:b:c@localhost:5432/db";
+
+        // Act
+        var conn = _sut.Parse(input);
+
+        // Assert
+        conn.Password.Should().Be("a:b:c");
+        conn.Username.Should().Be("user");
+        conn.Host.Should().Be("localhost");
+    }
+
+    [Fact]
+    public void Parse_UnencodedPassword_WithSslMode_ParsesCorrectly()
+    {
+        // Arrange — unencoded special chars + query params
+        var input = "postgres://user:p@ss#word@localhost:5432/mydb?sslmode=require";
+
+        // Act
+        var conn = _sut.Parse(input);
+
+        // Assert
+        conn.Password.Should().Be("p@ss#word");
+        conn.Host.Should().Be("localhost");
+        conn.SslMode.Should().Be(DbClone.Application.Enums.ESslMode.Require);
     }
 }
 

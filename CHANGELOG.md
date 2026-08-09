@@ -7,6 +7,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.0.4] - 2026-08-09
+
+### Fixed
+- Connection import now handles unencoded special characters (`@`, `#`, `&`, `?`, `:`, `/`, spaces) in passwords when pasting a URI — no manual percent-encoding required
+- Connection import now resolves the correct host when a URI contains `@` in both the password and a query-parameter value (scored candidate parsing instead of rightmost-`@` only)
+- Connection import now rejects URIs with invalid ports (0, above 65535, oversized numbers) as unparseable instead of failing with an exception
+- Connection string parsing now honors the `sslmode` query parameter in URIs (e.g. `?sslmode=require`) instead of always defaulting to Prefer
+
 ## [1.0.3] - 2026-08-08
 
 ### Added
@@ -49,6 +57,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Auto-update — checks GitHub Releases on startup; non-blocking banner notification
 - Fluent Design UI powered by WPF-UI
 
-[Unreleased]: https://github.com/AlexNek/DbClone/compare/v1.0.0...HEAD
+[Unreleased]: https://github.com/AlexNek/DbClone/compare/v1.0.4...HEAD
+[1.0.4]: https://github.com/AlexNek/DbClone/releases/tag/v1.0.4
+[1.0.3]: https://github.com/AlexNek/DbClone/releases/tag/v1.0.3
+[1.0.2]: https://github.com/AlexNek/DbClone/releases/tag/v1.0.2
 [1.0.1]: https://github.com/AlexNek/DbClone/compare/v1.0.0...v1.0.1
 [1.0.0]: https://github.com/AlexNek/DbClone/releases/tag/v1.0.0
