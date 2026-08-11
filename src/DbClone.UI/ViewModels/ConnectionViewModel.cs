@@ -66,6 +66,12 @@ public sealed partial class ConnectionViewModel : ObservableObject
 
     public ObservableCollection<SavedConnection> SavedConnections { get; } = [];
 
+    /// <summary>
+    /// Table selection panel — set on the source panel only.
+    /// Null on the destination panel; the connection view hides the row.
+    /// </summary>
+    public TableSelectionPanelViewModel? TableSelection { get; set; }
+
     public static string[] SslModeValues { get; } = ["Disable", "Prefer", "Require"];
 
     public string Summary =>

@@ -49,6 +49,8 @@ public sealed partial class CompareViewModel : ObservableObject, IWorkflowViewMo
 
     private readonly SettingsPersistenceManager _settingsPersister;
 
+    private readonly ITableSelectionService _tableSelectionService;
+
     private readonly ViewModelStateManager _stateManager;
 
     private CancellationTokenSource? _compareCts;
@@ -216,6 +218,7 @@ public sealed partial class CompareViewModel : ObservableObject, IWorkflowViewMo
         ReportExportService reportExportService,
         SettingsPersistenceManager settingsPersister,
         ViewModelStateManager stateManager,
+        ITableSelectionService tableSelectionService,
         UserSettings settings,
         OperationContext ctx)
     {
@@ -226,6 +229,7 @@ public sealed partial class CompareViewModel : ObservableObject, IWorkflowViewMo
         _reportExportService = reportExportService;
         _settingsPersister = settingsPersister;
         _stateManager = stateManager;
+        _tableSelectionService = tableSelectionService;
         Settings = settings;
         _ctx = ctx;
         State = new WorkflowState();
@@ -474,7 +478,8 @@ public sealed partial class CompareViewModel : ObservableObject, IWorkflowViewMo
                              !Settings.ComparePlatformSchemas,
                              compareProgress,
                              WaitWhilePaused,
-                             ct);
+                             ct,
+                             _tableSelectionService.OperationSpec);
 
             _allCompareResultItems.Clear();
             _allCompareResultItems.AddRange(result.Items);

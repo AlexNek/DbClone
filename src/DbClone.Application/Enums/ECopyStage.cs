@@ -11,6 +11,8 @@ public enum ECopyStage
 
     ReadMetadata,
 
+    ApplyTableFilter,
+
     AnalyzeDependencies,
 
     Validate,

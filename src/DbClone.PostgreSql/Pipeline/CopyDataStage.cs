@@ -73,6 +73,24 @@ public sealed class CopyDataStage : ICopyStage
             // depend on an unavailable extension). The user is notified via warnings.
             if (context.SkippedTables.Count > 0)
             {
+                var excluded = tablesToCopy
+                    .Where(t => context.SkippedTables.Contains(
+                                    PgIdentifierQuoter.QuoteSchemaQualified(t.SchemaName, t.Name)))
+                    .ToList();
+
+                if (excluded.Count > 0)
+                {
+                    logger.LogWarning(
+                        "CopyData: skipping {Count} table(s) that could not be created on the destination",
+                        excluded.Count);
+
+                    foreach (var t in excluded)
+                    {
+                        var qualifiedName = PgIdentifierQuoter.QuoteSchemaQualified(t.SchemaName, t.Name);
+                        logger.LogWarning("  Skipping data copy for {Table} (table creation failed earlier)", qualifiedName);
+                    }
+                }
+
                 tablesToCopy = tablesToCopy
                     .Where(t => !context.SkippedTables.Contains(
                                     PgIdentifierQuoter.QuoteSchemaQualified(t.SchemaName, t.Name)))
@@ -275,6 +293,13 @@ public sealed class CopyDataStage : ICopyStage
                                   StageDetail.Statistic("Rows", stats.TotalRowsCopied),
                                   StageDetail.Statistic("Bytes", stats.TotalBytesTransferred)
                               };
+
+            // Report tables excluded from data copy so the user sees them in the log
+            if (context.SkippedTables.Count > 0)
+            {
+                details.Add(StageDetail.Statistic(
+                    "Tables skipped (creation failed)", context.SkippedTables.Count));
+            }
 
             if (context.Request.Options.CopyMode != ECopyMode.Full)
             {

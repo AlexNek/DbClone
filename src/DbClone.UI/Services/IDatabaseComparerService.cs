@@ -1,4 +1,5 @@
 using DbClone.Application.Enums;
+using DbClone.Application.TableFilter;
 using DbClone.UI.Models;
 using DbClone.UI.ViewModels;
 
@@ -14,7 +15,8 @@ public interface IDatabaseComparerService
         bool excludePlatformSchemas,
         IProgress<CompareProgressInfo>? progress,
         Func<CancellationToken, Task>? waitWhilePaused,
-        CancellationToken ct);
+        CancellationToken ct,
+        TableSelectionSpec? tableSelection = null);
 }
 
 public sealed record CompareDatabasesResult(

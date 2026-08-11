@@ -88,6 +88,7 @@ public sealed class CreateTablesStage : ICopyStage
                 {
                     skipped++;
                     context.SkippedTables.Add(tableName);
+                    var reason = $"requires unavailable extension '{blockedByExtension}'";
                     logger.LogWarning(
                         ex,
                         "Table {Table} cannot be created: depends on unavailable extension {Extension}",
@@ -98,10 +99,12 @@ public sealed class CreateTablesStage : ICopyStage
                             Name,
                             EStageMessageKind.Skipped,
                             tableName,
-                            new Dictionary<string, object> { [PropKeys.Extension] = blockedByExtension }));
-                    details.Add(
-                        StageDetail.SkippedWarning(
-                            tableName, $"requires unavailable extension '{blockedByExtension}'"));
+                            new Dictionary<string, object>
+                            {
+                                [PropKeys.Extension] = blockedByExtension,
+                                [PropKeys.Reason] = reason
+                            }));
+                    details.Add(StageDetail.SkippedWarning(tableName, reason));
                 }
                 else
                 {
@@ -113,6 +116,12 @@ public sealed class CreateTablesStage : ICopyStage
                         "Failed to create table {Table}: {Error}",
                         tableName,
                         ex.Message);
+                    // Also emit a warning so it appears in the final summary alongside
+                    // extension-related skips — the user needs to know which tables
+                    // were not copied and why.
+                    context.Warnings.Add(
+                        new CopyWarning(Name, EStageMessageKind.Failed, tableName,
+                            new Dictionary<string, object> { [PropKeys.Reason] = userMsg }));
                     context.Errors.Add(
                         new CopyError(Name, EStageMessageKind.Failed, tableName,
                             new Dictionary<string, object> { [PropKeys.Reason] = userMsg }, ex));

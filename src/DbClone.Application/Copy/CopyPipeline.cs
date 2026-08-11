@@ -227,5 +227,6 @@ public sealed class CopyPipeline : ICopyPipeline
     }
 
     private static bool IsCriticalStage(ICopyStage stage) =>
-        stage.Order <= 30 || stage.Name == ECopyStage.CopyData;
+        stage.Order <= 30
+        || stage.Name is ECopyStage.CopyData or ECopyStage.ApplyTableFilter;
 }

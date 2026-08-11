@@ -12,5 +12,8 @@ public enum ESkipReason
     Timeout,
 
     /// <summary>A network error prevented access.</summary>
-    NetworkError
+    NetworkError,
+
+    /// <summary>The object depends on a table excluded by the active table selection.</summary>
+    TableSelection
 }

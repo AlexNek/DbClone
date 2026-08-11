@@ -7,6 +7,28 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+- Manual table selection: choose which tables Copy, Compare, and Backup process for a source database
+- Named table-selection presets stored per source connection + database, with automatic restore of the last-used preset
+- Table selection dialog with schema tree, search, sorting, table size column, and a foreign-key relationship explorer
+- Validation summary before applying a selection (dangling foreign keys, dependent views, orphaned partitions)
+- Compare now honors the active table selection: target tables outside the selection are ignored, and views depending on excluded tables are reported as skipped
+- Copy and Backup honor the active table selection; pre-copy cleanup of a populated target drops only the selected tables and never touches unselected ones
+- When copying with an active table selection into a populated destination, you now choose explicitly: replace only the selected tables, or clear the entire destination so it ends up containing only the selected tables
+
+### Changed
+- Table selection dialog messages and tooltips show bare table names while a single schema is selected — the schema prefix appears only in the "All Schemas" view or for cross-schema relationships
+- Resume/Update copy modes are blocked with an explanation while a non-default table selection is active (they require "All Tables")
+- "Clean Target Database?" dialog now uses explicit action buttons ("Clear All", "Replace Selected", "Cancel") instead of ambiguous Yes/No/Cancel
+
+### Fixed
+- Sequence sync no longer fails for mixed-case names (e.g. serial sequences of `"MixedCase"` tables): sequence and owner-table identifiers are now quoted in `setval`/`pg_get_serial_sequence` calls, while the owner-column is passed unquoted so it matches the catalog literally
+- Serial sequence sync no longer produces false "has no sequence on destination" warnings — the stage now resolves serial sequences by name and establishes the missing `OWNED BY` link on the destination
+- Copy summary now lists each warning inline with its stage context (e.g. `SKIP [Extensions]: vector`) instead of "review warning entries above"
+- Tables that fail to create (e.g. due to unsupported types or unavailable extensions) are now individually reported in the final warning summary with their specific error reason
+- CopyData stage now explicitly logs which tables it skips because their creation failed earlier, instead of silently excluding them
+- Copy summary "Tables:" count now includes all successfully processed tables (including empty ones), not just tables that had rows — previously "Tables: 3" when 16 tables were copied but only 3 had data
+
 ## [1.0.4] - 2026-08-09
 
 ### Fixed

@@ -110,3 +110,9 @@ No other `.cs` file in DbClone.UI may reference the PostgreSql namespace or type
 
 - CHANGELOG.md must exist in the repo root (the release workflow reads it at checkout path)
 - If no matching version section is found, the workflow falls back to `[Unreleased]`; if that's empty too, it links to CHANGELOG.md on GitHub
+
+## Edit discipline (MANDATORY)
+
+- Make surgical edits only: change exactly what the task requires.
+- Never refactor, "simplify", or restructure adjacent working code unless explicitly asked.
+- If a change seems to require touching unrelated structure, stop and ask first.

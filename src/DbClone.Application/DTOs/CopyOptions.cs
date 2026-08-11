@@ -1,4 +1,5 @@
 using DbClone.Application.Enums;
+using DbClone.Application.TableFilter;
 
 namespace DbClone.Application.DTOs;
 
@@ -22,6 +23,7 @@ namespace DbClone.Application.DTOs;
 /// <param name="MaxDegreeOfParallelism">Maximum number of tables copied in parallel.</param>
 /// <param name="ConstraintStrategy">Strategy for handling constraints during the copy.</param>
 /// <param name="ExcludePlatformSchemas">When true, schemas owned by platform service roles are excluded from the copy.</param>
+/// <param name="TableSelection">Optional table selection spec. Null means no filtering (copy all tables).</param>
 public sealed record CopyOptions(
     bool CopyData = true,
     bool CopyIndexes = true,
@@ -39,4 +41,5 @@ public sealed record CopyOptions(
     int BatchSize = 5000,
     int MaxDegreeOfParallelism = 4,
     EConstraintStrategy ConstraintStrategy = EConstraintStrategy.Automatic,
-    bool ExcludePlatformSchemas = false);
+    bool ExcludePlatformSchemas = false,
+    TableSelectionSpec? TableSelection = null);

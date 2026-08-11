@@ -2,6 +2,7 @@ using DbClone.Application.DTOs;
 using DbClone.Application.Enums;
 using DbClone.Application.Exceptions;
 using DbClone.Application.Interfaces;
+using DbClone.Application.Models;
 
 using Microsoft.Extensions.Logging;
 
@@ -124,24 +125,7 @@ public sealed class PgDatabaseMaintenanceProvider : IDatabaseMaintenanceProvider
         await conn.OpenAsync(ct);
 
         // ── Set session-level timeouts to prevent indefinite hangs ───────────
-        // lock_timeout: abort if we can't acquire a lock within the limit
-        // statement_timeout: abort if any single statement runs too long
-        try
-        {
-            await using var timeoutCmd = new NpgsqlCommand(
-                $"SET lock_timeout = '{CleanLockTimeoutSeconds}s'; SET statement_timeout = '{CleanStatementTimeoutSeconds}s';",
-                conn);
-            timeoutCmd.CommandTimeout = 10;
-            await timeoutCmd.ExecuteNonQueryAsync(ct);
-        }
-        catch (Exception ex)
-        {
-            logMessage(
-                $"Warning: could not set session timeouts: {PgExceptionHelper.GetUserMessage(ex)}");
-            _logger.LogWarning(
-                ex,
-                "Failed to set lock/statement timeout on destination connection");
-        }
+        await SetCleanSessionTimeoutsAsync(conn, logMessage, ct);
 
         // ── Ownership pre-check ─────────────────────────────────────────────
         // DROP SCHEMA requires schema ownership. If the user does not own all
@@ -374,6 +358,308 @@ public sealed class PgDatabaseMaintenanceProvider : IDatabaseMaintenanceProvider
             schemas.Count(s => s != "public"));
         return true;
     }
+
+    /// <summary>
+    /// Drops only the listed tables plus
+    /// the views that depend on them. Aborts before any destructive change when
+    /// an unlisted table would be affected (foreign key or partition boundary).
+    /// </summary>
+    public async Task<bool> CleanTablesAsync(
+        ConnectionInfo connection,
+        IReadOnlyCollection<TableId> tables,
+        Action<string> logMessage,
+        CancellationToken ct)
+    {
+        var dbName = connection.DatabaseName;
+
+        if (tables.Count == 0)
+        {
+            logMessage("Selection resolved to zero tables — nothing to clean");
+            return true;
+        }
+
+        logMessage(
+            $"Cleaning {tables.Count} selected table(s) in target database: {dbName}");
+
+        var builder = PgConnectionStringBuilder.BuildConnectionString(connection);
+        await using var conn = new NpgsqlConnection(builder.ConnectionString);
+        await conn.OpenAsync(ct);
+        await SetCleanSessionTimeoutsAsync(conn, logMessage, ct);
+
+        // Only tables that actually exist on the target are cleaned; stale
+        // selection entries (already absent) are skipped silently.
+        var existing = await ResolveExistingTablesAsync(conn, tables, ct);
+        if (existing.Count == 0)
+        {
+            logMessage(
+                "None of the selected tables exist in the target database — nothing to clean");
+            return true;
+        }
+
+        var dropSet = existing.Select(e => e.Id).ToHashSet();
+        var oids = existing.Select(e => e.Oid).ToArray();
+
+        // ── Abort-before-destruct dependency check ───────────────────
+        if (!await VerifySelectionBoundaryAsync(conn, oids, dropSet, logMessage, ct))
+            return false;
+
+        // Dependent views/materialized views are removed together with the
+        // selected tables — they cannot survive without the tables they read.
+        var dependentViews = await FindDependentViewsAsync(conn, oids, ct);
+        foreach (var (view, relKind) in dependentViews)
+        {
+            var keyword = relKind == PgRelKind.MaterializedView
+                ? "MATERIALIZED VIEW"
+                : "VIEW";
+            try
+            {
+                await using var dropCmd = new NpgsqlCommand(
+                    $"DROP {keyword} IF EXISTS {QuoteIdent(view.Schema)}.{QuoteIdent(view.Name)} CASCADE",
+                    conn);
+                await dropCmd.ExecuteNonQueryAsync(ct);
+                logMessage($"Dropped dependent view: {view.FullName}");
+            }
+            catch (PostgresException ex) when (IsLockOrStatementTimeout(ex))
+            {
+                LogLockTimeoutError(logMessage, dbName, $"DROP {keyword} \"{view.FullName}\"", ex);
+                return false;
+            }
+            catch (Exception ex)
+            {
+                logMessage(
+                    $"ERROR: could not drop dependent view {view.FullName}: {PgExceptionHelper.GetUserMessage(ex)}");
+                _logger.LogError(
+                    ex,
+                    "Selection-scoped clean failed on view {View} in {DbName}",
+                    view.FullName,
+                    dbName);
+                return false;
+            }
+        }
+
+        foreach (var (_, id) in existing)
+        {
+            try
+            {
+                // CASCADE is safe here: the boundary check already proved that no
+                // unlisted table references this table, and dependent views were
+                // dropped above. Owned sequences/indexes/triggers follow the table.
+                await using var dropCmd = new NpgsqlCommand(
+                    $"DROP TABLE IF EXISTS {QuoteIdent(id.Schema)}.{QuoteIdent(id.Name)} CASCADE",
+                    conn);
+                await dropCmd.ExecuteNonQueryAsync(ct);
+            }
+            catch (PostgresException ex) when (IsLockOrStatementTimeout(ex))
+            {
+                LogLockTimeoutError(logMessage, dbName, $"DROP TABLE \"{id.FullName}\"", ex);
+                return false;
+            }
+            catch (Exception ex)
+            {
+                logMessage(
+                    $"ERROR: could not drop table {id.FullName}: {PgExceptionHelper.GetUserMessage(ex)}");
+                _logger.LogError(
+                    ex,
+                    "Selection-scoped clean failed on {Table} in {DbName}",
+                    id.FullName,
+                    dbName);
+                return false;
+            }
+        }
+
+        logMessage(
+            $"Target selection cleaned: {dbName} ({existing.Count} tables, {dependentViews.Count} dependent views dropped)");
+        _logger.LogInformation(
+            "Selection-scoped clean of {DbName}: dropped {Tables} tables and {Views} dependent views",
+            dbName,
+            existing.Count,
+            dependentViews.Count);
+        return true;
+    }
+
+    /// <summary>
+    /// Maps the requested table identities to the catalog oids that actually
+    /// exist in the target database.
+    /// </summary>
+    private static async Task<List<(long Oid, TableId Id)>> ResolveExistingTablesAsync(
+        NpgsqlConnection conn,
+        IReadOnlyCollection<TableId> tables,
+        CancellationToken ct)
+    {
+        var schemas = tables.Select(t => t.Schema).ToArray();
+        var names = tables.Select(t => t.Name).ToArray();
+
+        await using var cmd = new NpgsqlCommand(
+            $@"SELECT c.oid, n.nspname, c.relname
+               FROM pg_class c
+               JOIN pg_namespace n ON n.oid = c.relnamespace
+               WHERE c.relkind IN ({PgRelKind.TableOrPartition})
+                 AND (n.nspname, c.relname) IN (SELECT unnest(@schemas), unnest(@names))",
+            conn);
+        cmd.Parameters.AddWithValue("schemas", schemas);
+        cmd.Parameters.AddWithValue("names", names);
+
+        var existing = new List<(long, TableId)>();
+        await using var reader = await cmd.ExecuteReaderAsync(ct);
+        while (await reader.ReadAsync(ct))
+        {
+            existing.Add(
+                (reader.GetFieldValue<uint>(0), new TableId(reader.GetString(1), reader.GetString(2))));
+        }
+
+        return existing;
+    }
+
+    /// <summary>
+    /// Dependency boundary check: returns false (and logs every conflict) when dropping
+    /// the listed tables would modify a table outside the list. Runs before any
+    /// destructive statement.
+    /// </summary>
+    private static async Task<bool> VerifySelectionBoundaryAsync(
+        NpgsqlConnection conn,
+        long[] oids,
+        HashSet<TableId> dropSet,
+        Action<string> logMessage,
+        CancellationToken ct)
+    {
+        var conflicts = new List<string>();
+
+        // Foreign keys owned by unlisted tables that reference a listed table:
+        // dropping the referenced table would remove a constraint on an
+        // unselected table — forbidden.
+        await using (var fkCmd = new NpgsqlCommand(
+                         @"SELECT cn.nspname, cc.relname, con.conname, tn.nspname, tc.relname
+                           FROM pg_constraint con
+                           JOIN pg_class cc ON cc.oid = con.conrelid
+                           JOIN pg_namespace cn ON cn.oid = cc.relnamespace
+                           JOIN pg_class tc ON tc.oid = con.confrelid
+                           JOIN pg_namespace tn ON tn.oid = tc.relnamespace
+                           WHERE con.contype = 'f' AND tc.oid = ANY(@oids)",
+                         conn))
+        {
+            fkCmd.Parameters.AddWithValue("oids", oids);
+            await using var reader = await fkCmd.ExecuteReaderAsync(ct);
+            while (await reader.ReadAsync(ct))
+            {
+                var ownerId = new TableId(reader.GetString(0), reader.GetString(1));
+                if (!dropSet.Contains(ownerId))
+                {
+                    conflicts.Add(
+                        $"Unselected table {ownerId.FullName} holds foreign key {reader.GetString(2)} referencing selected table {reader.GetString(3)}.{reader.GetString(4)}");
+                }
+            }
+        }
+
+        // Partition boundaries crossing the selection: parent and partitions
+        // cannot be cleaned independently.
+        await using (var partCmd = new NpgsqlCommand(
+                         @"SELECT pn.nspname, pc.relname, cn.nspname, cc.relname
+                           FROM pg_inherits i
+                           JOIN pg_class pc ON pc.oid = i.inhparent
+                           JOIN pg_namespace pn ON pn.oid = pc.relnamespace
+                           JOIN pg_class cc ON cc.oid = i.inhrelid
+                           JOIN pg_namespace cn ON cn.oid = cc.relnamespace
+                           WHERE pc.oid = ANY(@oids) OR cc.oid = ANY(@oids)",
+                         conn))
+        {
+            partCmd.Parameters.AddWithValue("oids", oids);
+            await using var reader = await partCmd.ExecuteReaderAsync(ct);
+            while (await reader.ReadAsync(ct))
+            {
+                var parentId = new TableId(reader.GetString(0), reader.GetString(1));
+                var childId = new TableId(reader.GetString(2), reader.GetString(3));
+                if (dropSet.Contains(parentId) != dropSet.Contains(childId))
+                {
+                    conflicts.Add(
+                        $"Partition boundary crosses the selection: {childId.FullName} (partition) / {parentId.FullName} (parent) — both sides must be selected together");
+                }
+            }
+        }
+
+        if (conflicts.Count == 0)
+            return true;
+
+        logMessage(
+            $"ERROR: Selection-scoped cleanup aborted — {conflicts.Count} conflict(s) with unselected tables. No objects were dropped:");
+        foreach (var conflict in conflicts.Distinct())
+            logMessage($"  - {conflict}");
+        logMessage(
+            "Adjust the table selection so the conflicting tables are included or excluded together, then retry.");
+        return false;
+    }
+
+    /// <summary>
+    /// Finds views and materialized views that (transitively) depend on any of
+    /// the given relations, via pg_depend. These must be dropped before the
+    /// tables they read from.
+    /// </summary>
+    private static async Task<List<(TableId Id, string RelKind)>> FindDependentViewsAsync(
+        NpgsqlConnection conn,
+        long[] oids,
+        CancellationToken ct)
+    {
+        await using var cmd = new NpgsqlCommand(
+            $@"WITH RECURSIVE dep AS (
+                   SELECT d.objid
+                   FROM pg_depend d
+                   WHERE d.classid = 'pg_class'::regclass AND d.refobjid = ANY(@oids)
+                   UNION
+                   SELECT d.objid
+                   FROM pg_depend d
+                   JOIN dep ON d.refobjid = dep.oid
+                   WHERE d.classid = 'pg_class'::regclass
+               )
+               SELECT DISTINCT n.nspname, c.relname, c.relkind
+               FROM dep
+               JOIN pg_class c ON c.oid = dep.objid
+               JOIN pg_namespace n ON n.oid = c.relnamespace
+               WHERE c.relkind IN ({PgRelKind.ViewOrMaterialized})
+                 AND n.nspname NOT IN ({PgSystemSchemas.SqlList})
+               ORDER BY 1, 2",
+            conn);
+        cmd.Parameters.AddWithValue("oids", oids);
+
+        var views = new List<(TableId, string)>();
+        await using var reader = await cmd.ExecuteReaderAsync(ct);
+        while (await reader.ReadAsync(ct))
+        {
+            views.Add((new TableId(reader.GetString(0), reader.GetString(1)), reader.GetString(2)));
+        }
+
+        return views;
+    }
+
+    /// <summary>
+    /// Sets session-level lock/statement timeouts so cleanup fails instead of
+    /// hanging indefinitely. lock_timeout: abort when a lock cannot be acquired;
+    /// statement_timeout: abort over-long statements (e.g. large CASCADE drops).
+    /// </summary>
+    private async Task SetCleanSessionTimeoutsAsync(
+        NpgsqlConnection conn,
+        Action<string> logMessage,
+        CancellationToken ct)
+    {
+        try
+        {
+            await using var timeoutCmd = new NpgsqlCommand(
+                $"SET lock_timeout = '{CleanLockTimeoutSeconds}s'; SET statement_timeout = '{CleanStatementTimeoutSeconds}s';",
+                conn);
+            timeoutCmd.CommandTimeout = 10;
+            await timeoutCmd.ExecuteNonQueryAsync(ct);
+        }
+        catch (Exception ex)
+        {
+            logMessage(
+                $"Warning: could not set session timeouts: {PgExceptionHelper.GetUserMessage(ex)}");
+            _logger.LogWarning(
+                ex,
+                "Failed to set lock/statement timeout on destination connection");
+        }
+    }
+
+    /// <summary>Quotes a PostgreSQL identifier, escaping embedded double quotes.</summary>
+    private static string QuoteIdent(string identifier) =>
+        "\"" + identifier.Replace("\"", "\"\"") + "\"";
 
     public async Task<bool> CreateDatabaseAsync(
         ConnectionInfo connection,

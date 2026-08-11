@@ -1,5 +1,8 @@
 using System.Windows;
 
+using DbClone.UI.Models;
+using DbClone.UI.Views;
+
 using Microsoft.Win32;
 
 namespace DbClone.UI.Services;
@@ -20,6 +23,20 @@ public sealed class WpfDialogService : IDialogService
             MessageBoxResult.No);
 
         return Task.FromResult(result == MessageBoxResult.Yes);
+    }
+
+    /// <inheritdoc />
+    public Task<ESelectionCleanChoice> ConfirmSelectionCleanAsync(string title, string message)
+    {
+        var dialog = new CleanTargetDialog
+                         {
+                             DataContext = new { Title = title, Message = message },
+                             Owner = System.Windows.Application.Current.MainWindow
+                         };
+
+        dialog.ShowDialog();
+
+        return Task.FromResult(dialog.Choice);
     }
 
     /// <inheritdoc />

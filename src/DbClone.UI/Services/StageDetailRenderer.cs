@@ -74,6 +74,25 @@ internal static class StageDetailRenderer
         };
     }
 
+    /// <summary>Renders a CopyWarning for the final summary section (includes stage context).</summary>
+    public static string RenderWarningSummary(CopyWarning warning)
+    {
+        var reason = warning.Properties is not null &&
+                     warning.Properties.TryGetValue(PropKeys.Reason, out var r)
+            ? (string)r
+            : null;
+
+        var stage = warning.StageName.DisplayName();
+        var prefix = warning.Kind switch
+        {
+            EStageMessageKind.Failed => "FAIL",
+            EStageMessageKind.Skipped => "SKIP",
+            _ => warning.Kind.ToString()
+        };
+
+        return $"{prefix} [{stage}]: {warning.ObjectName}{(reason is not null ? $": {reason}" : "")}";
+    }
+
     // ─── Private renderers ───────────────────────────────────────────────
 
     private static string RenderSkipped(StageDetail d) =>
