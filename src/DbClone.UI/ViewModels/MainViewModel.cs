@@ -347,6 +347,14 @@ public sealed partial class MainViewModel : ObservableObject
         {
             Connections.ClearGroupIfConnectionMismatch();
             SyncConnectionsToSettings();
+
+            // The previous run's error/result referred to the old connection —
+            // drop the visible error display (never while an operation is running)
+            if (!Context.IsBusy)
+            {
+                Copy.State.ClearResultDisplay();
+                Compare.State.ClearResultDisplay();
+            }
         }
     }
 

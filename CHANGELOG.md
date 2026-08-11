@@ -27,6 +27,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - CopyData stage now explicitly logs which tables it skips because their creation failed earlier, instead of silently excluding them
 - Copy summary "Tables:" count now includes all successfully processed tables (including empty ones), not just tables that had rows — previously "Tables: 3" when 16 tables were copied but only 3 had data
 - Copy is now blocked with a clear error when a connection is missing a database name — Full/Resume/Update require a destination database (backup-only connections can only use Backup mode), and all modes require a source database; previously such copies reported success without copying anything
+- Error banner and status display are now cleared when the connection or connection group is changed — previously an error from an earlier run remained visible after switching connections
+- Connections, connection groups, table selection, and copy/compare options can no longer be changed while an operation is running — the controls are disabled until the operation finishes
 
 ## [1.0.4] - 2026-08-09
 
