@@ -82,9 +82,14 @@ No other `.cs` file in DbClone.UI may reference the PostgreSql namespace or type
 
 ### Algorithm: when making code changes
 
-1. **Every user-visible change** (feature, fix, breaking change) — add a bullet under `## [Unreleased]` in the appropriate category (`Added`, `Fixed`, `Changed`, etc.)
-2. Keep bullets concise (one line) but descriptive enough for end users
-3. Do NOT modify existing versioned sections (`## [1.0.0]`, etc.) unless explicitly asked to correct an error
+The `[Unreleased]` section must always describe the **final user-facing state relative to the last released version** — never the development history. End users read it as "what will be new in the next release", so it must not look like a log of incremental dev steps.
+
+1. **Every user-visible change** (feature, fix, breaking change) must be covered under `## [Unreleased]` in the appropriate category (`Added`, `Fixed`, `Changed`, etc.)
+2. **New feature in development** — maintain ONE bullet per feature that describes its complete current state. As the feature grows across sessions, **update/expand that same bullet**; do NOT add a new bullet per incremental change, and do NOT keep bullets for intermediate states that no longer exist
+3. **Change to an already-released behavior** (fix or change of something users have today) — one bullet per issue; if the same issue is revisited, update the existing bullet instead of adding a second one
+4. **Fix/change that only concerns an unreleased feature** (bug found while developing it, dialog reworked before release) — fold it into the feature's bullet; never add a separate `Fixed`/`Changed` entry. Users have never had the feature, so there is nothing to "fix" relative to the last release
+5. Keep bullets concise but descriptive enough for end users (sub-points are allowed for large features)
+6. Do NOT modify existing versioned sections (`## [1.0.0]`, etc.) unless explicitly asked to correct an error
 
 ### Algorithm: preparing a release (when asked to tag/release version X.Y.Z)
 

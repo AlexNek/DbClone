@@ -9,31 +9,24 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 - Manual table selection: choose which tables Copy, Compare, and Backup process for a source database
-- Named table-selection presets stored per source connection + database, with automatic restore of the last-used preset
-- Table selection dialog with schema tree, search, sorting, table size column, and a foreign-key relationship explorer
-- Validation summary before applying a selection (dangling foreign keys, dependent views, orphaned partitions)
-- Compare now honors the active table selection: target tables outside the selection are ignored, and views depending on excluded tables are reported as skipped
-- Copy and Backup honor the active table selection; pre-copy cleanup of a populated target drops only the selected tables and never touches unselected ones
-- When copying with an active table selection into a populated destination, you now choose explicitly: replace only the selected tables, or clear the entire destination so it ends up containing only the selected tables
-- FK cascade deselect: unchecking a parent table automatically deselects its dependent child tables (recursively) to prevent referential integrity violations
-- Dependency warning: re-selecting a child table whose parent is excluded highlights the row with a warning background and tooltip
-- Destination table overview: read-only dialog showing all tables on the output database with schema tree, search, sorting, and size column
-- Destination database picker: when the destination has no database name, users can browse available databases on the server and select one directly from the main panel
-
-### Changed
-- Table selection dialog messages and tooltips show bare table names while a single schema is selected — the schema prefix appears only in the "All Schemas" view or for cross-schema relationships
-- Resume/Update copy modes are blocked with an explanation while a non-default table selection is active (they require "All Tables")
-- "Clean Target Database?" dialog now uses explicit action buttons ("Clear All", "Replace Selected", "Cancel") instead of ambiguous Yes/No/Cancel
+  - Selection dialog with schema tree, search, sorting, table size column, and a foreign-key relationship explorer
+  - Named presets stored per source connection + database with automatic restore of the last-used preset; unsaved (dirty) modifications survive application restart
+  - Validation summary before applying a selection (dangling foreign keys, dependent views, orphaned partitions)
+  - FK-aware behavior: unchecking a parent table automatically deselects its dependent child tables (recursively); re-selecting a child whose parent is excluded highlights the row with a warning
+  - Compare ignores target tables outside the selection; views depending on excluded tables are reported as skipped
+  - Copy and Backup clean only the selected tables on a populated destination, with an explicit choice: replace only the selected tables, or clear the entire destination
+  - Resume/Update modes are blocked with an explanation while a non-default selection is active (they require "All Tables")
+  - Destination table overview: read-only dialog listing all tables on the output database (schema tree, search, sorting, size column)
+  - Destination database picker: when the destination has no database name, browse the server's databases and pick one directly from the main panel
 
 ### Fixed
-- Table selection dialog now correctly shows the active preset in the Selection dropdown when opened (previously always showed "All Tables")
-- Temporary (dirty) table selection modifications now survive application restart — previously, unchecking/checking schemas and pressing Apply without Save would lose the changes on next launch
 - Sequence sync no longer fails for mixed-case names (e.g. serial sequences of `"MixedCase"` tables): sequence and owner-table identifiers are now quoted in `setval`/`pg_get_serial_sequence` calls, while the owner-column is passed unquoted so it matches the catalog literally
 - Serial sequence sync no longer produces false "has no sequence on destination" warnings — the stage now resolves serial sequences by name and establishes the missing `OWNED BY` link on the destination
 - Copy summary now lists each warning inline with its stage context (e.g. `SKIP [Extensions]: vector`) instead of "review warning entries above"
 - Tables that fail to create (e.g. due to unsupported types or unavailable extensions) are now individually reported in the final warning summary with their specific error reason
 - CopyData stage now explicitly logs which tables it skips because their creation failed earlier, instead of silently excluding them
 - Copy summary "Tables:" count now includes all successfully processed tables (including empty ones), not just tables that had rows — previously "Tables: 3" when 16 tables were copied but only 3 had data
+- Copy is now blocked with a clear error when a connection is missing a database name — Full/Resume/Update require a destination database (backup-only connections can only use Backup mode), and all modes require a source database; previously such copies reported success without copying anything
 
 ## [1.0.4] - 2026-08-09
 

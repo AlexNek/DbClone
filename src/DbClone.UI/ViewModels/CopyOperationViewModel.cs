@@ -147,6 +147,35 @@ public sealed partial class CopyOperationViewModel : ObservableObject, IWorkflow
     [RelayCommand(CanExecute = nameof(CanStartCopy))]
     private async Task StartCopyAsync(CancellationToken cancellationToken)
     {
+        // A copy needs a concrete database on both sides — except Backup mode,
+        // which auto-creates a new database on the destination server.
+        if (string.IsNullOrWhiteSpace(_ctx.Source.DatabaseName))
+        {
+            State.BeginNewRun();
+            State.LogError(
+                "Source connection has no database name. Copy requires a specific database.");
+            State.ShowBanner(
+                "Copy blocked",
+                "The source connection has no database name — select a specific database to copy from.",
+                Wpf.Ui.Controls.InfoBarSeverity.Error);
+            return;
+        }
+
+        if (Settings.SelectedCopyMode != ECopyMode.Backup
+            && string.IsNullOrWhiteSpace(_ctx.Destination.DatabaseName))
+        {
+            State.BeginNewRun();
+            State.LogError(
+                "Destination connection has no database name. "
+                + $"{Settings.SelectedCopyMode} mode requires a specific database — "
+                + "backup-only connections can only be used in Backup mode.");
+            State.ShowBanner(
+                "Copy blocked",
+                "The destination connection has no database name. Choose Backup mode, or enter a database name on the destination connection.",
+                Wpf.Ui.Controls.InfoBarSeverity.Error);
+            return;
+        }
+
         // Resume/Update replay against already-copied state and require the
         // full table set — a filtered resume could skip already-copied tables or
         // leave partial tables inconsistent.
