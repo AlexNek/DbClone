@@ -13,6 +13,13 @@ public sealed partial class TableSelectionItem : ObservableObject
     [ObservableProperty]
     private bool _isSelected = true;
 
+    /// <summary>
+    /// True when this table is selected but one or more of its FK-referenced
+    /// parent tables are excluded — referential integrity would be broken.
+    /// </summary>
+    [ObservableProperty]
+    private bool _hasDependencyWarning;
+
     [ObservableProperty]
     private bool _isRelated;
 

@@ -135,6 +135,36 @@ public sealed class TableSelectionPresetStore : ITableSelectionPresetStore
         return Task.CompletedTask;
     }
 
+    /// <inheritdoc />
+    public Task<IReadOnlySet<TableId>?> GetTemporaryExclusionsAsync(DatabaseIdentifier database)
+    {
+        lock (_lock)
+        {
+            var entry = FindEntry(database);
+            if (entry?.TemporaryExclusions is null or { Count: 0 })
+                return Task.FromResult<IReadOnlySet<TableId>?>(null);
+
+            IReadOnlySet<TableId> result = new HashSet<TableId>(
+                entry.TemporaryExclusions.Select(t => t.ToModel()));
+            return Task.FromResult<IReadOnlySet<TableId>?>(result);
+        }
+    }
+
+    /// <inheritdoc />
+    public Task SetTemporaryExclusionsAsync(DatabaseIdentifier database, IReadOnlySet<TableId>? exclusions)
+    {
+        lock (_lock)
+        {
+            var entry = FindOrCreateEntry(database);
+            entry.TemporaryExclusions = exclusions is null or { Count: 0 }
+                ? null
+                : [.. exclusions.Select(TableIdDto.FromModel)];
+        }
+
+        Persist();
+        return Task.CompletedTask;
+    }
+
     // ── Lookup ───────────────────────────────────────────────────────────────────
 
     private DatabaseEntryDto? FindEntry(DatabaseIdentifier database) =>
@@ -171,6 +201,9 @@ public sealed class TableSelectionPresetStore : ITableSelectionPresetStore
         public string? LastUsedPresetId { get; set; }
 
         public List<PresetDto> Presets { get; set; } = [];
+
+        /// <summary>Dirty exclusion set applied without saving to a preset. Null when clean.</summary>
+        public List<TableIdDto>? TemporaryExclusions { get; set; }
     }
 
     /// <summary>JSON form of a <see cref="TableSelectionPreset"/>.</summary>

@@ -61,6 +61,13 @@ public sealed class TableSelectionService : ITableSelectionService
         _isDirty = DiffersFromSavedPreset(presetId, excludedTables);
 
         await _presetStore.SetLastUsedPresetIdAsync(_currentDatabase, presetId);
+
+        // Persist or clear the temporary exclusion set so it survives a restart.
+        if (_isDirty)
+            await _presetStore.SetTemporaryExclusionsAsync(_currentDatabase, excludedTables);
+        else
+            await _presetStore.SetTemporaryExclusionsAsync(_currentDatabase, null);
+
         Changed?.Invoke();
     }
 
@@ -80,11 +87,22 @@ public sealed class TableSelectionService : ITableSelectionService
         var lastUsedId = await _presetStore.GetLastUsedPresetIdAsync(_currentDatabase);
         var lastUsed = _presets.FirstOrDefault(p => p.Id == lastUsedId);
 
-        _activePresetId = lastUsed?.Id;
-        _activeSpec = lastUsed is null
-            ? TableSelectionSpec.All
-            : BuildSpec(lastUsed.ExcludedTables);
-        _isDirty = false;
+        // Restore a persisted temporary (dirty) selection if one exists.
+        var tempExclusions = await _presetStore.GetTemporaryExclusionsAsync(_currentDatabase);
+        if (tempExclusions is not null)
+        {
+            _activePresetId = lastUsed?.Id;
+            _activeSpec = BuildSpec(tempExclusions);
+            _isDirty = true;
+        }
+        else
+        {
+            _activePresetId = lastUsed?.Id;
+            _activeSpec = lastUsed is null
+                ? TableSelectionSpec.All
+                : BuildSpec(lastUsed.ExcludedTables);
+            _isDirty = false;
+        }
 
         Changed?.Invoke();
     }
@@ -110,6 +128,7 @@ public sealed class TableSelectionService : ITableSelectionService
         _isDirty = false;
 
         await _presetStore.SetLastUsedPresetIdAsync(_currentDatabase, presetId);
+        await _presetStore.SetTemporaryExclusionsAsync(_currentDatabase, null);
         Changed?.Invoke();
     }
 

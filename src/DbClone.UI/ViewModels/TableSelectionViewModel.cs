@@ -46,6 +46,8 @@ public sealed partial class TableSelectionViewModel : ObservableObject
 
     private bool _suspendItemRecount;
 
+    private bool _suspendCascadeDeselect;
+
     private bool _suspendSchemaSync;
 
     private string _sortColumn = "Schema";
@@ -137,8 +139,8 @@ public sealed partial class TableSelectionViewModel : ObservableObject
 
             BuildItems();
             BuildSchemaNodes();
-            BuildPresetOptions();
             ApplyActiveSelection();
+            BuildPresetOptions();
             UpdateCounts();
             RefreshVisibleTables();
 
@@ -371,14 +373,24 @@ public sealed partial class TableSelectionViewModel : ObservableObject
     {
         var exclusions = _selectionService.ActiveSpec.ExcludedTables;
 
-        foreach (var item in _allItems)
+        _suspendCascadeDeselect = true;
+        try
         {
-            item.IsSelected = !exclusions.Contains(item.Id);
+            foreach (var item in _allItems)
+            {
+                item.IsSelected = !exclusions.Contains(item.Id);
+            }
+        }
+        finally
+        {
+            _suspendCascadeDeselect = false;
         }
 
         SetLoadedPreset(
             _selectionService.ActivePresetId,
             [.. exclusions.Where(id => _itemsById.ContainsKey(id))]);
+
+        RefreshAllDependencyWarnings();
     }
 
     private void BuildItems()
@@ -395,6 +407,19 @@ public sealed partial class TableSelectionViewModel : ObservableObject
             {
                 if (e.PropertyName == nameof(TableSelectionItem.IsSelected) && !_suspendItemRecount)
                 {
+                    if (!_suspendCascadeDeselect)
+                    {
+                        if (!item.IsSelected)
+                        {
+                            _ = ConfirmAndCascadeDeselectAsync(item);
+                        }
+                        else
+                        {
+                            // Re-selected manually — check if parents are excluded.
+                            UpdateDependencyWarning(item);
+                        }
+                    }
+
                     UpdateCounts();
                 }
             };
@@ -480,6 +505,7 @@ public sealed partial class TableSelectionViewModel : ObservableObject
     private void SetAllSelected(bool selected)
     {
         _suspendItemRecount = true;
+        _suspendCascadeDeselect = true;
         try
         {
             foreach (var item in _allItems)
@@ -490,8 +516,10 @@ public sealed partial class TableSelectionViewModel : ObservableObject
         finally
         {
             _suspendItemRecount = false;
+            _suspendCascadeDeselect = false;
         }
 
+        RefreshAllDependencyWarnings();
         UpdateCounts();
     }
 
@@ -525,6 +553,7 @@ public sealed partial class TableSelectionViewModel : ObservableObject
             }
 
             _suspendItemRecount = true;
+            _suspendCascadeDeselect = true;
             try
             {
                 foreach (var item in _allItems)
@@ -535,10 +564,12 @@ public sealed partial class TableSelectionViewModel : ObservableObject
             finally
             {
                 _suspendItemRecount = false;
+                _suspendCascadeDeselect = false;
             }
 
             SetLoadedPreset(requested.Id, [.. exclusions.Where(id => _itemsById.ContainsKey(id))]);
 
+            RefreshAllDependencyWarnings();
             UpdateCounts();
         }
         catch (Exception ex) when (ex is not OperationCanceledException)
@@ -630,6 +661,7 @@ public sealed partial class TableSelectionViewModel : ObservableObject
         var select = node.IsChecked == true;
 
         _suspendItemRecount = true;
+        _suspendCascadeDeselect = true;
         try
         {
             foreach (var item in _allItems)
@@ -644,8 +676,10 @@ public sealed partial class TableSelectionViewModel : ObservableObject
         finally
         {
             _suspendItemRecount = false;
+            _suspendCascadeDeselect = false;
         }
 
+        RefreshAllDependencyWarnings();
         UpdateCounts();
     }
 
@@ -688,6 +722,191 @@ public sealed partial class TableSelectionViewModel : ObservableObject
         foreach (var item in query)
         {
             VisibleTables.Add(item);
+        }
+    }
+
+    // ── FK cascade deselect & dependency warnings ────────────────────────────
+
+    /// <summary>
+    /// Collects all currently-selected tables that transitively depend on <paramref name="parentId"/>
+    /// via foreign keys (recursive). Used to build the confirmation message.
+    /// </summary>
+    private List<TableId> GetSelectedDependents(TableId parentId)
+    {
+        if (_model is null) return [];
+
+        var result = new List<TableId>();
+        var visited = new HashSet<TableId> { parentId };
+        var queue = new Queue<TableId>();
+        queue.Enqueue(parentId);
+
+        while (queue.Count > 0)
+        {
+            var current = queue.Dequeue();
+
+            var dependents = _model.Tables
+                .Where(t => t.ForeignKeys.Any(fk =>
+                    string.Equals(fk.ReferencedSchema, current.Schema, StringComparison.OrdinalIgnoreCase)
+                    && string.Equals(fk.ReferencedTable, current.Name, StringComparison.OrdinalIgnoreCase)))
+                .Select(t => new TableId(t.SchemaName, t.Name))
+                .Where(id => id != parentId && visited.Add(id))
+                .ToList();
+
+            foreach (var depId in dependents)
+            {
+                if (_itemsById.TryGetValue(depId, out var depItem) && depItem.IsSelected)
+                {
+                    result.Add(depId);
+                    queue.Enqueue(depId);
+                }
+            }
+        }
+
+        return result;
+    }
+
+    /// <summary>
+    /// Shows a confirmation dialog listing dependent tables that will be
+    /// auto-deselected. If confirmed (or no dependents), cascades. If cancelled,
+    /// reverts the uncheck.
+    /// </summary>
+    private async Task ConfirmAndCascadeDeselectAsync(TableSelectionItem uncheckedItem)
+    {
+        var dependents = GetSelectedDependents(uncheckedItem.Id);
+
+        if (dependents.Count > 0)
+        {
+            var tableList = string.Join("\n", dependents.Select(d => $"  • {Display(d)}"));
+            var message = $"The following tables depend on {Display(uncheckedItem.Id)} " +
+                $"and will also be deselected:\n\n{tableList}\n\nProceed?";
+
+            var confirmed = await _dialogService.ConfirmAsync("Deselect Dependent Tables", message);
+
+            if (!confirmed)
+            {
+                // Revert the uncheck — suppress cascade/recount to avoid recursion.
+                _suspendCascadeDeselect = true;
+                _suspendItemRecount = true;
+                try
+                {
+                    uncheckedItem.IsSelected = true;
+                }
+                finally
+                {
+                    _suspendCascadeDeselect = false;
+                    _suspendItemRecount = false;
+                }
+
+                UpdateCounts();
+                return;
+            }
+        }
+
+        CascadeDeselect(uncheckedItem.Id);
+        RefreshAllDependencyWarnings();
+        UpdateCounts();
+    }
+
+    /// <summary>
+    /// When a table is deselected, automatically deselect all tables that have
+    /// a FK referencing it (children cannot exist without their parent).
+    /// Operates recursively — if deselecting A causes B to deselect, B's dependents
+    /// are also deselected. Suppresses further confirmation dialogs during cascade.
+    /// </summary>
+    private void CascadeDeselect(TableId deselectedId)
+    {
+        if (_model is null) return;
+
+        _suspendCascadeDeselect = true;
+        _suspendItemRecount = true;
+        try
+        {
+            var visited = new HashSet<TableId> { deselectedId };
+            var queue = new Queue<TableId>();
+            queue.Enqueue(deselectedId);
+
+            while (queue.Count > 0)
+            {
+                var current = queue.Dequeue();
+
+                var dependents = _model.Tables
+                    .Where(t => t.ForeignKeys.Any(fk =>
+                        string.Equals(fk.ReferencedSchema, current.Schema, StringComparison.OrdinalIgnoreCase)
+                        && string.Equals(fk.ReferencedTable, current.Name, StringComparison.OrdinalIgnoreCase)))
+                    .Select(t => new TableId(t.SchemaName, t.Name))
+                    .Where(id => id != deselectedId && visited.Add(id))
+                    .ToList();
+
+                foreach (var depId in dependents)
+                {
+                    if (_itemsById.TryGetValue(depId, out var depItem) && depItem.IsSelected)
+                    {
+                        depItem.IsSelected = false;
+                        queue.Enqueue(depId);
+                    }
+                }
+            }
+        }
+        finally
+        {
+            _suspendCascadeDeselect = false;
+            _suspendItemRecount = false;
+        }
+
+        // After cascade, clear warning on the deselected table itself (it's excluded).
+        if (_itemsById.TryGetValue(deselectedId, out var item))
+        {
+            item.HasDependencyWarning = false;
+        }
+    }
+
+    /// <summary>
+    /// Sets <see cref="TableSelectionItem.HasDependencyWarning"/> on a single item
+    /// based on whether any of its FK-referenced parent tables are currently excluded.
+    /// </summary>
+    private void UpdateDependencyWarning(TableSelectionItem item)
+    {
+        if (_model is null)
+        {
+            item.HasDependencyWarning = false;
+            return;
+        }
+
+        if (!item.IsSelected)
+        {
+            item.HasDependencyWarning = false;
+            return;
+        }
+
+        var tableDef = _model.Tables.FirstOrDefault(t =>
+            string.Equals(t.SchemaName, item.Id.Schema, StringComparison.OrdinalIgnoreCase)
+            && string.Equals(t.Name, item.Id.Name, StringComparison.OrdinalIgnoreCase));
+
+        if (tableDef is null)
+        {
+            item.HasDependencyWarning = false;
+            return;
+        }
+
+        var hasExcludedParent = tableDef.ForeignKeys.Any(fk =>
+        {
+            var parentId = new TableId(fk.ReferencedSchema, fk.ReferencedTable);
+            if (parentId == item.Id) return false; // self-referencing FK
+            return _itemsById.TryGetValue(parentId, out var parentItem) && !parentItem.IsSelected;
+        });
+
+        item.HasDependencyWarning = hasExcludedParent;
+    }
+
+    /// <summary>
+    /// Recomputes the dependency warning on all selected items. Called after bulk
+    /// operations (Select All, Select None, preset switch) where cascade was suspended.
+    /// </summary>
+    private void RefreshAllDependencyWarnings()
+    {
+        foreach (var item in _allItems)
+        {
+            UpdateDependencyWarning(item);
         }
     }
 
@@ -744,10 +963,14 @@ public sealed partial class TableSelectionViewModel : ObservableObject
             if (_itemsById.TryGetValue(related, out var item))
             {
                 item.IsRelated = true;
-                item.RelationshipIndicator = $" 🔗 ({(item.IsSelected ? "selected" : "excluded")})";
-                item.RelationshipTooltip = references.Contains(related)
-                    ? $"References {Display(id)}"
-                    : $"Referenced by {Display(id)}";
+
+                var isParent = references.Contains(related);
+                var arrow = isParent ? "⬆️" : "⬇️";
+                var suffix = item.IsSelected ? "" : " (excluded)";
+                item.RelationshipIndicator = $" {arrow}{suffix}";
+                item.RelationshipTooltip = isParent
+                    ? $"Parent of {Display(id)}"
+                    : $"Child of {Display(id)}";
             }
         }
 
@@ -777,6 +1000,6 @@ public sealed partial class TableSelectionViewModel : ObservableObject
                 ", ",
                 tables.Select(t =>
                     _itemsById.TryGetValue(t, out var item)
-                        ? $"{Display(t)} ({(item.IsSelected ? "selected" : "excluded")})"
+                        ? item.IsSelected ? Display(t) : $"{Display(t)} (excluded)"
                         : Display(t)));
 }

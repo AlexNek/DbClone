@@ -28,4 +28,10 @@ public interface ITableSelectionPresetStore
 
     /// <summary>Records the last-used preset. Null clears the record.</summary>
     Task SetLastUsedPresetIdAsync(DatabaseIdentifier database, string? presetId);
+
+    /// <summary>Returns the persisted temporary exclusion set, or null when none exists.</summary>
+    Task<IReadOnlySet<TableId>?> GetTemporaryExclusionsAsync(DatabaseIdentifier database);
+
+    /// <summary>Persists a temporary (dirty) exclusion set. Null clears it.</summary>
+    Task SetTemporaryExclusionsAsync(DatabaseIdentifier database, IReadOnlySet<TableId>? exclusions);
 }

@@ -29,6 +29,8 @@ public sealed partial class MainViewModel : ObservableObject
 
     private readonly IConnectionStore _connectionStore;
 
+    private readonly IDatabaseMaintenanceProvider _maintenanceProvider;
+
     private readonly IDatabaseService _dbService;
 
     private readonly IDialogService _dialogService;
@@ -120,6 +122,7 @@ public sealed partial class MainViewModel : ObservableObject
         ITableSelectionPresetNameValidator presetNameValidator)
     {
         _connectionStore = connectionStore;
+        _maintenanceProvider = maintenanceProvider;
         _settingsService = settingsService;
         _dialogService = dialogService;
         _dbService = dbService;
@@ -157,6 +160,10 @@ public sealed partial class MainViewModel : ObservableObject
             dbService,
             source);
         source.TableSelection.EditRequested += (_, _) => OpenTableSelectionDialog();
+
+        // Table overview panel — destination panel only
+        destination.TableOverview = new TableOverviewPanelViewModel(dbService, destination);
+        destination.TableOverview.ViewRequested += (_, _) => OpenTableOverviewDialog();
 
         // Create shared context (must exist before stateManager wiring)
         Context = new OperationContext(source, destination);
@@ -289,6 +296,15 @@ public sealed partial class MainViewModel : ObservableObject
                 _ = source.TableSelection!.LoadForConnectionAsync(source.SelectedSavedConnection);
         };
 
+        // Restore the destination table overview for the initial connection,
+        // then follow destination connection switches.
+        _ = destination.TableOverview.LoadForConnectionAsync(destination.SelectedSavedConnection);
+        destination.PropertyChanged += (_, e) =>
+        {
+            if (e.PropertyName == nameof(ConnectionViewModel.SelectedSavedConnection))
+                _ = destination.TableOverview!.LoadForConnectionAsync(destination.SelectedSavedConnection);
+        };
+
         // Update banner — self-contained component with its own ViewModel
         Update = new UpdateInfoBarViewModel(updateService);
 
@@ -356,6 +372,24 @@ public sealed partial class MainViewModel : ObservableObject
             Owner = System.Windows.Application.Current.MainWindow
         };
         dialog.ShowDialog();
+    }
+
+    /// <summary>Opens the read-only table overview dialog for the current destination connection.</summary>
+    private void OpenTableOverviewDialog()
+    {
+        var vm = new TableOverviewViewModel(_maintenanceProvider, _dbService, Context.Destination);
+
+        var dialog = new Views.TableOverviewDialog(vm)
+        {
+            Owner = System.Windows.Application.Current.MainWindow
+        };
+        dialog.ShowDialog();
+
+        // If the user selected a different database inside the dialog, refresh the panel.
+        if (dialog.DatabaseChanged)
+        {
+            Context.Destination.TableOverview?.RefreshAfterDatabaseChange();
+        }
     }
 
     [RelayCommand]

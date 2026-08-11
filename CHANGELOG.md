@@ -15,6 +15,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Compare now honors the active table selection: target tables outside the selection are ignored, and views depending on excluded tables are reported as skipped
 - Copy and Backup honor the active table selection; pre-copy cleanup of a populated target drops only the selected tables and never touches unselected ones
 - When copying with an active table selection into a populated destination, you now choose explicitly: replace only the selected tables, or clear the entire destination so it ends up containing only the selected tables
+- FK cascade deselect: unchecking a parent table automatically deselects its dependent child tables (recursively) to prevent referential integrity violations
+- Dependency warning: re-selecting a child table whose parent is excluded highlights the row with a warning background and tooltip
+- Destination table overview: read-only dialog showing all tables on the output database with schema tree, search, sorting, and size column
+- Destination database picker: when the destination has no database name, users can browse available databases on the server and select one directly from the main panel
 
 ### Changed
 - Table selection dialog messages and tooltips show bare table names while a single schema is selected — the schema prefix appears only in the "All Schemas" view or for cross-schema relationships
@@ -22,6 +26,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - "Clean Target Database?" dialog now uses explicit action buttons ("Clear All", "Replace Selected", "Cancel") instead of ambiguous Yes/No/Cancel
 
 ### Fixed
+- Table selection dialog now correctly shows the active preset in the Selection dropdown when opened (previously always showed "All Tables")
+- Temporary (dirty) table selection modifications now survive application restart — previously, unchecking/checking schemas and pressing Apply without Save would lose the changes on next launch
 - Sequence sync no longer fails for mixed-case names (e.g. serial sequences of `"MixedCase"` tables): sequence and owner-table identifiers are now quoted in `setval`/`pg_get_serial_sequence` calls, while the owner-column is passed unquoted so it matches the catalog literally
 - Serial sequence sync no longer produces false "has no sequence on destination" warnings — the stage now resolves serial sequences by name and establishes the missing `OWNED BY` link on the destination
 - Copy summary now lists each warning inline with its stage context (e.g. `SKIP [Extensions]: vector`) instead of "review warning entries above"

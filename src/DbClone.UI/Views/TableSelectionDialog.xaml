@@ -31,7 +31,7 @@
                         <StackPanel Orientation="Horizontal">
                             <TextBlock Text="{Binding Name}" TextTrimming="CharacterEllipsis"/>
                             <TextBlock Text="{Binding RelationshipIndicator}" VerticalAlignment="Center"
-                                       Foreground="{ui:ThemeResource TextFillColorSecondaryBrush}"/>
+                                       FontSize="14"/>
                         </StackPanel>
                     </DataTemplate>
                 </GridViewColumn.CellTemplate>
@@ -76,7 +76,7 @@
                         <StackPanel Orientation="Horizontal">
                             <TextBlock Text="{Binding Name}" TextWrapping="Wrap"/>
                             <TextBlock Text="{Binding RelationshipIndicator}" VerticalAlignment="Center"
-                                       Foreground="{ui:ThemeResource TextFillColorSecondaryBrush}"/>
+                                       FontSize="14"/>
                         </StackPanel>
                     </DataTemplate>
                 </GridViewColumn.CellTemplate>
@@ -236,6 +236,12 @@
                             <ListView.ItemContainerStyle>
                                 <Style TargetType="ListViewItem">
                                     <Setter Property="ToolTip" Value="{Binding RelationshipTooltip}"/>
+                                    <Style.Triggers>
+                                        <DataTrigger Binding="{Binding HasDependencyWarning}" Value="True">
+                                            <Setter Property="Background" Value="#33FFA500"/>
+                                            <Setter Property="ToolTip" Value="⚠ Parent table is excluded — FK integrity will be broken"/>
+                                        </DataTrigger>
+                                    </Style.Triggers>
                                 </Style>
                             </ListView.ItemContainerStyle>
                         </ListView>
