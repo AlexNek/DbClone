@@ -24,9 +24,12 @@ Repeat the same process for your destination database.
 !!! warning "Destination must exist"
     DbClone does not create the destination database itself. Create an empty database on your target server first (e.g. `CREATE DATABASE my_app_clone;`).
 
+!!! tip "Don't know the database name yet?"
+    You can leave the Database field empty and pick the database later from the destination panel — see [Table Overview (Destination)](../connections/table-overview.md). Backup mode creates its own timestamped database automatically.
+
 ## Step 3: Select Source & Destination
 
-Back on the main screen, select your source and destination from the dropdowns.
+Back on the main screen, select your source and destination from the dropdowns. See [The Main Window](main-window.md) for a walkthrough of all the panels.
 
 ![Select Connections](../images/select-connections.png){ loading=lazy }
 

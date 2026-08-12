@@ -18,7 +18,6 @@ This page collects ideas for potential future enhancements — **nothing here is
 
 | Feature | Priority | Description |
 |---------|----------|-------------|
-| **Manual table filtering** | 💡 Backlog | Choose which tables to include or exclude from a copy via a searchable checklist. Currently all accessible tables are copied (failed tables are auto-skipped). |
 | **Schema-level filtering** | 💡 Backlog | Select entire schemas to include/exclude without toggling the global "Platform Schemas" flag. |
 | **Parallel data copy** | 🔬 Exploratory | Copy multiple tables in parallel using concurrent `COPY` streams to improve throughput on high-bandwidth connections. |
 | **Incremental / CDC sync** | 🔬 Exploratory | Detect changed rows via `xmin`/`max_age` or logical replication slots and transfer only deltas instead of full tables. |
@@ -33,7 +32,6 @@ This page collects ideas for potential future enhancements — **nothing here is
 
 | Feature | Priority | Description |
 |---------|----------|-------------|
-| **Table-level comparison filtering** | 💡 Backlog | Limit comparison to a subset of tables or schemas for faster targeted checks. |
 | **Side-by-side data diff viewer** | 💡 Backlog | Show actual row-level differences in a split-pane viewer after a comparison run. |
 | **Historical comparison snapshots** | 💡 Backlog | Save comparison results over time and diff them to track when drift was introduced. |
 | **Custom comparison rules** | 🔬 Exploratory | Let users define ignore rules (e.g. ignore `updated_at` columns, ignore specific constraints, treat certain enum orderings as equivalent). |
@@ -120,9 +118,10 @@ This page collects ideas for potential future enhancements — **nothing here is
 For reference, these features from earlier roadmaps are **already shipped** in the current release:
 
 - Four copy modes (Full, Resume, Update, Backup)
+- Manual table selection with named presets — choose which tables Copy, Compare, and Backup process, with FK relationship explorer and validation summary
 - Platform auto-detection via `.platform` files (Supabase, Aiven, Neon, Vanilla)
 - Full database comparison with structural DDL diff
-- Dependency-ordered pipeline with 20 stages
+- Dependency-ordered pipeline with 21 stages
 - Connection import/export with AES-256 encryption
 - Connection groups and color coding
 - Real-time progress with per-table ETA

@@ -31,6 +31,7 @@ Update mode syncs changed tables from source to destination without touching unc
 - Does not detect schema changes (new columns, dropped tables)
 - Does not handle row-level deletes — if source has fewer rows than destination, it won't remove the extras (use Full mode for that)
 - For structural changes, run a Full copy instead
+- Requires the "All Tables" selection — Update is blocked with an explanation while a non-default [table selection](../connections/table-selection.md) is active
 
 ## Tips
 

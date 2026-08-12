@@ -41,11 +41,14 @@ nav:
   - Home: index.md
   - Getting Started:
       - Installation: getting-started/installation.md
+      - The Main Window: getting-started/main-window.md
       - First Copy: getting-started/first-copy.md
   - Connections:
       - Managing Connections: connections/managing-connections.md
       - Connection Formats: connections/connection-formats.md
       - Import & Export: connections/import-export.md
+      - Table Selection: connections/table-selection.md
+      - Table Overview (Destination): connections/table-overview.md
   - Copy Modes:
       - Overview: copy-modes/overview.md
       - Full Copy: copy-modes/full.md

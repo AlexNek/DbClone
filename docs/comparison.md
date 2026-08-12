@@ -14,6 +14,9 @@ DbClone includes a standalone comparison feature that lets you diff two database
 
 The comparison checks multiple object types with varying levels of detail:
 
+!!! note "Table selection scopes the comparison"
+    If a [table selection](connections/table-selection.md) is active on the source panel, only the selected tables are compared — target tables outside the selection are ignored and not reported as differences. Non-table objects are compared in full.
+
 ### Tables (structural DDL diff)
 
 Beyond presence and row counts, DbClone performs a detailed structural comparison of each table:

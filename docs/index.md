@@ -6,6 +6,8 @@
 - :material-rocket-launch: **[First Copy](getting-started/first-copy.md)** — Clone your first database in 5 minutes
 - :material-connection: **[Connections](connections/managing-connections.md)** — Manage source and destination connections
 - :material-content-copy: **[Copy Modes](copy-modes/overview.md)** — Full, Resume, Update, and Backup modes
+- :material-table-check: **[Table Selection](connections/table-selection.md)** — Choose which tables Copy, Compare, and Backup process
+- :material-database-search: **[Table Overview](connections/table-overview.md)** — Inspect the tables on the destination database
 - :material-compare: **[Comparison](comparison.md)** — Compare two databases side by side
 - :material-wrench: **[Troubleshooting](troubleshooting.md)** — Common issues and solutions
 - :material-lightbulb-on: **[Possible Future Features](roadmap.md)** — Ideas that wait for user requirements

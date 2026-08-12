@@ -86,7 +86,9 @@ Yes. The `.platform` files are JSON files stored in the `platforms/postgresql/` 
 
 ### Can I copy only specific tables?
 
-DbClone copies all tables it has permission to access by default. Tables that fail during schema creation (e.g., due to missing extensions) are automatically skipped and excluded from the data copy stage. Manual table filtering (choosing which tables to include/exclude) is a possible future feature. See [Possible Future Features](roadmap.md) for this and other ideas.
+Yes. Use [Table Selection](connections/table-selection.md): the source connection panel has a **Tables** dropdown with an **Edit…** dialog where you can check/uncheck individual tables (grouped by schema, searchable, sortable by size) and save named selections as presets. The selection applies to Copy, Compare, and Backup.
+
+Tables that fail during schema creation (e.g., due to missing extensions) are additionally skipped automatically and excluded from the data copy stage.
 
 ### How long does a copy take?
 
