@@ -7,6 +7,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.1.1] - 2026-08-12
+
+### Changed
+- Update banner now shows download progress (spinning indicator), disables the Update button while downloading, and displays a clear error message with Retry/Dismiss options if the installer download or launch fails (e.g. antivirus blocking)
+
 ## [1.1.0] - 2026-08-12
 
 ### Added

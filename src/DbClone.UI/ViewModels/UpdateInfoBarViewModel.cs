@@ -24,6 +24,15 @@ public sealed partial class UpdateInfoBarViewModel : ObservableObject
     [ObservableProperty]
     private string? _changelogUrl;
 
+    [ObservableProperty]
+    private bool _isDownloading;
+
+    [ObservableProperty]
+    private bool _hasError;
+
+    [ObservableProperty]
+    private string _errorMessage = "";
+
     /// <summary>True when a changelog link is available for the user to review.</summary>
     public bool HasChangelog => !string.IsNullOrEmpty(ChangelogUrl);
 
@@ -31,10 +40,18 @@ public sealed partial class UpdateInfoBarViewModel : ObservableObject
     {
         _updateService = updateService;
         _updateService.UpdateCheckCompleted += OnUpdateCheckCompleted;
+        _updateService.InstallProgressChanged += OnInstallProgressChanged;
     }
 
     [RelayCommand]
-    private void InstallUpdate() => _updateService.InstallUpdate();
+    private void InstallUpdate()
+    {
+        IsDownloading = true;
+        HasError = false;
+        ErrorMessage = "";
+        Message = "Downloading update…";
+        _updateService.InstallUpdate();
+    }
 
     [RelayCommand]
     private void ViewReleaseNotes()
@@ -46,6 +63,18 @@ public sealed partial class UpdateInfoBarViewModel : ObservableObject
             FileName = ChangelogUrl,
             UseShellExecute = true
         });
+    }
+
+    [RelayCommand]
+    private void DismissError()
+    {
+        HasError = false;
+        ErrorMessage = "";
+        // Restore the original "available" message
+        if (_updateService.LastCheck is { IsUpdateAvailable: true, Version: { } version })
+            Message = $"Version {version} is available.";
+        else
+            Message = "A new version is available.";
     }
 
     partial void OnChangelogUrlChanged(string? value)
@@ -70,5 +99,33 @@ public sealed partial class UpdateInfoBarViewModel : ObservableObject
             IsOpen = false;
             ChangelogUrl = null;
         }
+    }
+
+    private void OnInstallProgressChanged(object? sender, InstallProgressEventArgs e)
+    {
+        System.Windows.Application.Current.Dispatcher.Invoke(() =>
+        {
+            switch (e.State)
+            {
+                case InstallProgressState.Downloading:
+                    IsDownloading = true;
+                    HasError = false;
+                    Message = "Downloading update…";
+                    break;
+
+                case InstallProgressState.Launching:
+                    IsDownloading = true;
+                    HasError = false;
+                    Message = "Launching installer…";
+                    break;
+
+                case InstallProgressState.Failed:
+                    IsDownloading = false;
+                    HasError = true;
+                    ErrorMessage = e.ErrorMessage ?? "Update failed. Please try again or download manually.";
+                    Message = "Update failed";
+                    break;
+            }
+        });
     }
 }

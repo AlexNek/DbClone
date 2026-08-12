@@ -59,6 +59,9 @@ public interface IUpdateService
 
     /// <summary>Downloads and installs the available update.</summary>
     void InstallUpdate();
+
+    /// <summary>Raised to report download/install progress and errors.</summary>
+    event EventHandler<InstallProgressEventArgs>? InstallProgressChanged;
 }
 
 public sealed class UpdateService : IUpdateService
@@ -100,6 +103,8 @@ public sealed class UpdateService : IUpdateService
 
     public event EventHandler<UpdateCheckCompletedEventArgs>? UpdateCheckCompleted;
 
+    public event EventHandler<InstallProgressEventArgs>? InstallProgressChanged;
+
     public void CheckForUpdates(bool reportErrors = false)
     {
         _logger.LogInformation(
@@ -134,6 +139,10 @@ public sealed class UpdateService : IUpdateService
             return;
         }
 
+        InstallProgressChanged?.Invoke(
+            this,
+            new InstallProgressEventArgs(InstallProgressState.Downloading));
+
         // Fire-and-forget: the download must not block the UI thread.
         _ = InstallUpdateAsync(_lastArgs);
     }
@@ -145,6 +154,10 @@ public sealed class UpdateService : IUpdateService
             // Download ourselves instead of AutoUpdater.DownloadUpdate, which
             // launches .exe installers without arguments (interactive setup).
             var installerPath = await DownloadInstallerAsync(args.DownloadURL);
+
+            InstallProgressChanged?.Invoke(
+                this,
+                new InstallProgressEventArgs(InstallProgressState.Launching));
 
             _logger.LogInformation(
                 "Launching installer {InstallerPath} with arguments '{Arguments}'",
@@ -165,6 +178,22 @@ public sealed class UpdateService : IUpdateService
         catch (Exception ex)
         {
             _logger.LogWarning(ex, "Update install failed");
+
+            var userMessage = ex switch
+            {
+                HttpRequestException => "Download failed. Check your internet connection and try again.",
+                IOException io when io.Message.Contains("access", StringComparison.OrdinalIgnoreCase)
+                    => "File access denied — your antivirus may be blocking the installer. " +
+                       "Try disabling it temporarily or download the update manually from GitHub.",
+                IOException => "Could not save the installer file. Check disk space and try again.",
+                System.ComponentModel.Win32Exception => "Could not launch the installer — it may have been " +
+                       "blocked by your antivirus. Try downloading manually from GitHub.",
+                _ => $"Update failed: {ex.Message}"
+            };
+
+            InstallProgressChanged?.Invoke(
+                this,
+                new InstallProgressEventArgs(InstallProgressState.Failed, userMessage));
         }
     }
 
