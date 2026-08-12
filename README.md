@@ -97,10 +97,10 @@ Download the latest `DbClone-Setup-x.y.z.exe` from [GitHub Releases](https://git
 
 > **Note — Windows SmartScreen:** On first run you may see a "Windows protected your PC" warning. This is normal for open-source apps without a paid code-signing certificate. Click **"More info"** → **"Run anyway"** to proceed. The software is safe — you can verify file integrity via the SHA-256 checksum on the Releases page.
 
-The installer supports silent updates:
+The installer supports silent deployment:
 
-```
-DbClone-Setup-x.y.z.exe /VERYSILENT /SUPPRESSMSGBOXES /NORESTART
+```batch
+DbClone-Setup-x.y.z.exe /quiet
 ```
 
 ## Building from Source
@@ -108,7 +108,6 @@ DbClone-Setup-x.y.z.exe /VERYSILENT /SUPPRESSMSGBOXES /NORESTART
 ### Prerequisites
 
 - [.NET 10 SDK](https://dotnet.microsoft.com/download)
-- [Inno Setup 6](https://jrsoftware.org/isinfo.php) (for installer builds)
 
 ### Build & Run
 
@@ -127,15 +126,16 @@ dotnet test tests/PostgreSql.Tests
 ### Build Installer
 
 ```powershell
-dotnet publish src/DbClone.UI/DbClone.UI.csproj -c Release -r win-x64 --self-contained true -p:PublishDir=bin/publish
-iscc /DAppVersion=1.0.0 installer\DbClone.iss
+.\build-installer-wix.ps1
 ```
 
-Or use the provided script:
+Or use the batch wrapper:
 
-```powershell
-.\build-installer.ps1
+```batch
+build-installer.bat
 ```
+
+The script publishes the app, builds the WiX MSI, builds the Burn bundle (`DbClone-Setup-*.exe`), and copies outputs into `artifacts/`. No separate WiX CLI install needed — `WixToolset.Sdk` is referenced by the installer projects.
 
 ## Architecture
 

@@ -42,7 +42,7 @@ msiexec /i DbClone-x.y.z.msi /qn
 
 ## Auto-Update
 
-DbClone checks for updates automatically on startup (after a 3-second delay). When a new version is available, a dialog prompts you to download and install it.
+DbClone checks for updates automatically on startup (after a 3-second delay). When a new version is available, a non-blocking banner appears at the top of the main window with **Update** and **What's new** buttons. Click **Update** to download and install, or dismiss the banner to continue working.
 
 Updates are applied in-place — no uninstall needed.
 
