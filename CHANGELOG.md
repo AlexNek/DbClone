@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.1.0] - 2026-08-12
+
 ### Added
 - Manual table selection: choose which tables Copy, Compare, and Backup process for a source database
   - Selection dialog with schema tree, search, sorting, table size column, and a foreign-key relationship explorer
