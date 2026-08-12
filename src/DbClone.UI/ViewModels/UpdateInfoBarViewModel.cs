@@ -33,6 +33,9 @@ public sealed partial class UpdateInfoBarViewModel : ObservableObject
     [ObservableProperty]
     private string _errorMessage = "";
 
+    [ObservableProperty]
+    private string _progressText = "";
+
     /// <summary>True when a changelog link is available for the user to review.</summary>
     public bool HasChangelog => !string.IsNullOrEmpty(ChangelogUrl);
 
@@ -46,10 +49,8 @@ public sealed partial class UpdateInfoBarViewModel : ObservableObject
     [RelayCommand]
     private void InstallUpdate()
     {
-        IsDownloading = true;
-        HasError = false;
-        ErrorMessage = "";
-        Message = "Downloading update…";
+        // Installation state is established by the service's synchronous
+        // Downloading event (OnInstallProgressChanged) — no eager UI updates here.
         _updateService.InstallUpdate();
     }
 
@@ -103,25 +104,35 @@ public sealed partial class UpdateInfoBarViewModel : ObservableObject
 
     private void OnInstallProgressChanged(object? sender, InstallProgressEventArgs e)
     {
-        System.Windows.Application.Current.Dispatcher.Invoke(() =>
+        System.Windows.Application.Current.Dispatcher.InvokeAsync(() =>
         {
             switch (e.State)
             {
                 case InstallProgressState.Downloading:
                     IsDownloading = true;
                     HasError = false;
+                    ProgressText = "Starting…";
                     Message = "Downloading update…";
+                    break;
+
+                case InstallProgressState.DownloadProgress:
+                    IsDownloading = true;
+                    HasError = false;
+                    ProgressText = $"{e.ProgressPercent}%";
+                    Message = $"Downloading update… {e.ProgressPercent}%";
                     break;
 
                 case InstallProgressState.Launching:
                     IsDownloading = true;
                     HasError = false;
+                    ProgressText = "Installing…";
                     Message = "Launching installer…";
                     break;
 
                 case InstallProgressState.Failed:
                     IsDownloading = false;
                     HasError = true;
+                    ProgressText = "";
                     ErrorMessage = e.ErrorMessage ?? "Update failed. Please try again or download manually.";
                     Message = "Update failed";
                     break;

@@ -4,6 +4,7 @@ namespace DbClone.UI.Services;
 public enum InstallProgressState
 {
     Downloading,
+    DownloadProgress,
     Launching,
     Failed
 }

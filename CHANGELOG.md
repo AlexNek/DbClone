@@ -7,10 +7,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+
 ## [1.1.1] - 2026-08-12
+### Changed
+
+### Fixed
+- Update install errors caused by file-access denial (e.g. antivirus blocking the downloaded installer) now show the same recovery guidance as other access errors instead of a generic failure message
 
 ### Changed
 - Update banner now shows download progress (spinning indicator), disables the Update button while downloading, and displays a clear error message with Retry/Dismiss options if the installer download or launch fails (e.g. antivirus blocking)
+- The update banner's close button is now disabled while the installer is downloading, so the progress/error state cannot be dismissed mid-download
 
 ## [1.1.0] - 2026-08-12
 

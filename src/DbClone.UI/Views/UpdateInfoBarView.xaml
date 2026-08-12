@@ -15,14 +15,18 @@
 
         <ui:InfoBar
             Grid.Row="0"
-            IsClosable="True"
             IsOpen="{Binding IsOpen, Mode=TwoWay}"
             Title="Update available"
             Message="{Binding Message}">
             <ui:InfoBar.Style>
                 <Style TargetType="ui:InfoBar">
                     <Setter Property="Severity" Value="Success" />
+                    <Setter Property="IsClosable" Value="True" />
                     <Style.Triggers>
+                        <!--  Keep the bar open while the installer download is running  -->
+                        <DataTrigger Binding="{Binding IsDownloading}" Value="True">
+                            <Setter Property="IsClosable" Value="False" />
+                        </DataTrigger>
                         <DataTrigger Binding="{Binding HasError}" Value="True">
                             <Setter Property="Severity" Value="Error" />
                         </DataTrigger>
@@ -43,13 +47,21 @@
             Orientation="Horizontal"
             Visibility="{Binding IsOpen, Converter={StaticResource BoolToVis}}">
 
-            <!--  Progress ring during download  -->
-            <ui:ProgressRing
-                Width="18"
-                Height="18"
+            <!--  Progress ring + percentage during download  -->
+            <StackPanel
+                Orientation="Horizontal"
                 Margin="0,0,10,0"
-                IsIndeterminate="True"
-                Visibility="{Binding IsDownloading, Converter={StaticResource BoolToVis}}" />
+                Visibility="{Binding IsDownloading, Converter={StaticResource BoolToVis}}">
+                <ui:ProgressRing
+                    Width="18"
+                    Height="18"
+                    Margin="0,0,6,0"
+                    IsIndeterminate="True" />
+                <TextBlock
+                    VerticalAlignment="Center"
+                    FontSize="12"
+                    Text="{Binding ProgressText}" />
+            </StackPanel>
 
             <!--  What's new button (hidden during download/error)  -->
             <ui:Button

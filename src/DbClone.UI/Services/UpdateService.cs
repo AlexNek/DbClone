@@ -143,8 +143,8 @@ public sealed class UpdateService : IUpdateService
             this,
             new InstallProgressEventArgs(InstallProgressState.Downloading));
 
-        // Fire-and-forget: the download must not block the UI thread.
-        _ = InstallUpdateAsync(_lastArgs);
+        // Run on a thread-pool thread so the UI thread stays responsive.
+        _ = Task.Run(() => InstallUpdateAsync(_lastArgs));
     }
 
     private async Task InstallUpdateAsync(UpdateInfoEventArgs args)
@@ -153,7 +153,7 @@ public sealed class UpdateService : IUpdateService
         {
             // Download ourselves instead of AutoUpdater.DownloadUpdate, which
             // launches .exe installers without arguments (interactive setup).
-            var installerPath = await DownloadInstallerAsync(args.DownloadURL);
+            var installerPath = await DownloadInstallerAsync(args.DownloadURL).ConfigureAwait(false);
 
             InstallProgressChanged?.Invoke(
                 this,
@@ -182,6 +182,8 @@ public sealed class UpdateService : IUpdateService
             var userMessage = ex switch
             {
                 HttpRequestException => "Download failed. Check your internet connection and try again.",
+                UnauthorizedAccessException => "File access denied — your antivirus may be blocking the installer. " +
+                       "Try disabling it temporarily or download the update manually from GitHub.",
                 IOException io when io.Message.Contains("access", StringComparison.OrdinalIgnoreCase)
                     => "File access denied — your antivirus may be blocking the installer. " +
                        "Try disabling it temporarily or download the update manually from GitHub.",
@@ -197,7 +199,7 @@ public sealed class UpdateService : IUpdateService
         }
     }
 
-    private static async Task<string> DownloadInstallerAsync(string url)
+    private async Task<string> DownloadInstallerAsync(string url)
     {
         var fileName = Path.GetFileName(new Uri(url).AbsolutePath);
         if (string.IsNullOrWhiteSpace(fileName))
@@ -208,9 +210,35 @@ public sealed class UpdateService : IUpdateService
         using var http = new HttpClient();
         http.DefaultRequestHeaders.UserAgent.ParseAdd("DbClone-AutoUpdater");
 
-        using var stream = await http.GetStreamAsync(url);
+        using var response = await http.GetAsync(url, HttpCompletionOption.ResponseHeadersRead).ConfigureAwait(false);
+        response.EnsureSuccessStatusCode();
+
+        var totalBytes = response.Content.Headers.ContentLength;
+        await using var contentStream = await response.Content.ReadAsStreamAsync().ConfigureAwait(false);
         await using var file = File.Create(target);
-        await stream.CopyToAsync(file);
+
+        var buffer = new byte[81920];
+        long bytesRead = 0;
+        int lastReportedPercent = -1;
+        int read;
+
+        while ((read = await contentStream.ReadAsync(buffer).ConfigureAwait(false)) > 0)
+        {
+            await file.WriteAsync(buffer.AsMemory(0, read)).ConfigureAwait(false);
+            bytesRead += read;
+
+            if (totalBytes > 0)
+            {
+                var percent = (int)(bytesRead * 100 / totalBytes.Value);
+                if (percent != lastReportedPercent)
+                {
+                    lastReportedPercent = percent;
+                    InstallProgressChanged?.Invoke(
+                        this,
+                        new InstallProgressEventArgs(InstallProgressState.DownloadProgress, progressPercent: percent));
+                }
+            }
+        }
 
         return target;
     }
