@@ -143,8 +143,12 @@ public sealed class UpdateService : IUpdateService
             this,
             new InstallProgressEventArgs(InstallProgressState.Downloading));
 
+        // Capture the update data now so the background task uses the args
+        // selected by this check, not a later OnCheckForUpdate reassignment.
+        var args = _lastArgs;
+
         // Run on a thread-pool thread so the UI thread stays responsive.
-        _ = Task.Run(() => InstallUpdateAsync(_lastArgs));
+        _ = Task.Run(() => InstallUpdateAsync(args));
     }
 
     private async Task InstallUpdateAsync(UpdateInfoEventArgs args)
