@@ -39,6 +39,7 @@ public static class PostgreSqlServiceRegistration
         services.AddSingleton<PgDdlGenerator>();
         services.AddSingleton<IDdlGenerator>(sp => sp.GetRequiredService<PgDdlGenerator>());
         services.AddSingleton<IPgExecutorFactory, PgExecutorFactory>();
+        services.AddSingleton<IPgConnectionProvider, PgConnectionProvider>();
 
         // Pipeline stages (registered as ICopyStage implementations)
         services.AddTransient<ICopyStage, ConnectStage>();

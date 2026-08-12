@@ -9,6 +9,7 @@ using DbClone.PostgreSql.Pipeline;
 
 using FluentAssertions;
 
+using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Logging.Abstractions;
 
 using Npgsql;
@@ -25,12 +26,18 @@ public class CreateIndexesStageTests
 {
     private readonly ISqlExecutor _executor = Substitute.For<ISqlExecutor>();
     private readonly IPgExecutorFactory _factory = Substitute.For<IPgExecutorFactory>();
+    private readonly IPgConnectionProvider _connectionProvider = Substitute.For<IPgConnectionProvider>();
     private readonly CreateIndexesStage _stage;
 
     public CreateIndexesStageTests()
     {
         _factory.Create(Arg.Any<NpgsqlConnection>()).Returns(_executor);
-        _stage = new CreateIndexesStage(new PgDdlGenerator(), _factory, NullLoggerFactory.Instance);
+        _connectionProvider.GetDestinationConnectionAsync(
+                Arg.Any<CopyContext>(),
+                Arg.Any<Microsoft.Extensions.Logging.ILogger>(),
+                Arg.Any<CancellationToken>())
+            .Returns(DestConnection);
+        _stage = new CreateIndexesStage(new PgDdlGenerator(), _factory, _connectionProvider, NullLoggerFactory.Instance);
     }
 
     [Fact]

@@ -7,8 +7,6 @@ using DbClone.PostgreSql.Execution;
 
 using Microsoft.Extensions.Logging;
 
-using Npgsql;
-
 namespace DbClone.PostgreSql.Pipeline;
 
 /// <summary>
@@ -18,6 +16,8 @@ namespace DbClone.PostgreSql.Pipeline;
 /// </summary>
 public sealed class CreateIndexesStage : ICopyStage
 {
+    private readonly IPgConnectionProvider _connectionProvider;
+
     private readonly PgDdlGenerator _ddl;
 
     private readonly IPgExecutorFactory _executorFactory;
@@ -31,10 +31,15 @@ public sealed class CreateIndexesStage : ICopyStage
     public int Order => 95;
 
     /// <summary>Initializes a new instance.</summary>
-    public CreateIndexesStage(PgDdlGenerator ddl, IPgExecutorFactory executorFactory, ILoggerFactory loggerFactory)
+    public CreateIndexesStage(
+        PgDdlGenerator ddl,
+        IPgExecutorFactory executorFactory,
+        IPgConnectionProvider connectionProvider,
+        ILoggerFactory loggerFactory)
     {
         _ddl = ddl;
         _executorFactory = executorFactory;
+        _connectionProvider = connectionProvider;
         _loggerFactory = loggerFactory;
     }
 
@@ -65,20 +70,7 @@ public sealed class CreateIndexesStage : ICopyStage
         var model = context.SourceModel!;
         var logger = _loggerFactory.CreateLogger<CreateIndexesStage>();
 
-        var conn = await PgConnectionHelper.ValidateAndReopenAsync(
-                       context,
-                       isSource: false,
-                       logger,
-                       cancellationToken);
-        if (conn is null)
-            return new StageResult(
-                Name,
-                false,
-                TimeSpan.Zero,
-                0,
-                    [StageDetail.ConnectionFailed(ECompareSide.Destination)]);
-
-        var executor = _executorFactory.Create(conn);
+        ISqlExecutor? executor = null;
 
         var totalIndexes = 0;
         var failedIndexes = 0;
@@ -106,6 +98,30 @@ public sealed class CreateIndexesStage : ICopyStage
                 table.Indexes,
                 table.SchemaName,
                 table.Name);
+
+            if (indexStmts.Count == 0)
+                continue;
+
+            // Defer connection validation until we actually need to execute SQL.
+            // This avoids unnecessary connection round-trips when all indexes are
+            // skipped or filtered out (primary/constraint).
+            if (executor is null)
+            {
+                var conn = await _connectionProvider.GetDestinationConnectionAsync(
+                               context,
+                               logger,
+                               cancellationToken);
+                if (conn is null)
+                    return new StageResult(
+                        Name,
+                        false,
+                        TimeSpan.Zero,
+                        0,
+                            [StageDetail.ConnectionFailed(ECompareSide.Destination)]);
+
+                executor = _executorFactory.Create(conn);
+            }
+
             foreach (var sql in indexStmts)
             {
                 cancellationToken.ThrowIfCancellationRequested();
