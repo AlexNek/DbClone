@@ -67,7 +67,7 @@ public sealed class ConnectStage : ICopyStage
         catch (Exception ex)
         {
             _logger.LogError(ex, "Failed to connect to source server {Server}", sourceLabel);
-            details.Add(StageDetail.Exception(ex.Message));
+            details.Add(StageDetail.ConnectionFailed(ECompareSide.Source, ex.Message, sourceLabel));
             return new StageResult(
                 Name,
                 false,
@@ -95,7 +95,7 @@ public sealed class ConnectStage : ICopyStage
         {
             await sourceConn.DisposeAsync();
             _logger.LogError(ex, "Failed to connect to destination server {Server}", destLabel);
-            details.Add(StageDetail.Exception(ex.Message));
+            details.Add(StageDetail.ConnectionFailed(ECompareSide.Destination, ex.Message, destLabel));
             return new StageResult(
                 Name,
                 false,

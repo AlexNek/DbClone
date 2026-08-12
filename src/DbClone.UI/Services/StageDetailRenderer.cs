@@ -50,10 +50,7 @@ internal static class StageDetailRenderer
                 ? $"{error.ObjectName}{(reason is not null ? $": {reason}" : "")}"
                 : reason ?? "Skipped",
             EStageMessageKind.Exception => reason ?? "Unexpected error",
-            EStageMessageKind.ConnectionFailed => error.Properties is not null &&
-                error.Properties.TryGetValue(PropKeys.Side, out var s)
-                ? $"Cannot establish live connection to {((ECompareSide)s).ToDisplayText()}"
-                : "Connection failed",
+            EStageMessageKind.ConnectionFailed => RenderConnectionFailedError(error),
             _ => reason ?? error.ObjectName ?? error.Kind.ToString()
         };
     }
@@ -103,8 +100,32 @@ internal static class StageDetailRenderer
     private static string RenderStillMismatched(StageDetail d) =>
         $"STILL MISMATCHED: {d.ObjectName}: source={d.Get<long>(PropKeys.SourceRows)}, dest={d.Get<long>(PropKeys.DestRows)}";
 
-    private static string RenderConnectionFailed(StageDetail d) =>
-        $"Cannot establish live connection to {d.Get<ECompareSide>(PropKeys.Side).ToDisplayText()}";
+    private static string RenderConnectionFailed(StageDetail d)
+    {
+        var side = d.Get<ECompareSide>(PropKeys.Side).ToDisplayText();
+        var host = d.Has(PropKeys.Host) ? d.Get<string>(PropKeys.Host) : null;
+        var reason = d.Has(PropKeys.Reason) ? d.Get<string>(PropKeys.Reason) : null;
+
+        var target = host is not null ? $"{side} ({host})" : side;
+        return reason is not null
+            ? $"Cannot connect to {target}: {reason}"
+            : $"Cannot establish live connection to {target}";
+    }
+
+    private static string RenderConnectionFailedError(CopyError error)
+    {
+        if (error.Properties is null || !error.Properties.TryGetValue(PropKeys.Side, out var s))
+            return "Connection failed";
+
+        var side = ((ECompareSide)s).ToDisplayText();
+        var host = error.Properties.TryGetValue(PropKeys.Host, out var h) ? (string)h : null;
+        var reason = error.Properties.TryGetValue(PropKeys.Reason, out var r) ? (string)r : null;
+
+        var target = host is not null ? $"{side} ({host})" : side;
+        return reason is not null
+            ? $"Cannot connect to {target}: {reason}"
+            : $"Cannot establish live connection to {target}";
+    }
 
     private static string RenderSummary(StageDetail d)
     {
