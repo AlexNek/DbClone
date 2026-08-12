@@ -15,18 +15,17 @@
 
         <ui:InfoBar
             Grid.Row="0"
+            IsClosable="{Binding IsDownloading, Converter={StaticResource InvertBoolConverter}}"
             IsOpen="{Binding IsOpen, Mode=TwoWay}"
             Title="Update available"
             Message="{Binding Message}">
             <ui:InfoBar.Style>
-                <Style TargetType="ui:InfoBar">
+                <!--  BasedOn is required: without it this explicit style replaces WPF-UI's
+                      implicit theme style and the InfoBar loses its ControlTemplate
+                      (icon, title, message, close button, severity colors).  -->
+                <Style BasedOn="{StaticResource {x:Type ui:InfoBar}}" TargetType="ui:InfoBar">
                     <Setter Property="Severity" Value="Success" />
-                    <Setter Property="IsClosable" Value="True" />
                     <Style.Triggers>
-                        <!--  Keep the bar open while the installer download is running  -->
-                        <DataTrigger Binding="{Binding IsDownloading}" Value="True">
-                            <Setter Property="IsClosable" Value="False" />
-                        </DataTrigger>
                         <DataTrigger Binding="{Binding HasError}" Value="True">
                             <Setter Property="Severity" Value="Error" />
                         </DataTrigger>

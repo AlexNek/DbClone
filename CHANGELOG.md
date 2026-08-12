@@ -7,9 +7,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-
 ## [1.1.1] - 2026-08-12
-### Changed
 
 ### Fixed
 - Update install errors caused by file-access denial (e.g. antivirus blocking the downloaded installer) now show the same recovery guidance as other access errors instead of a generic failure message
