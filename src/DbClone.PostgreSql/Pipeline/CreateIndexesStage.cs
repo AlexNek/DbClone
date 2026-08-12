@@ -1,10 +1,13 @@
 using DbClone.Application.DTOs;
 using DbClone.Application.Enums;
+using DbClone.Application.Interfaces;
 using DbClone.Application.Copy;
 using DbClone.PostgreSql.Ddl;
 using DbClone.PostgreSql.Execution;
 
 using Microsoft.Extensions.Logging;
+
+using Npgsql;
 
 namespace DbClone.PostgreSql.Pipeline;
 
@@ -17,6 +20,8 @@ public sealed class CreateIndexesStage : ICopyStage
 {
     private readonly PgDdlGenerator _ddl;
 
+    private readonly IPgExecutorFactory _executorFactory;
+
     private readonly ILoggerFactory _loggerFactory;
 
     /// <inheritdoc />
@@ -26,9 +31,10 @@ public sealed class CreateIndexesStage : ICopyStage
     public int Order => 95;
 
     /// <summary>Initializes a new instance.</summary>
-    public CreateIndexesStage(PgDdlGenerator ddl, ILoggerFactory loggerFactory)
+    public CreateIndexesStage(PgDdlGenerator ddl, IPgExecutorFactory executorFactory, ILoggerFactory loggerFactory)
     {
         _ddl = ddl;
+        _executorFactory = executorFactory;
         _loggerFactory = loggerFactory;
     }
 
@@ -58,14 +64,8 @@ public sealed class CreateIndexesStage : ICopyStage
 
         var model = context.SourceModel!;
         var logger = _loggerFactory.CreateLogger<CreateIndexesStage>();
-        var conn = await PgConnectionHelper.EnsureDestinationOpenAsync(
-                       context,
-                       logger,
-                       cancellationToken);
-        var executor = new PgSqlExecutor(
-            conn,
-            _loggerFactory.CreateLogger<PgSqlExecutor>(),
-            TimeSpan.FromMinutes(5));
+        var conn = (NpgsqlConnection)context.DestinationConnection!;
+        var executor = _executorFactory.Create(conn);
 
         var totalIndexes = 0;
         var failedIndexes = 0;
@@ -74,12 +74,10 @@ public sealed class CreateIndexesStage : ICopyStage
 
         foreach (var table in model.Tables)
         {
-            var qualifiedTableName =
-                PgIdentifierQuoter.QuoteSchemaQualified(table.SchemaName, table.Name);
-
             // Tables that failed to create → their indexes cannot be created either.
             // Report explicitly as skipped so the user sees why the count differs.
-            if (context.SkippedTables.Contains(qualifiedTableName))
+            if (context.SkippedTables.Contains(
+                    new Application.Models.TableId(table.SchemaName, table.Name)))
             {
                 foreach (var idx in table.Indexes.Where(i => !i.IsPrimary))
                 {

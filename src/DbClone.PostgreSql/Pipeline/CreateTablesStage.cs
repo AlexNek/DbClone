@@ -17,6 +17,8 @@ public sealed class CreateTablesStage : ICopyStage
 {
     private readonly PgDdlGenerator _ddl;
 
+    private readonly IPgExecutorFactory _executorFactory;
+
     private readonly ILoggerFactory _loggerFactory;
 
     /// <inheritdoc />
@@ -26,9 +28,10 @@ public sealed class CreateTablesStage : ICopyStage
     public int Order => 70;
 
     /// <summary>Initializes a new instance.</summary>
-    public CreateTablesStage(PgDdlGenerator ddl, ILoggerFactory loggerFactory)
+    public CreateTablesStage(PgDdlGenerator ddl, IPgExecutorFactory executorFactory, ILoggerFactory loggerFactory)
     {
         _ddl = ddl;
+        _executorFactory = executorFactory;
         _loggerFactory = loggerFactory;
     }
 
@@ -58,10 +61,7 @@ public sealed class CreateTablesStage : ICopyStage
         var statements = _ddl.GenerateCreateTableStatements(model.Tables);
 
         var conn = (NpgsqlConnection)context.DestinationConnection!;
-        var executor = new PgSqlExecutor(
-            conn,
-            _loggerFactory.CreateLogger<PgSqlExecutor>(),
-            TimeSpan.FromMinutes(5));
+        var executor = _executorFactory.Create(conn);
 
         // Create each table individually so one failure (e.g. unsupported type on the
         // destination) does not abort the remaining tables.
@@ -83,11 +83,16 @@ public sealed class CreateTablesStage : ICopyStage
                 // (e.g. vault.secrets depends on supabase_vault). Such tables are
                 // reported as notifications so the user can decide how to proceed,
                 // but they do not fail the overall copy.
-                var blockedByExtension = FindBlockingExtension(context, tableName);
+                var dotIdx = tableName.IndexOf('.');
+                var tableId = dotIdx > 0
+                    ? new Application.Models.TableId(tableName[..dotIdx], tableName[(dotIdx + 1)..])
+                    : new Application.Models.TableId(string.Empty, tableName);
+
+                var blockedByExtension = FindBlockingExtension(context, tableId);
                 if (blockedByExtension is not null)
                 {
                     skipped++;
-                    context.SkippedTables.Add(tableName);
+                    context.SkippedTables.Add(tableId);
                     var reason = $"requires unavailable extension '{blockedByExtension}'";
                     logger.LogWarning(
                         ex,
@@ -109,7 +114,7 @@ public sealed class CreateTablesStage : ICopyStage
                 else
                 {
                     failed++;
-                    context.SkippedTables.Add(tableName);
+                    context.SkippedTables.Add(tableId);
                     var userMsg = PgExceptionHelper.GetUserMessage(ex);
                     logger.LogError(
                         ex,
@@ -143,15 +148,14 @@ public sealed class CreateTablesStage : ICopyStage
     /// Determines whether a failed table belongs to a schema owned by an extension
     /// that could not be created on the destination. Returns the extension name, or null.
     /// </summary>
-    private static string? FindBlockingExtension(CopyContext context, string qualifiedTableName)
+    private static string? FindBlockingExtension(CopyContext context, Application.Models.TableId tableId)
     {
         foreach (var (extensionName, schemaName) in context.SkippedExtensions)
         {
             if (string.IsNullOrEmpty(schemaName))
                 continue;
 
-            var schemaPrefix = PgIdentifierQuoter.QuoteIdentifier(schemaName) + ".";
-            if (qualifiedTableName.StartsWith(schemaPrefix, StringComparison.OrdinalIgnoreCase))
+            if (string.Equals(tableId.Schema, schemaName, StringComparison.OrdinalIgnoreCase))
                 return extensionName;
         }
 

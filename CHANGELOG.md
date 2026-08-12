@@ -30,6 +30,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Error banner and status display are now cleared when the connection or connection group is changed — previously an error from an earlier run remained visible after switching connections
 - Connections, connection groups, table selection, and copy/compare options can no longer be changed while an operation is running — the controls are disabled until the operation finishes
 - Connection failure error now shows which side (source/destination) failed and the configured host:port/database, instead of only the raw TCP error with a resolved IP
+- Table selection now correctly excludes objects (sequences, triggers, policies, foreign keys) owned by partitions of excluded parent tables — previously only the explicitly excluded table's objects were filtered, leaving orphaned-partition dependents behind
+- Table selection now skips materialized views that depend on an excluded table (same as ordinary views) — previously they were retained and could fail during creation
+- Skipped-table tracking in the copy pipeline now uses the typed `TableId` key instead of fragile formatted strings — previously mixed-case table names could slip through and attempt data copy after their creation had already failed
 
 ## [1.0.4] - 2026-08-09
 

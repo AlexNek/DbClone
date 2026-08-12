@@ -55,7 +55,7 @@ Presets store the tables you **unchecked** — not an explicit include-list. Con
 
 ## How Operations Use the Selection
 
-The active selection applies to **Copy, Compare, and Backup** alike. Objects that belong to an excluded table (its data, indexes, own foreign keys, triggers) are excluded with it. Schemas, sequences, functions, types, and extensions are not affected by table selection.
+The active selection applies to **Copy, Compare, and Backup** alike. Objects that belong to an excluded table (its data, indexes, own foreign keys, triggers) are excluded with it. Sequences owned by an excluded table (identity/serial backing sequences) are excluded with the table; standalone sequences are not affected. Schemas, functions, types, and extensions are not affected by table selection.
 
 ### Copy
 
@@ -89,7 +89,7 @@ Resume and Update modes **require "All Tables"**. While a non-default selection 
 
 ## Dependency handling at runtime
 
-The operation never fails because of a filtered table — it skips and reports:
+When partial filtering is active, the operation skips affected dependents and reports them:
 
 | Situation | Behavior |
 |-----------|----------|
@@ -97,6 +97,8 @@ The operation never fails because of a filtered table — it skips and reports:
 | View / materialized view depends on an excluded table | View is skipped, warning logged |
 | Partition selected but parent excluded (or vice versa) | Orphaned partition is skipped, warning logged |
 | Trigger on an excluded table | Automatically excluded with the table |
+
+If the active selection excludes **every** table in the source database, the operation fails immediately instead of copying nothing.
 
 ## Destination Table Overview
 

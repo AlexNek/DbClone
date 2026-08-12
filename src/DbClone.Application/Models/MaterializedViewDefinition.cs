@@ -9,4 +9,5 @@ public sealed record MaterializedViewDefinition(
     string Definition,
     string? Tablespace,
     IReadOnlyList<string> Columns,
-    string? Comment);
+    string? Comment,
+    IReadOnlyList<string>? ReferencedRelations = null);

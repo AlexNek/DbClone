@@ -39,8 +39,18 @@ public partial class TableOverviewDialog : Window
         base.OnClosing(e);
     }
 
-    private async void OnLoadedAsync(object sender, RoutedEventArgs e) =>
-        await _vm.LoadAsync(_cts.Token);
+    private async void OnLoadedAsync(object sender, RoutedEventArgs e)
+    {
+        try
+        {
+            await _vm.LoadAsync(_cts.Token);
+        }
+        catch (OperationCanceledException) { }
+        catch (Exception ex)
+        {
+            MessageBox.Show(this, ex.Message, "Load Error", MessageBoxButton.OK, MessageBoxImage.Error);
+        }
+    }
 
     private void OnViewModelPropertyChanged(object? sender, PropertyChangedEventArgs e)
     {

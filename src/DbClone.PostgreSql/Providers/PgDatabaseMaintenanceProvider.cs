@@ -7,6 +7,7 @@ using DbClone.Application.Models;
 using Microsoft.Extensions.Logging;
 
 using Npgsql;
+using NpgsqlTypes;
 
 namespace DbClone.PostgreSql.Providers;
 
@@ -406,65 +407,83 @@ public sealed class PgDatabaseMaintenanceProvider : IDatabaseMaintenanceProvider
         // Dependent views/materialized views are removed together with the
         // selected tables — they cannot survive without the tables they read.
         var dependentViews = await FindDependentViewsAsync(conn, oids, ct);
-        foreach (var (view, relKind) in dependentViews)
-        {
-            var keyword = relKind == PgRelKind.MaterializedView
-                ? "MATERIALIZED VIEW"
-                : "VIEW";
-            try
-            {
-                await using var dropCmd = new NpgsqlCommand(
-                    $"DROP {keyword} IF EXISTS {QuoteIdent(view.Schema)}.{QuoteIdent(view.Name)} CASCADE",
-                    conn);
-                await dropCmd.ExecuteNonQueryAsync(ct);
-                logMessage($"Dropped dependent view: {view.FullName}");
-            }
-            catch (PostgresException ex) when (IsLockOrStatementTimeout(ex))
-            {
-                LogLockTimeoutError(logMessage, dbName, $"DROP {keyword} \"{view.FullName}\"", ex);
-                return false;
-            }
-            catch (Exception ex)
-            {
-                logMessage(
-                    $"ERROR: could not drop dependent view {view.FullName}: {PgExceptionHelper.GetUserMessage(ex)}");
-                _logger.LogError(
-                    ex,
-                    "Selection-scoped clean failed on view {View} in {DbName}",
-                    view.FullName,
-                    dbName);
-                return false;
-            }
-        }
 
-        foreach (var (_, id) in existing)
+        // Wrap all DROP commands in a single transaction so a mid-way failure
+        // rolls back every prior drop, leaving the database unchanged.
+        await using var txn = await conn.BeginTransactionAsync(ct);
+        try
         {
-            try
+            foreach (var (view, relKind) in dependentViews)
             {
-                // CASCADE is safe here: the boundary check already proved that no
-                // unlisted table references this table, and dependent views were
-                // dropped above. Owned sequences/indexes/triggers follow the table.
-                await using var dropCmd = new NpgsqlCommand(
-                    $"DROP TABLE IF EXISTS {QuoteIdent(id.Schema)}.{QuoteIdent(id.Name)} CASCADE",
-                    conn);
-                await dropCmd.ExecuteNonQueryAsync(ct);
+                var keyword = relKind == PgRelKind.MaterializedView
+                    ? "MATERIALIZED VIEW"
+                    : "VIEW";
+                try
+                {
+                    await using var dropCmd = new NpgsqlCommand(
+                        $"DROP {keyword} IF EXISTS {QuoteIdent(view.Schema)}.{QuoteIdent(view.Name)} CASCADE",
+                        conn);
+                    dropCmd.Transaction = txn;
+                    await dropCmd.ExecuteNonQueryAsync(ct);
+                    logMessage($"Dropped dependent view: {view.FullName}");
+                }
+                catch (PostgresException ex) when (IsLockOrStatementTimeout(ex))
+                {
+                    LogLockTimeoutError(logMessage, dbName, $"DROP {keyword} \"{view.FullName}\"", ex);
+                    return false;
+                }
+                catch (Exception ex)
+                {
+                    logMessage(
+                        $"ERROR: could not drop dependent view {view.FullName}: {PgExceptionHelper.GetUserMessage(ex)}");
+                    _logger.LogError(
+                        ex,
+                        "Selection-scoped clean failed on view {View} in {DbName}",
+                        view.FullName,
+                        dbName);
+                    return false;
+                }
             }
-            catch (PostgresException ex) when (IsLockOrStatementTimeout(ex))
+
+            foreach (var (_, id) in existing)
             {
-                LogLockTimeoutError(logMessage, dbName, $"DROP TABLE \"{id.FullName}\"", ex);
-                return false;
+                try
+                {
+                    // CASCADE is safe here: the boundary check already proved that no
+                    // unlisted table references this table, and dependent views were
+                    // dropped above. Owned sequences/indexes/triggers follow the table.
+                    await using var dropCmd = new NpgsqlCommand(
+                        $"DROP TABLE IF EXISTS {QuoteIdent(id.Schema)}.{QuoteIdent(id.Name)} CASCADE",
+                        conn);
+                    dropCmd.Transaction = txn;
+                    await dropCmd.ExecuteNonQueryAsync(ct);
+                }
+                catch (PostgresException ex) when (IsLockOrStatementTimeout(ex))
+                {
+                    LogLockTimeoutError(logMessage, dbName, $"DROP TABLE \"{id.FullName}\"", ex);
+                    return false;
+                }
+                catch (Exception ex)
+                {
+                    logMessage(
+                        $"ERROR: could not drop table {id.FullName}: {PgExceptionHelper.GetUserMessage(ex)}");
+                    _logger.LogError(
+                        ex,
+                        "Selection-scoped clean failed on {Table} in {DbName}",
+                        id.FullName,
+                        dbName);
+                    return false;
+                }
             }
-            catch (Exception ex)
-            {
-                logMessage(
-                    $"ERROR: could not drop table {id.FullName}: {PgExceptionHelper.GetUserMessage(ex)}");
-                _logger.LogError(
-                    ex,
-                    "Selection-scoped clean failed on {Table} in {DbName}",
-                    id.FullName,
-                    dbName);
-                return false;
-            }
+
+            await txn.CommitAsync(ct);
+        }
+        catch (Exception) when (txn.Connection != null)
+        {
+            // If we reach here from an unexpected path, the await-using
+            // disposal will call Rollback automatically; re-throw to let
+            // outer catch handle logging.
+            throw;
         }
 
         logMessage(
@@ -481,7 +500,7 @@ public sealed class PgDatabaseMaintenanceProvider : IDatabaseMaintenanceProvider
     /// Maps the requested table identities to the catalog oids that actually
     /// exist in the target database.
     /// </summary>
-    private static async Task<List<(long Oid, TableId Id)>> ResolveExistingTablesAsync(
+    private static async Task<List<(uint Oid, TableId Id)>> ResolveExistingTablesAsync(
         NpgsqlConnection conn,
         IReadOnlyCollection<TableId> tables,
         CancellationToken ct)
@@ -499,7 +518,7 @@ public sealed class PgDatabaseMaintenanceProvider : IDatabaseMaintenanceProvider
         cmd.Parameters.AddWithValue("schemas", schemas);
         cmd.Parameters.AddWithValue("names", names);
 
-        var existing = new List<(long, TableId)>();
+        var existing = new List<(uint, TableId)>();
         await using var reader = await cmd.ExecuteReaderAsync(ct);
         while (await reader.ReadAsync(ct))
         {
@@ -517,7 +536,7 @@ public sealed class PgDatabaseMaintenanceProvider : IDatabaseMaintenanceProvider
     /// </summary>
     private static async Task<bool> VerifySelectionBoundaryAsync(
         NpgsqlConnection conn,
-        long[] oids,
+        uint[] oids,
         HashSet<TableId> dropSet,
         Action<string> logMessage,
         CancellationToken ct)
@@ -537,7 +556,7 @@ public sealed class PgDatabaseMaintenanceProvider : IDatabaseMaintenanceProvider
                            WHERE con.contype = 'f' AND tc.oid = ANY(@oids)",
                          conn))
         {
-            fkCmd.Parameters.AddWithValue("oids", oids);
+            fkCmd.Parameters.Add(new NpgsqlParameter("oids", NpgsqlDbType.Array | NpgsqlDbType.Oid) { Value = oids });
             await using var reader = await fkCmd.ExecuteReaderAsync(ct);
             while (await reader.ReadAsync(ct))
             {
@@ -562,7 +581,7 @@ public sealed class PgDatabaseMaintenanceProvider : IDatabaseMaintenanceProvider
                            WHERE pc.oid = ANY(@oids) OR cc.oid = ANY(@oids)",
                          conn))
         {
-            partCmd.Parameters.AddWithValue("oids", oids);
+            partCmd.Parameters.Add(new NpgsqlParameter("oids", NpgsqlDbType.Array | NpgsqlDbType.Oid) { Value = oids });
             await using var reader = await partCmd.ExecuteReaderAsync(ct);
             while (await reader.ReadAsync(ct))
             {
@@ -595,7 +614,7 @@ public sealed class PgDatabaseMaintenanceProvider : IDatabaseMaintenanceProvider
     /// </summary>
     private static async Task<List<(TableId Id, string RelKind)>> FindDependentViewsAsync(
         NpgsqlConnection conn,
-        long[] oids,
+        uint[] oids,
         CancellationToken ct)
     {
         await using var cmd = new NpgsqlCommand(
@@ -606,7 +625,7 @@ public sealed class PgDatabaseMaintenanceProvider : IDatabaseMaintenanceProvider
                    UNION
                    SELECT d.objid
                    FROM pg_depend d
-                   JOIN dep ON d.refobjid = dep.oid
+                   JOIN dep ON d.refobjid = dep.objid
                    WHERE d.classid = 'pg_class'::regclass
                )
                SELECT DISTINCT n.nspname, c.relname, c.relkind
@@ -617,7 +636,7 @@ public sealed class PgDatabaseMaintenanceProvider : IDatabaseMaintenanceProvider
                  AND n.nspname NOT IN ({PgSystemSchemas.SqlList})
                ORDER BY 1, 2",
             conn);
-        cmd.Parameters.AddWithValue("oids", oids);
+        cmd.Parameters.Add(new NpgsqlParameter("oids", NpgsqlDbType.Array | NpgsqlDbType.Oid) { Value = oids });
 
         var views = new List<(TableId, string)>();
         await using var reader = await cmd.ExecuteReaderAsync(ct);

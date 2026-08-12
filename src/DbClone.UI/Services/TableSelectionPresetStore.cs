@@ -286,10 +286,13 @@ public sealed class TableSelectionPresetStore : ITableSelectionPresetStore
                 Directory.CreateDirectory(directory);
 
             List<DatabaseEntryDto> snapshot;
+            string json;
             lock (_lock)
+            {
                 snapshot = [.. _databases];
+                json = JsonSerializer.Serialize(snapshot, JsonOptions);
+            }
 
-            var json = JsonSerializer.Serialize(snapshot, JsonOptions);
             File.WriteAllText(_storePath, json);
         }
         catch (Exception ex)

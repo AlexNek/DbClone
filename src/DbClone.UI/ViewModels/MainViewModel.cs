@@ -37,6 +37,8 @@ public sealed partial class MainViewModel : ObservableObject
 
     private readonly ITableFilterApplier _filterApplier;
 
+    private readonly ILogger<MainViewModel> _logger;
+
     private readonly DispatcherTimer? _memoryTimer;
 
     private readonly ITableSelectionPresetNameValidator _presetNameValidator;
@@ -130,6 +132,7 @@ public sealed partial class MainViewModel : ObservableObject
         _presetStore = presetStore;
         _filterApplier = filterApplier;
         _presetNameValidator = presetNameValidator;
+        _logger = serviceProvider.GetRequiredService<ILogger<MainViewModel>>();
 
         // Load settings
         Settings = settingsService.Load();
@@ -289,20 +292,20 @@ public sealed partial class MainViewModel : ObservableObject
 
         // Restore the last-used table selection preset for the initial source
         // connection, then follow source connection switches.
-        _ = source.TableSelection.LoadForConnectionAsync(source.SelectedSavedConnection);
+        RunAndLogFailures(source.TableSelection.LoadForConnectionAsync(source.SelectedSavedConnection), "LoadForConnectionAsync (source initial)");
         source.PropertyChanged += (_, e) =>
         {
             if (e.PropertyName == nameof(ConnectionViewModel.SelectedSavedConnection))
-                _ = source.TableSelection!.LoadForConnectionAsync(source.SelectedSavedConnection);
+                RunAndLogFailures(source.TableSelection!.LoadForConnectionAsync(source.SelectedSavedConnection), "LoadForConnectionAsync (source changed)");
         };
 
         // Restore the destination table overview for the initial connection,
         // then follow destination connection switches.
-        _ = destination.TableOverview.LoadForConnectionAsync(destination.SelectedSavedConnection);
+        RunAndLogFailures(destination.TableOverview.LoadForConnectionAsync(destination.SelectedSavedConnection), "LoadForConnectionAsync (destination initial)");
         destination.PropertyChanged += (_, e) =>
         {
             if (e.PropertyName == nameof(ConnectionViewModel.SelectedSavedConnection))
-                _ = destination.TableOverview!.LoadForConnectionAsync(destination.SelectedSavedConnection);
+                RunAndLogFailures(destination.TableOverview!.LoadForConnectionAsync(destination.SelectedSavedConnection), "LoadForConnectionAsync (destination changed)");
         };
 
         // Update banner — self-contained component with its own ViewModel
@@ -324,6 +327,13 @@ public sealed partial class MainViewModel : ObservableObject
     }
 
     // ── Private helpers ─────────────────────────────────────────────────────────
+
+    private void RunAndLogFailures(Task task, string operation)
+    {
+        task.ContinueWith(
+            t => _logger.LogError(t.Exception!.InnerException ?? t.Exception, "{Operation} failed", operation),
+            TaskContinuationOptions.OnlyOnFaulted);
+    }
 
     private static bool IsConnectionProperty(string? name) =>
         name switch

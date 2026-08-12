@@ -123,6 +123,72 @@ public class ApplyTableFilterStageTests
         result.StageResults.Should().ContainSingle(); // the next stage never ran
     }
 
+    [Fact]
+    public async Task ExecuteAsync_MixedCaseExclusion_FiltersCorrectly()
+    {
+        // Arrange
+        // Verify the full stage path with case mismatch
+        var model = CreateModel(
+            Table("Sales", "Orders"), Table("public", "items"));
+        var spec = TableSelectionSpec.Excluding([new TableId("SALES", "orders")]);
+        var context = CreateContext(spec, model);
+        var stage = CreateStage();
+
+        // Act
+        var result = await stage.ExecuteAsync(context);
+
+        // Assert
+        result.Success.Should().BeTrue();
+        context.SourceModel!.Tables.Should()
+            .ContainSingle().Which.Name.Should().Be("items");
+    }
+
+    [Fact]
+    public async Task ExecuteAsync_PartitionWithTrigger_EmitsWarningForPartitionAndRemovesTrigger()
+    {
+        // Arrange
+        var partition = Table("public", "orders_2024", parentTable: "public.orders");
+        var trigger = new TriggerDefinition(
+            "public", "orders_2024_audit", "orders_2024", "AFTER", ["INSERT"],
+            "public", "audit_fn", true, true, null, null);
+        var model = CreateModel(
+            tables: [Table("public", "orders"), partition, Table("public", "items")],
+            triggers: [trigger]);
+        var spec = TableSelectionSpec.Excluding([new TableId("public", "orders")]);
+        var context = CreateContext(spec, model);
+        var stage = CreateStage();
+
+        // Act
+        var result = await stage.ExecuteAsync(context);
+
+        // Assert
+        result.Success.Should().BeTrue();
+        context.SourceModel!.Triggers.Should().BeEmpty();
+        context.Warnings.Should().Contain(w => w.ObjectName == "public.orders_2024");
+    }
+
+    [Fact]
+    public async Task ExecuteAsync_MaterializedViewDependingOnExcluded_EmitsWarning()
+    {
+        // Arrange
+        var mv = new MaterializedViewDefinition(
+            "public", "order_mv", "SELECT ...", null, ["count"], null, ["public.orders"]);
+        var model = CreateModel(
+            tables: [Table("public", "items")],
+            materializedViews: [mv]);
+        var spec = TableSelectionSpec.Excluding([new TableId("public", "orders")]);
+        var context = CreateContext(spec, model);
+        var stage = CreateStage();
+
+        // Act
+        var result = await stage.ExecuteAsync(context);
+
+        // Assert
+        result.Success.Should().BeTrue();
+        context.SourceModel!.MaterializedViews.Should().BeEmpty();
+        context.Warnings.Should().Contain(w => w.ObjectName == "public.order_mv");
+    }
+
     // ── Fixture helpers ────────────────────────────────────────────────────────
 
     private static ApplyTableFilterStage CreateStage() =>
@@ -172,6 +238,29 @@ public class ApplyTableFilterStageTests
             CompositeTypes: [],
             Functions: [],
             Triggers: [],
+            Policies: [],
+            Publications: [],
+            Subscriptions: [],
+            Extensions: []);
+
+    private static DatabaseModel CreateModel(
+        IReadOnlyList<TableDefinition>? tables = null,
+        IReadOnlyList<ViewDefinition>? views = null,
+        IReadOnlyList<MaterializedViewDefinition>? materializedViews = null,
+        IReadOnlyList<TriggerDefinition>? triggers = null) =>
+        new(
+            DatabaseName: "testdb",
+            ServerVersion: "17.0",
+            Schemas: [],
+            Tables: tables ?? [],
+            Views: views ?? [],
+            MaterializedViews: materializedViews ?? [],
+            Sequences: [],
+            Enums: [],
+            Domains: [],
+            CompositeTypes: [],
+            Functions: [],
+            Triggers: triggers ?? [],
             Policies: [],
             Publications: [],
             Subscriptions: [],

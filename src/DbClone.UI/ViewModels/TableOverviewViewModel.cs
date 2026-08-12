@@ -29,6 +29,8 @@ public sealed partial class TableOverviewViewModel : ObservableObject
 
     private readonly List<TableOverviewItem> _allItems = [];
 
+    private CancellationTokenSource? _loadCts;
+
     private string _sortColumn = "Schema";
 
     private bool _sortDescending;
@@ -146,7 +148,10 @@ public sealed partial class TableOverviewViewModel : ObservableObject
         HasDatabaseSelected = true;
         DatabaseChanged = true;
 
-        _ = LoadTablesAsync(CancellationToken.None);
+        _loadCts?.Cancel();
+        _loadCts?.Dispose();
+        _loadCts = new CancellationTokenSource();
+        _ = LoadTablesAsync(_loadCts.Token);
     }
 
     // ── Database browsing ──────────────────────────────────────────────────────
@@ -215,7 +220,7 @@ public sealed partial class TableOverviewViewModel : ObservableObject
             UpdateCounts();
             RefreshVisibleTables();
 
-            _ = LoadSizesAsync();
+            _ = LoadSizesAsync(ct);
         }
         catch (Exception ex) when (ex is not OperationCanceledException)
         {
@@ -263,11 +268,14 @@ public sealed partial class TableOverviewViewModel : ObservableObject
         SelectedSchemaNode = SchemaNodes.FirstOrDefault();
     }
 
-    private async Task LoadSizesAsync()
+    private async Task LoadSizesAsync(CancellationToken ct)
     {
         try
         {
-            var sizes = await _dbService.GetTableSizesAsync(_connection, CancellationToken.None);
+            var sizes = await _dbService.GetTableSizesAsync(_connection, ct);
+
+            if (ct.IsCancellationRequested)
+                return;
 
             foreach (var size in sizes)
             {
@@ -282,6 +290,10 @@ public sealed partial class TableOverviewViewModel : ObservableObject
             {
                 RefreshVisibleTables();
             }
+        }
+        catch (OperationCanceledException)
+        {
+            // intentionally empty — load was superseded
         }
         catch (Exception ex)
         {

@@ -28,97 +28,157 @@ public partial class TableSelectionDialog : Window
         Loaded += OnLoadedAsync;
     }
 
-    private async void ApplyAnywayClick(object sender, RoutedEventArgs e) =>
-        await CommitAndCloseAsync();
+    private async void ApplyAnywayClick(object sender, RoutedEventArgs e)
+    {
+        try
+        {
+            await CommitAndCloseAsync();
+        }
+        catch (OperationCanceledException) { }
+        catch (Exception ex)
+        {
+            MessageBox.Show(this, ex.Message, "Error", MessageBoxButton.OK, MessageBoxImage.Error);
+        }
+    }
 
     private async void ApplyClick(object sender, RoutedEventArgs e)
     {
-        if (_vm.IsSelectionEmpty)
+        try
         {
-            MessageBox.Show(
-                this,
-                "At least one table must be selected when the database contains tables.",
-                "Empty Selection",
-                MessageBoxButton.OK,
-                MessageBoxImage.Warning);
-            return;
-        }
+            if (_vm.IsSelectionEmpty)
+            {
+                MessageBox.Show(
+                    this,
+                    "At least one table must be selected when the database contains tables.",
+                    "Empty Selection",
+                    MessageBoxButton.OK,
+                    MessageBoxImage.Warning);
+                return;
+            }
 
-        // FR17 — a modified selection on "All Tables" suggests saving it first.
-        if (_vm.IsAllTablesLoaded && _vm.IsDialogDirty)
+            // FR17 — a modified selection on "All Tables" suggests saving it first.
+            if (_vm.IsAllTablesLoaded && _vm.IsDialogDirty)
+            {
+                var answer = MessageBox.Show(
+                    this,
+                    "You have a custom selection. Save it as a named selection?",
+                    "Save Selection",
+                    MessageBoxButton.YesNoCancel,
+                    MessageBoxImage.Question);
+
+                if (answer == MessageBoxResult.Cancel) return;
+
+                if (answer == MessageBoxResult.Yes && !await PromptSaveAsAsync()) return;
+            }
+
+            if (_vm.HasValidationIssues())
+            {
+                _vm.ShowValidationSummary = true;
+                return;
+            }
+
+            await CommitAndCloseAsync();
+        }
+        catch (OperationCanceledException) { }
+        catch (Exception ex)
         {
-            var answer = MessageBox.Show(
-                this,
-                "You have a custom selection. Save it as a named selection?",
-                "Save Selection",
-                MessageBoxButton.YesNoCancel,
-                MessageBoxImage.Question);
-
-            if (answer == MessageBoxResult.Cancel) return;
-
-            if (answer == MessageBoxResult.Yes && !await PromptSaveAsAsync()) return;
+            MessageBox.Show(this, ex.Message, "Error", MessageBoxButton.OK, MessageBoxImage.Error);
         }
-
-        if (_vm.HasValidationIssues())
-        {
-            _vm.ShowValidationSummary = true;
-            return;
-        }
-
-        await CommitAndCloseAsync();
     }
 
     private async void CancelClick(object sender, RoutedEventArgs e)
     {
-        if (!await ConfirmDiscardAsync()) return;
+        try
+        {
+            if (!await ConfirmDiscardAsync()) return;
 
-        DialogResult = false;
-        Close();
+            DialogResult = false;
+            Close();
+        }
+        catch (OperationCanceledException) { }
+        catch (Exception ex)
+        {
+            MessageBox.Show(this, ex.Message, "Error", MessageBoxButton.OK, MessageBoxImage.Error);
+        }
     }
 
-    private async void DeleteClick(object sender, RoutedEventArgs e) =>
-        await _vm.DeletePresetAsync();
+    private async void DeleteClick(object sender, RoutedEventArgs e)
+    {
+        try
+        {
+            await _vm.DeletePresetAsync();
+        }
+        catch (OperationCanceledException) { }
+        catch (Exception ex)
+        {
+            MessageBox.Show(this, ex.Message, "Error", MessageBoxButton.OK, MessageBoxImage.Error);
+        }
+    }
 
     private void GoBackClick(object sender, RoutedEventArgs e) =>
         _vm.HideValidationSummaryCommand.Execute(null);
 
     private async void RenameClick(object sender, RoutedEventArgs e)
     {
-        var dialog = new PresetNameDialog
+        try
         {
-            Owner = this,
-            Title = "Rename Preset",
-            InitialName = _vm.LoadedPresetName ?? string.Empty
-        };
+            var dialog = new PresetNameDialog
+            {
+                Owner = this,
+                Title = "Rename Preset",
+                InitialName = _vm.LoadedPresetName ?? string.Empty
+            };
 
-        if (dialog.ShowDialog() != true) return;
+            if (dialog.ShowDialog() != true) return;
 
-        var error = await _vm.RenamePresetAsync(dialog.PresetName);
+            var error = await _vm.RenamePresetAsync(dialog.PresetName);
 
-        if (error is not null)
+            if (error is not null)
+            {
+                MessageBox.Show(this, error, "Rename Preset", MessageBoxButton.OK, MessageBoxImage.Warning);
+            }
+        }
+        catch (OperationCanceledException) { }
+        catch (Exception ex)
         {
-            MessageBox.Show(this, error, "Rename Preset", MessageBoxButton.OK, MessageBoxImage.Warning);
+            MessageBox.Show(this, ex.Message, "Error", MessageBoxButton.OK, MessageBoxImage.Error);
         }
     }
 
-    private async void SaveAsClick(object sender, RoutedEventArgs e) =>
-        await PromptSaveAsAsync();
+    private async void SaveAsClick(object sender, RoutedEventArgs e)
+    {
+        try
+        {
+            await PromptSaveAsAsync();
+        }
+        catch (OperationCanceledException) { }
+        catch (Exception ex)
+        {
+            MessageBox.Show(this, ex.Message, "Error", MessageBoxButton.OK, MessageBoxImage.Error);
+        }
+    }
 
     private async void SaveClick(object sender, RoutedEventArgs e)
     {
-        var error = await _vm.SavePresetAsync();
-
-        if (error is not null)
+        try
         {
-            MessageBox.Show(this, error, "Save Preset", MessageBoxButton.OK, MessageBoxImage.Warning);
+            var error = await _vm.SavePresetAsync();
+
+            if (error is not null)
+            {
+                MessageBox.Show(this, error, "Save Preset", MessageBoxButton.OK, MessageBoxImage.Warning);
+            }
+        }
+        catch (OperationCanceledException) { }
+        catch (Exception ex)
+        {
+            MessageBox.Show(this, ex.Message, "Error", MessageBoxButton.OK, MessageBoxImage.Error);
         }
     }
 
     /// <inheritdoc />
     protected override void OnClosing(CancelEventArgs e)
     {
-        _cts.Cancel();
-
         // Closing via the X button — prompt before discarding unsaved modifications.
         if (!_committed && DialogResult is null && _vm.IsDialogDirty)
         {
@@ -136,6 +196,7 @@ public partial class TableSelectionDialog : Window
             }
         }
 
+        _cts.Cancel();
         base.OnClosing(e);
     }
 
@@ -162,8 +223,18 @@ public partial class TableSelectionDialog : Window
         return await Task.FromResult(discard == MessageBoxResult.Yes);
     }
 
-    private async void OnLoadedAsync(object sender, RoutedEventArgs e) =>
-        await _vm.LoadAsync(_cts.Token);
+    private async void OnLoadedAsync(object sender, RoutedEventArgs e)
+    {
+        try
+        {
+            await _vm.LoadAsync(_cts.Token);
+        }
+        catch (OperationCanceledException) { }
+        catch (Exception ex)
+        {
+            MessageBox.Show(this, ex.Message, "Load Error", MessageBoxButton.OK, MessageBoxImage.Error);
+        }
+    }
 
     private void OnViewModelPropertyChanged(object? sender, PropertyChangedEventArgs e)
     {
