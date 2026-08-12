@@ -64,7 +64,20 @@ public sealed class CreateIndexesStage : ICopyStage
 
         var model = context.SourceModel!;
         var logger = _loggerFactory.CreateLogger<CreateIndexesStage>();
-        var conn = (NpgsqlConnection)context.DestinationConnection!;
+
+        var conn = await PgConnectionHelper.ValidateAndReopenAsync(
+                       context,
+                       isSource: false,
+                       logger,
+                       cancellationToken);
+        if (conn is null)
+            return new StageResult(
+                Name,
+                false,
+                TimeSpan.Zero,
+                0,
+                    [StageDetail.ConnectionFailed(ECompareSide.Destination)]);
+
         var executor = _executorFactory.Create(conn);
 
         var totalIndexes = 0;
