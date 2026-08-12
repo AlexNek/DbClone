@@ -324,7 +324,7 @@ INSERT INTO test_all_types (
     'CHAR      ', 'VARCHAR', 'Neon PG18 test: !@#$%^&*()', E'\\xdeadbeef',
     '2026-08-01', '23:59:59', '23:59:59+05', '2026-08-01 23:59:59', '2026-08-01 23:59:59+00', '1 year 2 months',
     true, gen_random_uuid(), '192.168.1.1', '192.168.1.0/24', '08:00:2b:01:02:03', '08:00:2b:01:02:03:04:05',
-    B'10101010', B'1010101010101010', '(1.5, 2.5)', '{1,2,3}', '((1,2),(3,4))', '((1,2),(3,4))', '((1,2),(3,4),(5,6))', '<(1,2),3>',
+    B'10101010', B'1010101010101010', '(1.5, 2.5)', '{1,2,3}', '((1,2),(3,4))', '((1,2),(3,4))', '((1,2),(3,4),(5,6))', '((1,2),(3,4),(5,6),(1,2))', '<(1,2),3>',
     '{"key": "value"}', '{"key": "value"}', '<root><child>text</child></root>',
     to_tsvector('english', 'quick brown fox'), to_tsquery('english', 'quick & fox'),
     '[1, 10)', '[100, 1000)', '(1.1, 9.9)', '[2026-01-01, 2026-12-31)', '[2026-01-01 00:00:00+00, 2026-12-31 23:59:59+00)', '[2026-01-01, 2026-12-31)',
@@ -333,9 +333,9 @@ INSERT INTO test_all_types (
 ),
 (
     NULL, NULL, NULL, NULL, NULL, NULL, NULL, '', '', '', NULL, 
-    'infinity', '-infinity', NULL, '-infinity', 'infinity', NULL, 
-    false, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, 
-    NULL, '{}'::jsonb, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL,
+    'infinity', '00:00:00', NULL, '-infinity', 'infinity', NULL, 
+    false, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, 
+    NULL, '{}'::jsonb, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL,
     NULL, NULL,
     NULL, NULL, NULL, NULL
 );
@@ -346,7 +346,9 @@ INSERT INTO test_pg17_types (col_vector, col_json_path) VALUES
 ('[0.9, 0.8, 0.7]', '$.employees[0].salary');
 
 INSERT INTO test_partitioned_range (created_at, tenant_id, data)
-SELECT '2024-01-01'::timestamptz + (random() * (interval '2 years')), (random() * 200)::int, 'Data row ' || i
+-- 2.5 years pushes ~20% of rows past the last bound (2026-01-01, 200)
+-- so the DEFAULT partition receives data too.
+SELECT '2024-01-01'::timestamptz + (random() * (interval '2.5 years')), (random() * 200)::int, 'Data row ' || i
 FROM generate_series(1, 5000) i;
 
 INSERT INTO test_partitioned_hash (id, payload)
@@ -357,6 +359,20 @@ SELECT setval('custom_seq', 5000);
 
 INSERT INTO test_identity_generated (base_val) VALUES (10), (20), (30);
 INSERT INTO test_pg18_types (base_value) VALUES (100), (200), (300);
+
+-- RLS table data: the policy uses tenant_id = current_setting('app.current_tenant_id'),
+-- and WITH CHECK falls back to the USING expression, so the session must hold the
+-- matching tenant setting or the INSERT itself is rejected.
+SET app.current_tenant_id = '1';
+INSERT INTO test_rls (tenant_id, data) VALUES
+(1, 'Tenant 1 — row A'),
+(1, 'Tenant 1 — row B');
+
+SET app.current_tenant_id = '2';
+INSERT INTO test_rls (tenant_id, data) VALUES
+(2, 'Tenant 2 — row A');
+
+RESET app.current_tenant_id;
 
 -- Enum/domain table data (exercises all enum values + domain constraints)
 INSERT INTO test_enum_domain (status, priority, contact_email, quantity, region_code, completion, notes) VALUES

@@ -33,6 +33,8 @@ public sealed partial class CopyOperationViewModel : ObservableObject, IWorkflow
 
     private readonly ViewModelStateManager _stateManager;
 
+    private readonly ITableSelectionService _tableSelectionService;
+
     [ObservableProperty]
     private string _currentPhase = "Ready";
 
@@ -94,6 +96,7 @@ public sealed partial class CopyOperationViewModel : ObservableObject, IWorkflow
         CopyOperationOrchestrator orchestrator,
         SettingsPersistenceManager settingsPersister,
         ViewModelStateManager stateManager,
+        ITableSelectionService tableSelectionService,
         UserSettings settings,
         OperationContext ctx)
     {
@@ -102,6 +105,7 @@ public sealed partial class CopyOperationViewModel : ObservableObject, IWorkflow
         _orchestrator = orchestrator;
         _settingsPersister = settingsPersister;
         _stateManager = stateManager;
+        _tableSelectionService = tableSelectionService;
         Settings = settings;
         _ctx = ctx;
         State = new WorkflowState();
@@ -143,6 +147,55 @@ public sealed partial class CopyOperationViewModel : ObservableObject, IWorkflow
     [RelayCommand(CanExecute = nameof(CanStartCopy))]
     private async Task StartCopyAsync(CancellationToken cancellationToken)
     {
+        // A copy needs a concrete database on both sides — except Backup mode,
+        // which auto-creates a new database on the destination server.
+        if (string.IsNullOrWhiteSpace(_ctx.Source.DatabaseName))
+        {
+            State.BeginNewRun();
+            State.LogError(
+                "Source connection has no database name. Copy requires a specific database.");
+            State.ShowBanner(
+                "Copy blocked",
+                "The source connection has no database name — select a specific database to copy from.",
+                Wpf.Ui.Controls.InfoBarSeverity.Error);
+            return;
+        }
+
+        if (Settings.SelectedCopyMode != ECopyMode.Backup
+            && string.IsNullOrWhiteSpace(_ctx.Destination.DatabaseName))
+        {
+            State.BeginNewRun();
+            State.LogError(
+                "Destination connection has no database name. "
+                + $"{Settings.SelectedCopyMode} mode requires a specific database — "
+                + "backup-only connections can only be used in Backup mode.");
+            State.ShowBanner(
+                "Copy blocked",
+                "The destination connection has no database name. Choose Backup mode, or enter a database name on the destination connection.",
+                Wpf.Ui.Controls.InfoBarSeverity.Error);
+            return;
+        }
+
+        // Resume/Update replay against already-copied state and require the
+        // full table set — a filtered resume could skip already-copied tables or
+        // leave partial tables inconsistent.
+        var tableSelection = _tableSelectionService.OperationSpec;
+        if (tableSelection is not null
+            && Settings.SelectedCopyMode is ECopyMode.Resume or ECopyMode.Update)
+        {
+            State.BeginNewRun();
+            State.LogError(
+                $"{Settings.SelectedCopyMode} mode requires the \"All Tables\" selection. "
+                + "Resume and Update replay against previously copied tables and cannot run with a filtered table selection.");
+            State.LogHint(
+                "Switch the source panel table selection back to \"All Tables\", or use Full/Backup mode with the current selection.");
+            State.ShowBanner(
+                $"{Settings.SelectedCopyMode} is not available with a table selection",
+                "Switch back to \"All Tables\" to use Resume/Update, or choose Full/Backup mode.",
+                Wpf.Ui.Controls.InfoBarSeverity.Warning);
+            return;
+        }
+
         _settingsPersister.SaveNow();
 
         _operationCts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
@@ -155,6 +208,9 @@ public sealed partial class CopyOperationViewModel : ObservableObject, IWorkflow
         ResetProgress();
         CurrentPhase = "Starting...";
         State.Log($"Starting copy: {_ctx.Source.Summary} → {_ctx.Destination.Summary}");
+        if (tableSelection is not null)
+            State.Log(
+                $"Table selection active: {tableSelection.ExcludedTables.Count} table(s) excluded via preset selection");
 
         _stateManager.BeginOperation();
 
@@ -173,7 +229,8 @@ public sealed partial class CopyOperationViewModel : ObservableObject, IWorkflow
                     CopySequences: true,
                     CopyMode: Settings.SelectedCopyMode,
                     VerifyMode: Settings.SelectedVerifyMode,
-                    ExcludePlatformSchemas: !Settings.CopyPlatformSchemas));
+                    ExcludePlatformSchemas: !Settings.CopyPlatformSchemas,
+                    TableSelection: tableSelection));
 
             var listener = new CopyProgressUIListener(this, State);
 
@@ -213,9 +270,10 @@ public sealed partial class CopyOperationViewModel : ObservableObject, IWorkflow
                     State.LogDetail($"Functions: {result.Statistics.FunctionsCopied}");
                     if (result.Warnings.Count > 0)
                     {
-                        State.LogDetail(
-                            $"Skipped/failed objects: {result.Warnings.Count} — review warning entries above to decide how to proceed",
-                            ELogLevel.Warning);
+                        foreach (var w in result.Warnings)
+                            State.LogDetail(
+                                StageDetailRenderer.RenderWarningSummary(w),
+                                ELogLevel.Warning);
                     }
                 }
                 else

@@ -317,7 +317,11 @@ public sealed class PgDdlGenerator : IDdlGenerator
     /// <inheritdoc />
     public string GenerateSetSequenceValue(string schemaName, string sequenceName, long value)
     {
-        return $"SELECT setval('{schemaName}.{sequenceName}', {value}, true);";
+        // setval's text argument is cast to regclass and parsed like an unquoted
+        // identifier (case-folded to lowercase) — the name must be quoted inside
+        // the literal to preserve case and special characters.
+        var qualified = EscapeString(PgIdentifierQuoter.QuoteSchemaQualified(schemaName, sequenceName));
+        return $"SELECT setval('{qualified}', {value}, true);";
     }
 
     private static string EscapeString(string value) => value.Replace("'", "''");

@@ -2,6 +2,7 @@ using System.Diagnostics;
 
 using DbClone.Application.DTOs;
 using DbClone.Application.Enums;
+using DbClone.Application.Interfaces;
 using DbClone.Application.Models;
 using DbClone.Application.Copy;
 using DbClone.PostgreSql.Execution;
@@ -17,6 +18,8 @@ namespace DbClone.PostgreSql.Pipeline;
 /// </summary>
 public sealed class CopyDataStage : ICopyStage
 {
+    private readonly IPgExecutorFactory _executorFactory;
+
     private readonly ILoggerFactory _loggerFactory;
 
     /// <inheritdoc />
@@ -26,7 +29,11 @@ public sealed class CopyDataStage : ICopyStage
     public int Order => 90;
 
     /// <summary>Initializes a new instance.</summary>
-    public CopyDataStage(ILoggerFactory loggerFactory) => _loggerFactory = loggerFactory;
+    public CopyDataStage(IPgExecutorFactory executorFactory, ILoggerFactory loggerFactory)
+    {
+        _executorFactory = executorFactory;
+        _loggerFactory = loggerFactory;
+    }
 
     /// <inheritdoc />
     public async Task<StageResult> ExecuteAsync(
@@ -73,21 +80,35 @@ public sealed class CopyDataStage : ICopyStage
             // depend on an unavailable extension). The user is notified via warnings.
             if (context.SkippedTables.Count > 0)
             {
+                var excluded = tablesToCopy
+                    .Where(t => context.SkippedTables.Contains(
+                                    new Application.Models.TableId(t.SchemaName, t.Name)))
+                    .ToList();
+
+                if (excluded.Count > 0)
+                {
+                    logger.LogWarning(
+                        "CopyData: skipping {Count} table(s) that could not be created on the destination",
+                        excluded.Count);
+
+                    foreach (var t in excluded)
+                    {
+                        logger.LogWarning("  Skipping data copy for {Table} (table creation failed earlier)",
+                            $"{t.SchemaName}.{t.Name}");
+                    }
+                }
+
                 tablesToCopy = tablesToCopy
                     .Where(t => !context.SkippedTables.Contains(
-                                    PgIdentifierQuoter.QuoteSchemaQualified(t.SchemaName, t.Name)))
+                                    new Application.Models.TableId(t.SchemaName, t.Name)))
                     .ToList();
             }
 
             // Resume/Update mode: compare row counts and only copy tables that are missing or mismatched
             if (context.Request.Options.CopyMode is ECopyMode.Resume or ECopyMode.Update)
             {
-                var sourceExec = new PgSqlExecutor(
-                    sourceConn,
-                    _loggerFactory.CreateLogger<PgSqlExecutor>());
-                var destExec = new PgSqlExecutor(
-                    destConn,
-                    _loggerFactory.CreateLogger<PgSqlExecutor>());
+                var sourceExec = _executorFactory.Create(sourceConn);
+                var destExec = _executorFactory.Create(destConn);
                 var filteredTables = new List<TableDefinition>();
 
                 foreach (var table in tablesToCopy)
@@ -179,9 +200,7 @@ public sealed class CopyDataStage : ICopyStage
             // Pre-count total rows across tables that will actually be copied.
             // SkippedTables are already excluded from tablesToCopy at this point.
             long grandTotalRows = 0;
-            var rowCountExec = new PgSqlExecutor(
-                sourceConn,
-                _loggerFactory.CreateLogger<PgSqlExecutor>());
+            var rowCountExec = _executorFactory.Create(sourceConn);
             foreach (var t in tablesToCopy)
             {
                 if (t.IsPartitioned) continue;
@@ -275,6 +294,13 @@ public sealed class CopyDataStage : ICopyStage
                                   StageDetail.Statistic("Rows", stats.TotalRowsCopied),
                                   StageDetail.Statistic("Bytes", stats.TotalBytesTransferred)
                               };
+
+            // Report tables excluded from data copy so the user sees them in the log
+            if (context.SkippedTables.Count > 0)
+            {
+                details.Add(StageDetail.Statistic(
+                    "Tables skipped (creation failed)", context.SkippedTables.Count));
+            }
 
             if (context.Request.Options.CopyMode != ECopyMode.Full)
             {

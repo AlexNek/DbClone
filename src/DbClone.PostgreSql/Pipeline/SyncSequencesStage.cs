@@ -1,5 +1,6 @@
 using DbClone.Application.DTOs;
 using DbClone.Application.Enums;
+using DbClone.Application.Interfaces;
 using DbClone.Application.Copy;
 using DbClone.PostgreSql.Ddl;
 using DbClone.PostgreSql.Execution;
@@ -17,6 +18,8 @@ public sealed class SyncSequencesStage : ICopyStage
 {
     private readonly PgDdlGenerator _ddl;
 
+    private readonly IPgExecutorFactory _executorFactory;
+
     private readonly ILoggerFactory _loggerFactory;
 
     /// <inheritdoc />
@@ -26,9 +29,13 @@ public sealed class SyncSequencesStage : ICopyStage
     public int Order => 110;
 
     /// <summary>Initializes a new instance.</summary>
-    public SyncSequencesStage(PgDdlGenerator ddl, ILoggerFactory loggerFactory)
+    public SyncSequencesStage(
+        PgDdlGenerator ddl,
+        IPgExecutorFactory executorFactory,
+        ILoggerFactory loggerFactory)
     {
         _ddl = ddl;
+        _executorFactory = executorFactory;
         _loggerFactory = loggerFactory;
     }
 
@@ -46,13 +53,9 @@ public sealed class SyncSequencesStage : ICopyStage
                     [StageDetail.Skipped(reason: "CopyMode=Resume/Update")]);
 
         var model = context.SourceModel!;
-        var sourceConn = (NpgsqlConnection)context.SourceConnection!;
-        var destConn = (NpgsqlConnection)context.DestinationConnection!;
 
-        var sourceExec = new PgSqlExecutor(
-            sourceConn,
-            _loggerFactory.CreateLogger<PgSqlExecutor>());
-        var destExec = new PgSqlExecutor(destConn, _loggerFactory.CreateLogger<PgSqlExecutor>());
+        var sourceExec = _executorFactory.Create((NpgsqlConnection)context.SourceConnection!);
+        var destExec = _executorFactory.Create((NpgsqlConnection)context.DestinationConnection!);
 
         var synced = 0;
         var skipped = 0;
@@ -72,11 +75,22 @@ public sealed class SyncSequencesStage : ICopyStage
                 string destSchema, destName;
                 if (seq.IsOwned && seq.OwnerColumn is not null)
                 {
+                    var (ownerSchema, ownerTable) = ParseQualifiedSequence(seq.OwnerTable!);
+
+                    // The table argument is parsed as an identifier (case-folded unless
+                    // quoted) — pass it quoted so mixed-case tables resolve correctly.
+                    // The column argument is matched LITERALLY against pg_attribute
+                    // (case-sensitive, no identifier parsing) — pass it raw, otherwise
+                    // a quoted name searches for a column containing quote characters.
+                    var tableArg = EscapeSqlLiteral(
+                        PgIdentifierQuoter.QuoteSchemaQualified(ownerSchema, ownerTable));
+                    var columnArg = EscapeSqlLiteral(seq.OwnerColumn);
+
                     string? resolved;
                     try
                     {
                         resolved = await destExec.ExecuteScalarAsync<string>(
-                                       $"SELECT pg_get_serial_sequence('{seq.OwnerTable}', '{seq.OwnerColumn}')",
+                                       $"SELECT pg_get_serial_sequence('{tableArg}', '{columnArg}')",
                                        cancellationToken);
                     }
                     catch (InvalidOperationException)
@@ -87,26 +101,59 @@ public sealed class SyncSequencesStage : ICopyStage
 
                     if (resolved is null)
                     {
-                        skipped++;
-                        var reason =
-                            $"Owning column {seq.OwnerTable}.{seq.OwnerColumn} has no sequence on destination";
-                        details.Add(StageDetail.SkippedWarning(sourceSeqName, reason));
-                        context.Warnings.Add(
-                            new CopyWarning(
-                                Name,
-                                EStageMessageKind.Skipped,
-                                sourceSeqName,
-                                new Dictionary<string, object>
-                                {
-                                    [PropKeys.Reason] = reason
-                                }));
-                        continue;
-                    }
+                        if (!seq.IsIdentity)
+                        {
+                            // Serial sequences have deterministic names — the sequence was
+                            // created explicitly by CreateSequencesStage with the same name
+                            // as on the source. The pg_depend ownership link is missing
+                            // (CREATE SEQUENCE doesn't establish it), but we can use the
+                            // source name directly and also fix the ownership now.
+                            destSchema = seq.SchemaName;
+                            destName = seq.Name;
 
-                    // pg_get_serial_sequence returns schema-qualified, possibly quoted
-                    var (rs, rn) = ParseQualifiedSequence(resolved);
-                    destSchema = rs;
-                    destName = rn;
+                            // Establish the ownership link so pg_get_serial_sequence works
+                            // for any future operations on this database.
+                            try
+                            {
+                                var ownedBySql =
+                                    $"ALTER SEQUENCE {PgIdentifierQuoter.QuoteSchemaQualified(destSchema, destName)} " +
+                                    $"OWNED BY {PgIdentifierQuoter.QuoteSchemaQualified(ownerSchema, ownerTable)}.{PgIdentifierQuoter.QuoteIdentifier(seq.OwnerColumn)}";
+                                await destExec.ExecuteNonQueryAsync(ownedBySql, cancellationToken);
+                            }
+                            catch (Exception ownerEx)
+                            {
+                                // Ownership link is nice-to-have; don't fail the sync for it
+                                _loggerFactory.CreateLogger<SyncSequencesStage>().LogWarning(
+                                    ownerEx,
+                                    "Could not set OWNED BY for sequence {Sequence}",
+                                    sourceSeqName);
+                            }
+                        }
+                        else
+                        {
+                            skipped++;
+                            var reason =
+                                $"Owning column {seq.OwnerTable}.{seq.OwnerColumn} has no sequence on destination";
+                            details.Add(StageDetail.SkippedWarning(sourceSeqName, reason));
+                            context.Warnings.Add(
+                                new CopyWarning(
+                                    Name,
+                                    EStageMessageKind.Skipped,
+                                    sourceSeqName,
+                                    new Dictionary<string, object>
+                                    {
+                                        [PropKeys.Reason] = reason
+                                    }));
+                            continue;
+                        }
+                    }
+                    else
+                    {
+                        // pg_get_serial_sequence returns schema-qualified, possibly quoted
+                        var (rs, rn) = ParseQualifiedSequence(resolved);
+                        destSchema = rs;
+                        destName = rn;
+                    }
                 }
                 else
                 {
@@ -161,4 +208,7 @@ public sealed class SyncSequencesStage : ICopyStage
 
         return (parts[0].Trim('"'), parts[1].Trim('"'));
     }
+
+    /// <summary>Escapes embedded single quotes for use inside a SQL string literal.</summary>
+    private static string EscapeSqlLiteral(string value) => value.Replace("'", "''");
 }

@@ -53,4 +53,7 @@ public static class PropKeys
 
     /// <summary>Copy mode description.</summary>
     public const string Mode = "mode";
+
+    /// <summary>Host label (host:port/database).</summary>
+    public const string Host = "host";
 }

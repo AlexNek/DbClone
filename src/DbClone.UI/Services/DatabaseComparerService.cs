@@ -4,6 +4,7 @@ using DbClone.Application.Enums;
 using DbClone.Application.Exceptions;
 using DbClone.Application.Interfaces;
 using DbClone.Application.Models;
+using DbClone.Application.TableFilter;
 using DbClone.UI.Models;
 using DbClone.UI.ViewModels;
 
@@ -13,6 +14,8 @@ namespace DbClone.UI.Services;
 
 public sealed class DatabaseComparerService : IDatabaseComparerService
 {
+    private readonly ITableFilterApplier _filterApplier;
+
     private readonly ILogger<DatabaseComparerService> _logger;
 
     private readonly IEnumerable<IModelComparer> _modelComparers;
@@ -25,11 +28,13 @@ public sealed class DatabaseComparerService : IDatabaseComparerService
         ITableInfoProvider tableInfoProvider,
         ITableComparerProvider tableComparerProvider,
         IEnumerable<IModelComparer> modelComparers,
+        ITableFilterApplier filterApplier,
         ILogger<DatabaseComparerService> logger)
     {
         _tableInfoProvider = tableInfoProvider;
         _tableComparerProvider = tableComparerProvider;
         _modelComparers = modelComparers;
+        _filterApplier = filterApplier;
         _logger = logger;
     }
 
@@ -41,7 +46,8 @@ public sealed class DatabaseComparerService : IDatabaseComparerService
         bool excludePlatformSchemas,
         IProgress<CompareProgressInfo>? progress,
         Func<CancellationToken, Task>? waitWhilePaused,
-        CancellationToken ct)
+        CancellationToken ct,
+        TableSelectionSpec? tableSelection = null)
     {
         var sourceInfo = ConnectionInfoFactory.FromViewModel(source);
         var destInfo = ConnectionInfoFactory.FromViewModel(destination);
@@ -150,6 +156,17 @@ public sealed class DatabaseComparerService : IDatabaseComparerService
 
         var allItems = new List<CompareResultItem>();
 
+        // ─── 0. Apply the active table selection scope ───────────────────────
+        if (tableSelection is { IsActive: true })
+        {
+            (sourceModel, destModel) = ApplyTableSelectionScope(
+                sourceModel,
+                destModel,
+                tableSelection,
+                allItems,
+                state);
+        }
+
         // ─── 1. Compare tables (presence + row counts / checksums) ───
         await CompareTableDataAsync(
             state, sourceModel, destModel, sourceInfo, destInfo, mode, allItems, progress, waitWhilePaused, ct);
@@ -189,6 +206,94 @@ public sealed class DatabaseComparerService : IDatabaseComparerService
             TotalMissingDest: sorted.Count(i => i.Status == ECompareStatus.MissingDest),
             TotalSkipped: sorted.Count(i => i.Status == ECompareStatus.Skipped),
             TotalErrors: sorted.Count(i => i.Status == ECompareStatus.Error));
+    }
+
+    // ─────────────────────────────────────────────────────────────────────────
+    // Table selection scope
+    // ─────────────────────────────────────────────────────────────────────────
+
+    /// <summary>
+    /// Restricts both models to the active table selection. The source filter is
+    /// authoritative; the destination is restricted to the same table identities
+    /// so unselected target tables are ignored rather than reported as
+    /// differences. Views skipped because they depend on excluded tables are
+    /// surfaced as Skipped items — consistent with Copy.
+    /// </summary>
+    private (DatabaseModel Source, DatabaseModel Destination) ApplyTableSelectionScope(
+        DatabaseModel source,
+        DatabaseModel destination,
+        TableSelectionSpec spec,
+        List<CompareResultItem> items,
+        WorkflowState state)
+    {
+        var sourceResult = _filterApplier.Apply(source, spec);
+
+        // Destination: exclude every table that is not part of the selected set.
+        // Reuses the same filter engine so dependent-object handling stays identical.
+        var selectedTables = sourceResult.FilteredModel.Tables
+            .Select(t => new TableId(t.SchemaName, t.Name))
+            .ToHashSet();
+        var destExclusions = destination.Tables
+            .Select(t => new TableId(t.SchemaName, t.Name))
+            .Where(id => !selectedTables.Contains(id))
+            .ToHashSet();
+        var destResult = _filterApplier.Apply(destination, new TableSelectionSpec(true, destExclusions));
+
+        state.Log(
+            $"Table selection active: {sourceResult.Report.RemovedTables.Count} tables excluded, {sourceResult.FilteredModel.Tables.Count} tables in scope.");
+
+        if (sourceResult.Report.StaleExclusions.Count > 0)
+            state.LogWarning(
+                $"{sourceResult.Report.StaleExclusions.Count} selected exclusion(s) matched no source table and were ignored.");
+
+        var report = sourceResult.Report;
+
+        foreach (var view in report.SkippedViews)
+        {
+            items.Add(new CompareResultItem
+                {
+                    ObjectType = EDatabaseObjectType.View,
+                    SchemaName = view.Schema,
+                    TableName = view.FullName,
+                    Status = ECompareStatus.Skipped,
+                    SkipReason = ESkipReason.TableSelection,
+                    SourceCount = -1,
+                    DestCount = -1,
+                    Details = "View depends on a table excluded by the active table selection"
+                });
+        }
+
+        foreach (var partition in report.OrphanedPartitions)
+        {
+            items.Add(new CompareResultItem
+                {
+                    ObjectType = EDatabaseObjectType.Table,
+                    SchemaName = partition.Schema,
+                    TableName = partition.FullName,
+                    Status = ECompareStatus.Skipped,
+                    SkipReason = ESkipReason.TableSelection,
+                    SourceCount = -1,
+                    DestCount = -1,
+                    Details = "Partition of a table excluded by the active table selection"
+                });
+        }
+
+        foreach (var fk in report.DroppedForeignKeys)
+        {
+            items.Add(new CompareResultItem
+                {
+                    ObjectType = EDatabaseObjectType.Constraint,
+                    SchemaName = fk.OwningTable.Schema,
+                    TableName = fk.OwningTable.FullName,
+                    Status = ECompareStatus.Notice,
+                    SourceCount = -1,
+                    DestCount = -1,
+                    Details =
+                        $"Foreign key {fk.ConstraintName} → {fk.ReferencedTable.FullName} ignored (referenced table excluded by the active table selection)"
+                });
+        }
+
+        return (sourceResult.FilteredModel, destResult.FilteredModel);
     }
 
     // ─────────────────────────────────────────────────────────────────────────

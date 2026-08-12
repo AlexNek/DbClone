@@ -1,4 +1,5 @@
 using DbClone.Application.DTOs;
+using DbClone.Application.Models;
 using DbClone.Application.Platforms;
 
 namespace DbClone.Application.Copy;
@@ -78,11 +79,12 @@ public sealed class CopyContext
         new(StringComparer.OrdinalIgnoreCase);
 
     /// <summary>
-    /// Gets the qualified names of tables that could not be created on the destination
-    /// because they depend on a skipped extension. These tables are excluded from
-    /// data copy and validation, and reported as warnings for the user to review.
+    /// Gets the tables that could not be created on the destination
+    /// because they depend on a skipped extension or encountered an error.
+    /// These tables are excluded from data copy and validation, and reported
+    /// as warnings for the user to review.
     /// </summary>
-    public HashSet<string> SkippedTables { get; } = new(StringComparer.OrdinalIgnoreCase);
+    public HashSet<TableId> SkippedTables { get; } = [];
 
     /// <summary>
     /// Gets or sets the detected source capabilities.

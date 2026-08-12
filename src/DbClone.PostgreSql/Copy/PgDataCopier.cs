@@ -102,12 +102,12 @@ public sealed class PgDataCopier : IDataCopier
 
                     sw.Stop();
 
+                    totalRowsCopied += rowsCopied;
+                    totalBytesTransferred += bytesTransferred;
+                    tablesCopied++;
+
                     if (rowsCopied > 0)
                     {
-                        totalRowsCopied += rowsCopied;
-                        totalBytesTransferred += bytesTransferred;
-                        tablesCopied++;
-
                         _logger.LogInformation(
                             "Table {Table}: {Rows} rows ({Bytes:N0} bytes) in {Elapsed}",
                             tableKey,
@@ -117,7 +117,7 @@ public sealed class PgDataCopier : IDataCopier
                     }
                     else
                     {
-                        _logger.LogDebug("Table {Table} has no data, skipping", tableKey);
+                        _logger.LogDebug("Table {Table} is empty (0 rows)", tableKey);
                     }
 
                     success = true;

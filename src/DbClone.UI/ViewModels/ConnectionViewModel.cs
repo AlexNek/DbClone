@@ -66,6 +66,18 @@ public sealed partial class ConnectionViewModel : ObservableObject
 
     public ObservableCollection<SavedConnection> SavedConnections { get; } = [];
 
+    /// <summary>
+    /// Table selection panel — set on the source panel only.
+    /// Null on the destination panel; the connection view hides the row.
+    /// </summary>
+    public TableSelectionPanelViewModel? TableSelection { get; set; }
+
+    /// <summary>
+    /// Table overview panel — set on the destination panel only.
+    /// Null on the source panel; the connection view hides the row.
+    /// </summary>
+    public TableOverviewPanelViewModel? TableOverview { get; set; }
+
     public static string[] SslModeValues { get; } = ["Disable", "Prefer", "Require"];
 
     public string Summary =>
@@ -150,6 +162,11 @@ public sealed partial class ConnectionViewModel : ObservableObject
         var defaults = _platformResolver.GetConnectionDefaults(value);
         SslMode = defaults.SslMode;
         Port = defaults.Port.ToString();
+    }
+
+    partial void OnDatabaseNameChanged(string value)
+    {
+        OnPropertyChanged(nameof(Summary));
     }
 
     partial void OnSelectedSavedConnectionChanged(SavedConnection? value)

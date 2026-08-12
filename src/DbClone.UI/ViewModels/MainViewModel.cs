@@ -29,9 +29,25 @@ public sealed partial class MainViewModel : ObservableObject
 
     private readonly IConnectionStore _connectionStore;
 
+    private readonly IDatabaseMaintenanceProvider _maintenanceProvider;
+
+    private readonly IDatabaseService _dbService;
+
+    private readonly IDialogService _dialogService;
+
+    private readonly ITableFilterApplier _filterApplier;
+
+    private readonly ILogger<MainViewModel> _logger;
+
     private readonly DispatcherTimer? _memoryTimer;
 
+    private readonly ITableSelectionPresetNameValidator _presetNameValidator;
+
+    private readonly ITableSelectionPresetStore _presetStore;
+
     private readonly ISettingsService _settingsService;
+
+    private readonly ITableSelectionService _tableSelectionService;
 
     /// <summary>The two workflow components behind their common contract.</summary>
     private readonly IWorkflowViewModel[] _workflows;
@@ -101,10 +117,22 @@ public sealed partial class MainViewModel : ObservableObject
         IConnectionExportService exportService,
         IUpdateService updateService,
         IServiceProvider serviceProvider,
-        CopyOperationOrchestrator orchestrator)
+        CopyOperationOrchestrator orchestrator,
+        ITableSelectionService tableSelectionService,
+        ITableSelectionPresetStore presetStore,
+        ITableFilterApplier filterApplier,
+        ITableSelectionPresetNameValidator presetNameValidator)
     {
         _connectionStore = connectionStore;
+        _maintenanceProvider = maintenanceProvider;
         _settingsService = settingsService;
+        _dialogService = dialogService;
+        _dbService = dbService;
+        _tableSelectionService = tableSelectionService;
+        _presetStore = presetStore;
+        _filterApplier = filterApplier;
+        _presetNameValidator = presetNameValidator;
+        _logger = serviceProvider.GetRequiredService<ILogger<MainViewModel>>();
 
         // Load settings
         Settings = settingsService.Load();
@@ -128,6 +156,18 @@ public sealed partial class MainViewModel : ObservableObject
                     Label = "Destination"
                 };
 
+        // Table selection panel — source panel only
+        source.TableSelection = new TableSelectionPanelViewModel(
+            tableSelectionService,
+            dialogService,
+            dbService,
+            source);
+        source.TableSelection.EditRequested += (_, _) => OpenTableSelectionDialog();
+
+        // Table overview panel — destination panel only
+        destination.TableOverview = new TableOverviewPanelViewModel(dbService, destination);
+        destination.TableOverview.ViewRequested += (_, _) => OpenTableOverviewDialog();
+
         // Create shared context (must exist before stateManager wiring)
         Context = new OperationContext(source, destination);
 
@@ -143,6 +183,7 @@ public sealed partial class MainViewModel : ObservableObject
             reportExportService,
             settingsPersister,
             stateManager,
+            tableSelectionService,
             Settings,
             Context);
 
@@ -156,6 +197,7 @@ public sealed partial class MainViewModel : ObservableObject
             orchestrator,
             settingsPersister,
             stateManager,
+            tableSelectionService,
             Settings,
             Context);
 
@@ -248,6 +290,24 @@ public sealed partial class MainViewModel : ObservableObject
         source.PropertyChanged += OnConnectionPropertyChanged;
         destination.PropertyChanged += OnConnectionPropertyChanged;
 
+        // Restore the last-used table selection preset for the initial source
+        // connection, then follow source connection switches.
+        RunAndLogFailures(source.TableSelection.LoadForConnectionAsync(source.SelectedSavedConnection), "LoadForConnectionAsync (source initial)");
+        source.PropertyChanged += (_, e) =>
+        {
+            if (e.PropertyName == nameof(ConnectionViewModel.SelectedSavedConnection))
+                RunAndLogFailures(source.TableSelection!.LoadForConnectionAsync(source.SelectedSavedConnection), "LoadForConnectionAsync (source changed)");
+        };
+
+        // Restore the destination table overview for the initial connection,
+        // then follow destination connection switches.
+        RunAndLogFailures(destination.TableOverview.LoadForConnectionAsync(destination.SelectedSavedConnection), "LoadForConnectionAsync (destination initial)");
+        destination.PropertyChanged += (_, e) =>
+        {
+            if (e.PropertyName == nameof(ConnectionViewModel.SelectedSavedConnection))
+                RunAndLogFailures(destination.TableOverview!.LoadForConnectionAsync(destination.SelectedSavedConnection), "LoadForConnectionAsync (destination changed)");
+        };
+
         // Update banner — self-contained component with its own ViewModel
         Update = new UpdateInfoBarViewModel(updateService);
 
@@ -267,6 +327,13 @@ public sealed partial class MainViewModel : ObservableObject
     }
 
     // ── Private helpers ─────────────────────────────────────────────────────────
+
+    private void RunAndLogFailures(Task task, string operation)
+    {
+        task.ContinueWith(
+            t => _logger.LogError(t.Exception!.InnerException ?? t.Exception, "{Operation} failed", operation),
+            TaskContinuationOptions.OnlyOnFaulted);
+    }
 
     private static bool IsConnectionProperty(string? name) =>
         name switch
@@ -290,12 +357,57 @@ public sealed partial class MainViewModel : ObservableObject
         {
             Connections.ClearGroupIfConnectionMismatch();
             SyncConnectionsToSettings();
+
+            // The previous run's error/result referred to the old connection —
+            // drop the visible error display (never while an operation is running)
+            if (!Context.IsBusy)
+            {
+                Copy.State.ClearResultDisplay();
+                Compare.State.ClearResultDisplay();
+            }
         }
     }
 
     partial void OnCurrentThemeModeChanged(EThemeMode value)
     {
         OnPropertyChanged(nameof(ThemeIcon));
+    }
+
+    /// <summary>Opens the table selection dialog for the current source connection.</summary>
+    private void OpenTableSelectionDialog()
+    {
+        var vm = new TableSelectionViewModel(
+            _tableSelectionService,
+            _presetStore,
+            _dialogService,
+            _dbService,
+            _filterApplier,
+            _presetNameValidator,
+            Context.Source);
+
+        var dialog = new Views.TableSelectionDialog(vm)
+        {
+            Owner = System.Windows.Application.Current.MainWindow
+        };
+        dialog.ShowDialog();
+    }
+
+    /// <summary>Opens the read-only table overview dialog for the current destination connection.</summary>
+    private void OpenTableOverviewDialog()
+    {
+        var vm = new TableOverviewViewModel(_maintenanceProvider, _dbService, Context.Destination);
+
+        var dialog = new Views.TableOverviewDialog(vm)
+        {
+            Owner = System.Windows.Application.Current.MainWindow
+        };
+        dialog.ShowDialog();
+
+        // If the user selected a different database inside the dialog, refresh the panel.
+        if (dialog.DatabaseChanged)
+        {
+            Context.Destination.TableOverview?.RefreshAfterDatabaseChange();
+        }
     }
 
     [RelayCommand]

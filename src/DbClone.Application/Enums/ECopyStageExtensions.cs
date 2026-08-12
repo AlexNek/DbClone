@@ -12,6 +12,7 @@ public static class ECopyStageExtensions
                 ECopyStage.Connect => "Connect",
                 ECopyStage.DetectCapabilities => "Detect Capabilities",
                 ECopyStage.ReadMetadata => "Read Metadata",
+                ECopyStage.ApplyTableFilter => "Apply Table Filter",
                 ECopyStage.AnalyzeDependencies => "Analyze Dependencies",
                 ECopyStage.Validate => "Validate",
                 ECopyStage.CreateSchemas => "Schemas",

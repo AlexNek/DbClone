@@ -7,6 +7,35 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.1.0] - 2026-08-12
+
+### Added
+- Manual table selection: choose which tables Copy, Compare, and Backup process for a source database
+  - Selection dialog with schema tree, search, sorting, table size column, and a foreign-key relationship explorer
+  - Named presets stored per source connection + database with automatic restore of the last-used preset; unsaved (dirty) modifications survive application restart
+  - Validation summary before applying a selection (dangling foreign keys, dependent views, orphaned partitions)
+  - FK-aware behavior: unchecking a parent table automatically deselects its dependent child tables (recursively); re-selecting a child whose parent is excluded highlights the row with a warning
+  - Compare ignores target tables outside the selection; views depending on excluded tables are reported as skipped
+  - Copy and Backup clean only the selected tables on a populated destination, with an explicit choice: replace only the selected tables, or clear the entire destination
+  - Resume/Update modes are blocked with an explanation while a non-default selection is active (they require "All Tables")
+  - Destination table overview: read-only dialog listing all tables on the output database (schema tree, search, sorting, size column)
+  - Destination database picker: when the destination has no database name, browse the server's databases and pick one directly from the main panel
+
+### Fixed
+- Sequence sync no longer fails for mixed-case names (e.g. serial sequences of `"MixedCase"` tables): sequence and owner-table identifiers are now quoted in `setval`/`pg_get_serial_sequence` calls, while the owner-column is passed unquoted so it matches the catalog literally
+- Serial sequence sync no longer produces false "has no sequence on destination" warnings — the stage now resolves serial sequences by name and establishes the missing `OWNED BY` link on the destination
+- Copy summary now lists each warning inline with its stage context (e.g. `SKIP [Extensions]: vector`) instead of "review warning entries above"
+- Tables that fail to create (e.g. due to unsupported types or unavailable extensions) are now individually reported in the final warning summary with their specific error reason
+- CopyData stage now explicitly logs which tables it skips because their creation failed earlier, instead of silently excluding them
+- Copy summary "Tables:" count now includes all successfully processed tables (including empty ones), not just tables that had rows — previously "Tables: 3" when 16 tables were copied but only 3 had data
+- Copy is now blocked with a clear error when a connection is missing a database name — Full/Resume/Update require a destination database (backup-only connections can only use Backup mode), and all modes require a source database; previously such copies reported success without copying anything
+- Error banner and status display are now cleared when the connection or connection group is changed — previously an error from an earlier run remained visible after switching connections
+- Connections, connection groups, table selection, and copy/compare options can no longer be changed while an operation is running — the controls are disabled until the operation finishes
+- Connection failure error now shows which side (source/destination) failed and the configured host:port/database, instead of only the raw TCP error with a resolved IP
+- Table selection now correctly excludes objects (sequences, triggers, policies, foreign keys) owned by partitions of excluded parent tables — previously only the explicitly excluded table's objects were filtered, leaving orphaned-partition dependents behind
+- Table selection now skips materialized views that depend on an excluded table (same as ordinary views) — previously they were retained and could fail during creation
+- Skipped-table tracking in the copy pipeline now uses the typed `TableId` key instead of fragile formatted strings — previously mixed-case table names could slip through and attempt data copy after their creation had already failed
+
 ## [1.0.4] - 2026-08-09
 
 ### Fixed
@@ -61,5 +90,5 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 [1.0.4]: https://github.com/AlexNek/DbClone/releases/tag/v1.0.4
 [1.0.3]: https://github.com/AlexNek/DbClone/releases/tag/v1.0.3
 [1.0.2]: https://github.com/AlexNek/DbClone/releases/tag/v1.0.2
-[1.0.1]: https://github.com/AlexNek/DbClone/compare/v1.0.0...v1.0.1
+[1.0.1]: https://github.com/AlexNek/DbClone/releases/tag/v1.0.1
 [1.0.0]: https://github.com/AlexNek/DbClone/releases/tag/v1.0.0

@@ -812,7 +812,19 @@ public sealed class PgMetadataReader : IMetadataReader
                 ARRAY(SELECT a.attname FROM pg_attribute a
                       WHERE a.attrelid = c.oid AND a.attnum > 0 AND NOT a.attisdropped
                       ORDER BY a.attnum) AS columns,
-                obj_description(c.oid) AS comment
+                obj_description(c.oid) AS comment,
+                ARRAY(
+                    SELECT DISTINCT nr.nspname || '.' || cr.relname
+                    FROM pg_depend d
+                    JOIN pg_rewrite r ON r.oid = d.objid
+                    JOIN pg_class cr ON cr.oid = d.refobjid
+                    JOIN pg_namespace nr ON nr.oid = cr.relnamespace
+                    WHERE r.ev_class = c.oid
+                      AND d.refclassid = 'pg_class'::regclass
+                      AND cr.oid <> c.oid
+                      AND cr.relkind IN ({PgRelKind.AllUserRelations})
+                      AND nr.nspname NOT IN ({_schemaFilter})
+                ) AS referenced_relations
             FROM pg_class c
             JOIN pg_namespace n ON n.oid = c.relnamespace
             WHERE c.relkind = '{PgRelKind.MaterializedView}'
@@ -829,7 +841,8 @@ public sealed class PgMetadataReader : IMetadataReader
                            Definition: r.GetString(2),
                            Tablespace: string.IsNullOrEmpty(r.GetString(3)) ? null : r.GetString(3),
                            Columns: r.GetFieldValue<string[]>(4).ToList(),
-                           Comment: r.IsDBNull(5) ? null : r.GetString(5)),
+                           Comment: r.IsDBNull(5) ? null : r.GetString(5),
+                           ReferencedRelations: r.GetFieldValue<string[]>(6).ToList()),
                    ct);
     }
 

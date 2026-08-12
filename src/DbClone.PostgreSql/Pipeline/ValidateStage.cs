@@ -1,5 +1,6 @@
 using DbClone.Application.DTOs;
 using DbClone.Application.Enums;
+using DbClone.Application.Interfaces;
 using DbClone.Application.Copy;
 using DbClone.PostgreSql.Execution;
 
@@ -12,6 +13,8 @@ namespace DbClone.PostgreSql.Pipeline;
 /// </summary>
 public sealed class ValidateStage : ICopyStage
 {
+    private readonly IPgExecutorFactory _executorFactory;
+
     private readonly ILoggerFactory _loggerFactory;
 
     /// <inheritdoc />
@@ -21,7 +24,11 @@ public sealed class ValidateStage : ICopyStage
     public int Order => 150;
 
     /// <summary>Initializes a new instance.</summary>
-    public ValidateStage(ILoggerFactory loggerFactory) => _loggerFactory = loggerFactory;
+    public ValidateStage(IPgExecutorFactory executorFactory, ILoggerFactory loggerFactory)
+    {
+        _executorFactory = executorFactory;
+        _loggerFactory = loggerFactory;
+    }
 
     /// <inheritdoc />
     public async Task<StageResult> ExecuteAsync(
@@ -52,10 +59,8 @@ public sealed class ValidateStage : ICopyStage
                     [StageDetail.ConnectionFailed(sourceConn is null ? ECompareSide.Source : ECompareSide.Destination)]);
         }
 
-        var sourceExec = new PgSqlExecutor(
-            sourceConn,
-            _loggerFactory.CreateLogger<PgSqlExecutor>());
-        var destExec = new PgSqlExecutor(destConn, _loggerFactory.CreateLogger<PgSqlExecutor>());
+        var sourceExec = _executorFactory.Create(sourceConn);
+        var destExec = _executorFactory.Create(destConn);
 
         var model = context.SourceModel!;
         var details = new List<StageDetail>();
@@ -73,7 +78,8 @@ public sealed class ValidateStage : ICopyStage
                 var qualifiedName =
                     PgIdentifierQuoter.QuoteSchemaQualified(table.SchemaName, table.Name);
 
-                if (context.SkippedTables.Contains(qualifiedName))
+                if (context.SkippedTables.Contains(
+                        new Application.Models.TableId(table.SchemaName, table.Name)))
                 {
                     details.Add(
                         StageDetail.SkippedWarning(
@@ -154,7 +160,7 @@ public sealed class ValidateStage : ICopyStage
     /// </summary>
     private static async Task ValidateObjectCountsAsync(
         CopyContext context,
-        PgSqlExecutor destExec,
+        ISqlExecutor destExec,
         List<StageDetail> details,
         CancellationToken ct)
     {
@@ -248,8 +254,8 @@ public sealed class ValidateStage : ICopyStage
     /// Compares data checksums between source and destination using md5 hash of all rows.
     /// </summary>
     private static async Task<ValidationResult> CompareChecksumAsync(
-        PgSqlExecutor sourceExec,
-        PgSqlExecutor destExec,
+        ISqlExecutor sourceExec,
+        ISqlExecutor destExec,
         string qualifiedName,
         CancellationToken ct)
     {
@@ -286,8 +292,8 @@ public sealed class ValidateStage : ICopyStage
     /// Note: For cross-server comparisons, this uses the same checksum approach as Checksum mode.
     /// </summary>
     private static async Task<ValidationResult> CompareFullAsync(
-        PgSqlExecutor sourceExec,
-        PgSqlExecutor destExec,
+        ISqlExecutor sourceExec,
+        ISqlExecutor destExec,
         string qualifiedName,
         CancellationToken ct)
     {
@@ -323,8 +329,8 @@ public sealed class ValidateStage : ICopyStage
     /// Compares row counts between source and destination.
     /// </summary>
     private static async Task<ValidationResult> CompareRowCountAsync(
-        PgSqlExecutor sourceExec,
-        PgSqlExecutor destExec,
+        ISqlExecutor sourceExec,
+        ISqlExecutor destExec,
         string qualifiedName,
         CancellationToken ct)
     {

@@ -1,5 +1,6 @@
 using DbClone.Application.DTOs;
 using DbClone.Application.Enums;
+using DbClone.Application.Interfaces;
 using DbClone.Application.Copy;
 using DbClone.PostgreSql.Ddl;
 using DbClone.PostgreSql.Execution;
@@ -15,7 +16,11 @@ namespace DbClone.PostgreSql.Pipeline;
 /// </summary>
 public sealed class CreateIndexesStage : ICopyStage
 {
+    private readonly IPgConnectionProvider _connectionProvider;
+
     private readonly PgDdlGenerator _ddl;
+
+    private readonly IPgExecutorFactory _executorFactory;
 
     private readonly ILoggerFactory _loggerFactory;
 
@@ -26,9 +31,15 @@ public sealed class CreateIndexesStage : ICopyStage
     public int Order => 95;
 
     /// <summary>Initializes a new instance.</summary>
-    public CreateIndexesStage(PgDdlGenerator ddl, ILoggerFactory loggerFactory)
+    public CreateIndexesStage(
+        PgDdlGenerator ddl,
+        IPgExecutorFactory executorFactory,
+        IPgConnectionProvider connectionProvider,
+        ILoggerFactory loggerFactory)
     {
         _ddl = ddl;
+        _executorFactory = executorFactory;
+        _connectionProvider = connectionProvider;
         _loggerFactory = loggerFactory;
     }
 
@@ -58,14 +69,8 @@ public sealed class CreateIndexesStage : ICopyStage
 
         var model = context.SourceModel!;
         var logger = _loggerFactory.CreateLogger<CreateIndexesStage>();
-        var conn = await PgConnectionHelper.EnsureDestinationOpenAsync(
-                       context,
-                       logger,
-                       cancellationToken);
-        var executor = new PgSqlExecutor(
-            conn,
-            _loggerFactory.CreateLogger<PgSqlExecutor>(),
-            TimeSpan.FromMinutes(5));
+
+        ISqlExecutor? executor = null;
 
         var totalIndexes = 0;
         var failedIndexes = 0;
@@ -74,12 +79,10 @@ public sealed class CreateIndexesStage : ICopyStage
 
         foreach (var table in model.Tables)
         {
-            var qualifiedTableName =
-                PgIdentifierQuoter.QuoteSchemaQualified(table.SchemaName, table.Name);
-
             // Tables that failed to create → their indexes cannot be created either.
             // Report explicitly as skipped so the user sees why the count differs.
-            if (context.SkippedTables.Contains(qualifiedTableName))
+            if (context.SkippedTables.Contains(
+                    new Application.Models.TableId(table.SchemaName, table.Name)))
             {
                 foreach (var idx in table.Indexes.Where(i => !i.IsPrimary))
                 {
@@ -95,6 +98,30 @@ public sealed class CreateIndexesStage : ICopyStage
                 table.Indexes,
                 table.SchemaName,
                 table.Name);
+
+            if (indexStmts.Count == 0)
+                continue;
+
+            // Defer connection validation until we actually need to execute SQL.
+            // This avoids unnecessary connection round-trips when all indexes are
+            // skipped or filtered out (primary/constraint).
+            if (executor is null)
+            {
+                var conn = await _connectionProvider.GetDestinationConnectionAsync(
+                               context,
+                               logger,
+                               cancellationToken);
+                if (conn is null)
+                    return new StageResult(
+                        Name,
+                        false,
+                        TimeSpan.Zero,
+                        0,
+                            [StageDetail.ConnectionFailed(ECompareSide.Destination)]);
+
+                executor = _executorFactory.Create(conn);
+            }
+
             foreach (var sql in indexStmts)
             {
                 cancellationToken.ThrowIfCancellationRequested();

@@ -77,6 +77,19 @@ public sealed partial class WorkflowState : ObservableObject
         LogMessages.Clear();
     }
 
+    /// <summary>
+    /// Clears the visible result display (banner, status bar) when the connection
+    /// configuration changes — the previous run's error/result no longer applies.
+    /// Log history is preserved.
+    /// </summary>
+    public void ClearResultDisplay()
+    {
+        LastError = string.Empty;
+        IsBannerOpen = false;
+        StatusMessage = "Ready";
+        StatusBarSummary = "Ready";
+    }
+
     /// <summary>Adds a timestamped informational entry.</summary>
     public void Log(string message) =>
         LogMessages.Add(new LogEntry(ELogLevel.Info, message, DateTime.Now));

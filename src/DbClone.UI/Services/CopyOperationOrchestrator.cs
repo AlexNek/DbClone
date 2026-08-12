@@ -1,6 +1,7 @@
 using DbClone.Application.DTOs;
 using DbClone.Application.Enums;
 using DbClone.Application.Interfaces;
+using DbClone.UI.Models;
 using DbClone.UI.ViewModels;
 
 using Microsoft.Extensions.Logging;
@@ -187,29 +188,78 @@ public sealed class CopyOperationOrchestrator
                                       cancellationToken);
                 if (destHasData)
                 {
-                    var confirm = await _dialogService.ConfirmAsync(
-                                      "Clean Target Database?",
-                                      $"The destination database '{destinationToUse.DatabaseName}' on {destinationToUse.Host} already contains data.\n\n"
-                                      +
-                                      "All existing tables, views, functions, and other objects will be DROPPED.\n\n"
-                                      +
-                                      "Click YES to clean and overwrite, or NO to cancel.");
+                    var selection = opts.TableSelection;
+                    var selectionActive = selection is { IsActive: true };
 
-                    if (!confirm)
+                    // Two valid scenarios with an active table selection — the
+                    // user chooses explicitly right here:
+                    // 1. Refresh only the selected tables — unselected destination
+                    //    tables stay untouched (selection-scoped clean).
+                    // 2. Clear the entire destination — afterwards it contains
+                    //    ONLY the selected tables.
+                    var clearAll = !selectionActive;
+
+                    if (selectionActive)
                     {
-                        listener.OnPhaseChanged(ECopyOperationPhase.Cancelled);
-                        listener.OnLogMessage("Operation cancelled by user");
-                        return new CopyWorkflowResult
-                                   {
-                                       Success = false, ErrorMessage = "Operation cancelled by user"
-                                   };
+                        var choiceMessage =
+                            $"The destination database '{destinationToUse.DatabaseName}' on {destinationToUse.Host} already contains data, "
+                            + "and a TABLE SELECTION is active.\n\n"
+                            + "How should the destination be cleaned?";
+
+                        var choice = await _dialogService.ConfirmSelectionCleanAsync(
+                                         "Clean Target Database?",
+                                         choiceMessage);
+
+                        if (choice == ESelectionCleanChoice.Cancel)
+                        {
+                            listener.OnPhaseChanged(ECopyOperationPhase.Cancelled);
+                            listener.OnLogMessage("Operation cancelled by user");
+                            return new CopyWorkflowResult
+                                       {
+                                           Success = false, ErrorMessage = "Operation cancelled by user"
+                                       };
+                        }
+
+                        clearAll = choice == ESelectionCleanChoice.ClearEntireDestination;
+                        listener.OnLogMessage(
+                            clearAll
+                                ? "Clearing the ENTIRE destination — after the copy it will contain only the selected tables"
+                                : "Replacing only the selected tables — all other destination tables remain untouched");
+                    }
+                    else
+                    {
+                        var confirmMessage =
+                            $"The destination database '{destinationToUse.DatabaseName}' on {destinationToUse.Host} already contains data.\n\n"
+                            + "All existing tables, views, functions, and other objects will be DROPPED.\n\n"
+                            + "Click YES to clean and overwrite, or NO to cancel.";
+
+                        var confirm = await _dialogService.ConfirmAsync(
+                                          "Clean Target Database?",
+                                          confirmMessage);
+
+                        if (!confirm)
+                        {
+                            listener.OnPhaseChanged(ECopyOperationPhase.Cancelled);
+                            listener.OnLogMessage("Operation cancelled by user");
+                            return new CopyWorkflowResult
+                                       {
+                                           Success = false, ErrorMessage = "Operation cancelled by user"
+                                       };
+                        }
                     }
 
                     listener.OnPhaseChanged(ECopyOperationPhase.CleaningDestination);
-                    var cleaned = await _dbService.CleanTargetDatabaseAsync(
-                                      destinationToUse,
-                                      msg => listener.OnLogMessage(msg),
-                                      cancellationToken);
+                    var cleaned = clearAll
+                        ? await _dbService.CleanTargetDatabaseAsync(
+                              destinationToUse,
+                              msg => listener.OnLogMessage(msg),
+                              cancellationToken)
+                        : await _dbService.CleanTargetSelectionAsync(
+                              source,
+                              destinationToUse,
+                              selection!,
+                              msg => listener.OnLogMessage(msg),
+                              cancellationToken);
 
                     if (!cleaned)
                     {
@@ -218,8 +268,9 @@ public sealed class CopyOperationOrchestrator
                         return new CopyWorkflowResult
                                    {
                                        Success = false,
-                                       ErrorMessage =
-                                           "Failed to clean destination database — see log for details"
+                                       ErrorMessage = clearAll
+                                           ? "Failed to clean destination database — see log for details"
+                                           : "Selection-scoped cleanup failed or aborted — see log for details"
                                    };
                     }
 

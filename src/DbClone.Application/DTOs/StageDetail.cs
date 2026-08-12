@@ -82,9 +82,15 @@ public sealed record StageDetail(
     // ─── Connection ──────────────────────────────────────────────────────
 
     /// <summary>Connection to the specified side could not be established.</summary>
-    public static StageDetail ConnectionFailed(ECompareSide side) =>
-        new(ELogLevel.Error, EStageMessageKind.ConnectionFailed,
-            Properties: new Dictionary<string, object> { [PropKeys.Side] = side });
+    public static StageDetail ConnectionFailed(ECompareSide side, string? reason = null, string? host = null)
+    {
+        var props = new Dictionary<string, object> { [PropKeys.Side] = side };
+        if (reason is not null)
+            props[PropKeys.Reason] = reason;
+        if (host is not null)
+            props[PropKeys.Host] = host;
+        return new(ELogLevel.Error, EStageMessageKind.ConnectionFailed, Properties: props);
+    }
 
     // ─── Stage-level ─────────────────────────────────────────────────────
 

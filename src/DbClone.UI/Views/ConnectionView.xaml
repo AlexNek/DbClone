@@ -15,6 +15,8 @@
                 <RowDefinition Height="Auto"/>
                 <RowDefinition Height="Auto"/>
                 <RowDefinition Height="Auto"/>
+                <RowDefinition Height="Auto"/>
+                <RowDefinition Height="Auto"/>
             </Grid.RowDefinitions>
 
             <!-- Header -->
@@ -51,8 +53,117 @@
                 </StackPanel>
             </Grid>
 
+            <!-- Table selection (source panel only — hidden when TableSelection is null) -->
+            <Grid Grid.Row="2" Margin="0,0,0,6">
+                <Grid.Style>
+                    <Style TargetType="Grid">
+                        <Setter Property="Visibility" Value="Visible"/>
+                        <Style.Triggers>
+                            <DataTrigger Binding="{Binding TableSelection}" Value="{x:Null}">
+                                <Setter Property="Visibility" Value="Collapsed"/>
+                            </DataTrigger>
+                        </Style.Triggers>
+                    </Style>
+                </Grid.Style>
+                <Grid DataContext="{Binding TableSelection}">
+                    <Grid.ColumnDefinitions>
+                        <ColumnDefinition Width="Auto"/>
+                        <ColumnDefinition Width="*"/>
+                        <ColumnDefinition Width="Auto"/>
+                        <ColumnDefinition Width="Auto"/>
+                    </Grid.ColumnDefinitions>
+
+                    <TextBlock Grid.Column="0" Text="Tables:" Style="{StaticResource FormLabelTextBlockStyle}" VerticalAlignment="Center" Margin="0,0,8,0"/>
+                    <ComboBox Grid.Column="1"
+                              ItemsSource="{Binding Options}"
+                              SelectedItem="{Binding SelectedOption}"
+                              DisplayMemberPath="Name"
+                              IsEnabled="{Binding HasConnection}"
+                              ToolTip="Table selection preset for this source database"
+                              Margin="0,0,8,0"/>
+                    <TextBlock Grid.Column="2"
+                               Text="{Binding CountText}"
+                               VerticalAlignment="Center" FontSize="11" Margin="0,0,8,0"
+                               Foreground="{ui:ThemeResource TextFillColorSecondaryBrush}"
+                               ToolTip="{Binding StatusNote}"/>
+                    <ui:Button Grid.Column="3" Style="{StaticResource CompactButtonStyle}"
+                               Content="Edit..." Command="{Binding EditTablesCommand}"
+                               IsEnabled="{Binding HasConnection}"/>
+                </Grid>
+            </Grid>
+
+            <!-- Table overview (destination panel only — hidden when TableOverview is null) -->
+            <Grid Grid.Row="3" Margin="0,0,0,6">
+                <Grid.Style>
+                    <Style TargetType="Grid">
+                        <Setter Property="Visibility" Value="Visible"/>
+                        <Style.Triggers>
+                            <DataTrigger Binding="{Binding TableOverview}" Value="{x:Null}">
+                                <Setter Property="Visibility" Value="Collapsed"/>
+                            </DataTrigger>
+                        </Style.Triggers>
+                    </Style>
+                </Grid.Style>
+                <Grid DataContext="{Binding TableOverview}">
+                    <Grid.ColumnDefinitions>
+                        <ColumnDefinition Width="Auto"/>
+                        <ColumnDefinition Width="*"/>
+                        <ColumnDefinition Width="Auto"/>
+                        <ColumnDefinition Width="Auto"/>
+                    </Grid.ColumnDefinitions>
+
+                    <TextBlock Grid.Column="0" Text="Tables:" Style="{StaticResource FormLabelTextBlockStyle}" VerticalAlignment="Center" Margin="0,0,8,0"/>
+
+                    <!-- No database — show indicator -->
+                    <TextBlock Grid.Column="1"
+                               Text="(no database)"
+                               VerticalAlignment="Center"
+                               FontStyle="Italic"
+                               Foreground="{ui:ThemeResource TextFillColorSecondaryBrush}"
+                               Margin="0,0,8,0">
+                        <TextBlock.Style>
+                            <Style TargetType="TextBlock">
+                                <Setter Property="Visibility" Value="Collapsed"/>
+                                <Style.Triggers>
+                                    <DataTrigger Binding="{Binding HasDatabaseName}" Value="False">
+                                        <Setter Property="Visibility" Value="Visible"/>
+                                    </DataTrigger>
+                                </Style.Triggers>
+                            </Style>
+                        </TextBlock.Style>
+                    </TextBlock>
+
+                    <!-- Has database — show "All Tables" label -->
+                    <TextBlock Grid.Column="1"
+                               Text="All Tables"
+                               VerticalAlignment="Center"
+                               Margin="0,0,8,0">
+                        <TextBlock.Style>
+                            <Style TargetType="TextBlock">
+                                <Setter Property="Visibility" Value="Visible"/>
+                                <Style.Triggers>
+                                    <DataTrigger Binding="{Binding HasDatabaseName}" Value="False">
+                                        <Setter Property="Visibility" Value="Collapsed"/>
+                                    </DataTrigger>
+                                </Style.Triggers>
+                            </Style>
+                        </TextBlock.Style>
+                    </TextBlock>
+
+                    <TextBlock Grid.Column="2"
+                               Text="{Binding CountText}"
+                               VerticalAlignment="Center" FontSize="11" Margin="0,0,8,0"
+                               Foreground="{ui:ThemeResource TextFillColorSecondaryBrush}"
+                               ToolTip="{Binding StatusNote}"/>
+
+                    <ui:Button Grid.Column="3" Style="{StaticResource CompactButtonStyle}"
+                               Content="View..." Command="{Binding ViewTablesCommand}"
+                               IsEnabled="{Binding HasConnection}"/>
+                </Grid>
+            </Grid>
+
             <!-- Summary -->
-            <TextBlock Grid.Row="2"
+            <TextBlock Grid.Row="4"
                        Text="{Binding Summary}"
                        Foreground="{ui:ThemeResource TextFillColorSecondaryBrush}"
                        FontSize="11"

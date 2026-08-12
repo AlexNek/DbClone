@@ -170,7 +170,8 @@
                     </Grid.RowDefinitions>
 
                     <!--  Connection group selector  -->
-                    <Grid Grid.Row="0" Margin="0,0,0,8" DataContext="{Binding Connections}">
+                    <Grid Grid.Row="0" Margin="0,0,0,8" DataContext="{Binding Connections}"
+                          IsEnabled="{Binding DataContext.Context.IsBusy, RelativeSource={RelativeSource AncestorType=Window}, Converter={StaticResource InvertBoolConverter}}">
                         <ComboBox
                             ItemsSource="{Binding ConnectionGroups}"
                             SelectedItem="{Binding SelectedConnectionGroup}"
@@ -201,7 +202,8 @@
                     </Grid>
 
                     <!--  Connection panels  -->
-                    <Grid Grid.Row="1" ColumnDefinitions="*,Auto,*">
+                    <Grid Grid.Row="1" ColumnDefinitions="*,Auto,*"
+                          IsEnabled="{Binding Context.IsBusy, Converter={StaticResource InvertBoolConverter}}">
                         <views:ConnectionView Grid.Column="0" DataContext="{Binding Context.Source}" />
 
                         <!--  Group action buttons between source and destination  -->

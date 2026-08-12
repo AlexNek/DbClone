@@ -25,10 +25,12 @@ If the destination database contains existing data, DbClone shows a confirmation
 !!! danger "Destructive operation"
     Full mode **drops all existing data** in the destination database. Make sure you've selected the correct destination.
 
+If a [table selection](../connections/table-selection.md) is active, the confirmation offers a choice instead: **Replace Selected** (only the selected tables are dropped and re-created) or **Clear All** (the destination ends up containing only the selected tables).
+
 ## Pipeline Stages
 
 ```
-Connect → DetectCapabilities → ReadMetadata → AnalyzeDependencies
+Connect → DetectCapabilities → ReadMetadata → ApplyTableFilter → AnalyzeDependencies
 → CreateSchemas → CreateExtensions → CreateSequences → CreateTypes
 → CreateFunctions → CreateTables → ReconcileColumns → CopyData
 → CreateIndexes → CreateConstraints → SyncSequences → RetryFunctions

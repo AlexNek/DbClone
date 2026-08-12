@@ -1,5 +1,6 @@
 using DbClone.Application.DTOs;
 using DbClone.Application.Enums;
+using DbClone.Application.Interfaces;
 using DbClone.Application.Copy;
 using DbClone.Application.Models;
 using DbClone.PostgreSql.Ddl;
@@ -20,6 +21,8 @@ namespace DbClone.PostgreSql.Pipeline;
 /// </summary>
 public sealed class ReconcileColumnsStage : ICopyStage
 {
+    private readonly IPgExecutorFactory _executorFactory;
+
     private readonly ILoggerFactory _loggerFactory;
 
     /// <inheritdoc />
@@ -29,8 +32,9 @@ public sealed class ReconcileColumnsStage : ICopyStage
     public int Order => 75;
 
     /// <summary>Initializes a new instance.</summary>
-    public ReconcileColumnsStage(ILoggerFactory loggerFactory)
+    public ReconcileColumnsStage(IPgExecutorFactory executorFactory, ILoggerFactory loggerFactory)
     {
+        _executorFactory = executorFactory;
         _loggerFactory = loggerFactory;
     }
 
@@ -58,16 +62,14 @@ public sealed class ReconcileColumnsStage : ICopyStage
         var model = context.SourceModel!;
         var logger = _loggerFactory.CreateLogger<ReconcileColumnsStage>();
         var conn = (NpgsqlConnection)context.DestinationConnection!;
-        var executor = new PgSqlExecutor(
-            conn,
-            _loggerFactory.CreateLogger<PgSqlExecutor>(),
-            TimeSpan.FromMinutes(2));
+        var executor = _executorFactory.Create(conn);
 
         // Only reconcile regular tables and partitioned parents — partition children
         // inherit nullability from the parent and cannot be altered independently.
         var tables = model.Tables
             .Where(t => t.ParentTable is null)
-            .Where(t => !context.SkippedTables.Contains($"{t.SchemaName}.{t.Name}"))
+            .Where(t => !context.SkippedTables.Contains(
+                new Application.Models.TableId(t.SchemaName, t.Name)))
             .ToList();
 
         if (tables.Count == 0)
@@ -162,7 +164,7 @@ public sealed class ReconcileColumnsStage : ICopyStage
     /// Reads the set of column names that are currently NOT NULL on the destination.
     /// </summary>
     private static async Task<HashSet<string>> ReadNotNullColumnsAsync(
-        PgSqlExecutor executor,
+        ISqlExecutor executor,
         string schema,
         string table,
         CancellationToken ct)

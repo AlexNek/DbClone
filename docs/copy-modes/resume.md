@@ -40,5 +40,8 @@ For each table in the source:
 !!! tip "Don't modify the destination between runs"
     Resume mode trusts that the schema is correct. If you manually alter the destination schema between a failed Full copy and a Resume, you may get constraint errors.
 
+!!! note "Requires the \"All Tables\" selection"
+    Resume is blocked with an explanation while a non-default [table selection](../connections/table-selection.md) is active — switch the source panel back to **All Tables** first.
+
 - Resume is safe to run multiple times — it's idempotent
 - If schema creation itself failed, use Full mode instead

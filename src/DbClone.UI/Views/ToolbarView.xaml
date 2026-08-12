@@ -113,6 +113,7 @@
                         AutomationProperties.Name="Copy Options"
                         Click="CopyOptionsButton_Click"
                         Content="Copy Options"
+                        IsEnabled="{Binding Context.IsBusy, Converter={StaticResource InvertBoolConverter}}"
                         Style="{StaticResource CommandBarButtonStyle}"
                         ToolTip="Copy Options">
                         <ui:Button.Icon>
@@ -281,6 +282,7 @@
                         AutomationProperties.Name="Compare Options"
                         Click="CompareOptionsButton_Click"
                         Content="Compare Options"
+                        IsEnabled="{Binding Context.IsBusy, Converter={StaticResource InvertBoolConverter}}"
                         Style="{StaticResource CommandBarButtonStyle}"
                         ToolTip="Compare Options">
                         <ui:Button.Icon>
@@ -370,6 +372,7 @@
                 AutomationProperties.Name="Open Connection Manager"
                 Command="{Binding OpenConnectionManagerCommand}"
                 Content="Connections"
+                IsEnabled="{Binding Context.IsBusy, Converter={StaticResource InvertBoolConverter}}"
                 Style="{StaticResource CommandBarButtonStyle}"
                 ToolTip="Connection Manager">
                 <ui:Button.Icon>

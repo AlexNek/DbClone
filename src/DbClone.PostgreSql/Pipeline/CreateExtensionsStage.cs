@@ -82,12 +82,14 @@ public sealed class CreateExtensionsStage : ICopyStage
             }
             catch (Exception ex)
             {
-                var userMsg = PgExceptionHelper.GetUserMessage(ex);
+                var pgMsg = PgExceptionHelper.GetUserMessage(ex);
+                var userMsg =
+                    $"extension \"{ext.Name}\" is installed on the source but is not available on the destination — tables depending on it will be skipped";
                 logger.LogWarning(
                     ex,
                     "Failed to create extension {Extension}: {Error}",
                     ext.Name,
-                    ex.Message);
+                    pgMsg);
                 context.SkippedExtensions[ext.Name] = ext.SchemaName;
                 context.Warnings.Add(
                     new CopyWarning(Name, EStageMessageKind.Skipped, ext.Name,

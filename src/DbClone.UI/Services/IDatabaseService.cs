@@ -1,4 +1,6 @@
 using DbClone.Application.Enums;
+using DbClone.Application.Models;
+using DbClone.Application.TableFilter;
 using DbClone.UI.ViewModels;
 
 namespace DbClone.UI.Services;
@@ -19,6 +21,18 @@ public interface IDatabaseService
         Action<string> logMessage,
         CancellationToken ct);
 
+    /// <summary>
+    /// Selection-scoped target clean: resolves the active spec
+    /// against the source's table list and drops only the selected tables —
+    /// plus their dependent objects — on the destination.
+    /// </summary>
+    Task<bool> CleanTargetSelectionAsync(
+        ConnectionViewModel source,
+        ConnectionViewModel destination,
+        TableSelectionSpec spec,
+        Action<string> logMessage,
+        CancellationToken ct);
+
     Task<bool> CreateBackupDatabaseAsync(
         ConnectionViewModel vm,
         string newDbName,
@@ -29,7 +43,15 @@ public interface IDatabaseService
         ConnectionViewModel vm,
         CancellationToken ct);
 
+    /// <summary>Estimated sizes for all user tables (single batched catalog query).</summary>
+    Task<IReadOnlyList<TableSizeInfo>> GetTableSizesAsync(
+        ConnectionViewModel vm,
+        CancellationToken ct);
+
     Task<DatabaseMetadata> ReadDatabaseMetadataAsync(ConnectionViewModel vm, CancellationToken ct);
+
+    /// <summary>Reads the full source database model (tables, FKs, views) over a live connection.</summary>
+    Task<DatabaseModel> ReadSourceModelAsync(ConnectionViewModel vm, CancellationToken ct);
 
     Task<string?> TestConnectionAsync(ConnectionViewModel vm, CancellationToken ct);
 }

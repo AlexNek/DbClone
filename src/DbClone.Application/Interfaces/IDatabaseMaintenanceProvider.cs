@@ -1,5 +1,6 @@
 using DbClone.Application.DTOs;
 using DbClone.Application.Enums;
+using DbClone.Application.Models;
 
 namespace DbClone.Application.Interfaces;
 
@@ -23,6 +24,20 @@ public interface IDatabaseMaintenanceProvider
     /// </summary>
     Task<bool> CleanDatabaseAsync(
         ConnectionInfo connection,
+        Action<string> logMessage,
+        CancellationToken ct);
+
+    /// <summary>
+    /// Selection-scoped clean: drops only the listed tables —
+    /// together with the objects that depend on them — from the target database.
+    /// Tables outside the list are never modified. When a listed table cannot be
+    /// dropped without touching an unlisted table (a foreign key from an unlisted
+    /// table, or a partition boundary crossing the list), the clean aborts
+    /// before any destructive change and returns false.
+    /// </summary>
+    Task<bool> CleanTablesAsync(
+        ConnectionInfo connection,
+        IReadOnlyCollection<TableId> tables,
         Action<string> logMessage,
         CancellationToken ct);
 

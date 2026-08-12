@@ -1,5 +1,7 @@
 using DbClone.Application.Enums;
 using DbClone.Application.Interfaces;
+using DbClone.Application.Models;
+using DbClone.Application.TableFilter;
 using DbClone.UI.ViewModels;
 
 namespace DbClone.UI.Services;
@@ -46,6 +48,25 @@ public sealed class DatabaseService : IDatabaseService
         return await _maintenanceProvider.CleanDatabaseAsync(info, logMessage, ct);
     }
 
+    public async Task<bool> CleanTargetSelectionAsync(
+        ConnectionViewModel source,
+        ConnectionViewModel destination,
+        TableSelectionSpec spec,
+        Action<string> logMessage,
+        CancellationToken ct)
+    {
+        // The selected set is resolved from the SOURCE's table list: target-only
+        // tables are unselected by definition and must never be touched.
+        var sourceTables = await GetTablesAsync(source, ct);
+        var selected = sourceTables
+            .Select(t => new TableId(t.Schema, t.Name))
+            .Where(id => !spec.IsExcluded(id))
+            .ToList();
+
+        var info = ConnectionInfoFactory.FromViewModel(destination);
+        return await _maintenanceProvider.CleanTablesAsync(info, selected, logMessage, ct);
+    }
+
     public async Task<bool> CreateBackupDatabaseAsync(
         ConnectionViewModel vm,
         string newDbName,
@@ -62,6 +83,14 @@ public sealed class DatabaseService : IDatabaseService
     {
         var info = ConnectionInfoFactory.FromViewModel(vm);
         return await _tableInfoProvider.GetTablesAsync(info, ct);
+    }
+
+    public async Task<IReadOnlyList<TableSizeInfo>> GetTableSizesAsync(
+        ConnectionViewModel vm,
+        CancellationToken ct)
+    {
+        var info = ConnectionInfoFactory.FromViewModel(vm);
+        return await _tableInfoProvider.GetTableSizesAsync(info, ct);
     }
 
     public async Task<DatabaseMetadata> ReadDatabaseMetadataAsync(
@@ -84,6 +113,14 @@ public sealed class DatabaseService : IDatabaseService
             Indexes: model.Tables.Sum(t => t.Indexes.Count(i => !i.IsPrimary)),
             Constraints: model.Tables.Sum(t =>
                 t.ForeignKeys.Count + t.CheckConstraints.Count + t.UniqueConstraints.Count));
+    }
+
+    public async Task<DatabaseModel> ReadSourceModelAsync(
+        ConnectionViewModel vm,
+        CancellationToken ct)
+    {
+        var info = ConnectionInfoFactory.FromViewModel(vm);
+        return await _tableInfoProvider.ReadDatabaseModelAsync(info, ct: ct);
     }
 
     public async Task<string?> TestConnectionAsync(ConnectionViewModel vm, CancellationToken ct)

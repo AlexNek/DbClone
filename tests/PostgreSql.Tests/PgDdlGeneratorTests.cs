@@ -424,4 +424,14 @@ public class PgDdlGeneratorTests
         result.Should().Contain("setval");
         result.Should().Contain("100");
     }
+
+    [Fact]
+    public void GenerateSetSequenceValue_MixedCaseName_QuotesIdentifierInsideLiteral()
+    {
+        // setval parses its text argument like an unquoted identifier (case-folded),
+        // so the name must be quoted inside the literal to survive.
+        var result = _generator.GenerateSetSequenceValue("sel_test", "MixedCase_Id_seq", 4);
+
+        result.Should().Contain("setval('sel_test.\"MixedCase_Id_seq\"', 4, true)");
+    }
 }

@@ -4,6 +4,7 @@ using DbClone.Application.Platforms;
 using DbClone.Application.Services;
 using DbClone.PostgreSql.Ddl;
 using DbClone.PostgreSql.DependencyAnalysis;
+using DbClone.PostgreSql.Execution;
 using DbClone.PostgreSql.Formats;
 using DbClone.PostgreSql.Pipeline;
 using DbClone.PostgreSql.Providers;
@@ -37,11 +38,14 @@ public static class PostgreSqlServiceRegistration
         services.AddSingleton<PgDependencyAnalyzer>();
         services.AddSingleton<PgDdlGenerator>();
         services.AddSingleton<IDdlGenerator>(sp => sp.GetRequiredService<PgDdlGenerator>());
+        services.AddSingleton<IPgExecutorFactory, PgExecutorFactory>();
+        services.AddSingleton<IPgConnectionProvider, PgConnectionProvider>();
 
         // Pipeline stages (registered as ICopyStage implementations)
         services.AddTransient<ICopyStage, ConnectStage>();
         services.AddTransient<ICopyStage, DetectCapabilitiesStage>();
         services.AddTransient<ICopyStage, ReadMetadataStage>();
+        services.AddTransient<ICopyStage, ApplyTableFilterStage>();
         services.AddTransient<ICopyStage, AnalyzeDependenciesStage>();
         services.AddTransient<ICopyStage, CreateSchemasStage>();
         services.AddTransient<ICopyStage, CreateExtensionsStage>();

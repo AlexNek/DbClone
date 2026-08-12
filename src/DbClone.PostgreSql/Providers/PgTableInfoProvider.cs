@@ -65,6 +65,47 @@ public sealed class PgTableInfoProvider : ITableInfoProvider
         }
     }
 
+    public async Task<IReadOnlyList<TableSizeInfo>> GetTableSizesAsync(
+        ConnectionInfo connection,
+        CancellationToken ct)
+    {
+        try
+        {
+            var builder = PgConnectionStringBuilder.BuildConnectionString(connection);
+            await using var conn = new NpgsqlConnection(builder.ConnectionString);
+            await conn.OpenAsync(ct);
+
+            // pg_total_relation_size is an instant catalog lookup (relation size +
+            // indexes + TOAST) — safe to run for every table in one batch.
+            await using var cmd = new NpgsqlCommand(
+                $@"SELECT n.nspname, c.relname, pg_total_relation_size(c.oid)
+                  FROM pg_class c
+                  JOIN pg_namespace n ON n.oid = c.relnamespace
+                  WHERE c.relkind IN ({PgRelKind.TableOrPartition})
+                    AND n.nspname NOT IN ({PgSystemSchemas.SqlList})
+                    AND n.nspname NOT LIKE 'pg_temp_%'
+                  ORDER BY n.nspname, c.relname",
+                conn);
+
+            var sizes = new List<TableSizeInfo>();
+            await using var reader = await cmd.ExecuteReaderAsync(ct);
+            while (await reader.ReadAsync(ct))
+            {
+                sizes.Add(
+                    new TableSizeInfo(
+                        new TableId(reader.GetString(0), reader.GetString(1)),
+                        reader.GetInt64(2)));
+            }
+
+            return sizes;
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Failed to get table sizes from {Db}", connection.DatabaseName);
+            throw;
+        }
+    }
+
     public async Task<DatabaseModel> ReadDatabaseModelAsync(
         ConnectionInfo connection,
         bool excludePlatformSchemas = false,
