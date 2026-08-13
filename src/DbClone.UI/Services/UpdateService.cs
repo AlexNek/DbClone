@@ -59,6 +59,9 @@ public interface IUpdateService
 
     /// <summary>Downloads and installs the available update.</summary>
     void InstallUpdate();
+
+    /// <summary>Raised to report download/install progress and errors.</summary>
+    event EventHandler<InstallProgressEventArgs>? InstallProgressChanged;
 }
 
 public sealed class UpdateService : IUpdateService
@@ -100,6 +103,8 @@ public sealed class UpdateService : IUpdateService
 
     public event EventHandler<UpdateCheckCompletedEventArgs>? UpdateCheckCompleted;
 
+    public event EventHandler<InstallProgressEventArgs>? InstallProgressChanged;
+
     public void CheckForUpdates(bool reportErrors = false)
     {
         _logger.LogInformation(
@@ -134,8 +139,16 @@ public sealed class UpdateService : IUpdateService
             return;
         }
 
-        // Fire-and-forget: the download must not block the UI thread.
-        _ = InstallUpdateAsync(_lastArgs);
+        InstallProgressChanged?.Invoke(
+            this,
+            new InstallProgressEventArgs(InstallProgressState.Downloading));
+
+        // Capture the update data now so the background task uses the args
+        // selected by this check, not a later OnCheckForUpdate reassignment.
+        var args = _lastArgs;
+
+        // Run on a thread-pool thread so the UI thread stays responsive.
+        _ = Task.Run(() => InstallUpdateAsync(args));
     }
 
     private async Task InstallUpdateAsync(UpdateInfoEventArgs args)
@@ -144,7 +157,11 @@ public sealed class UpdateService : IUpdateService
         {
             // Download ourselves instead of AutoUpdater.DownloadUpdate, which
             // launches .exe installers without arguments (interactive setup).
-            var installerPath = await DownloadInstallerAsync(args.DownloadURL);
+            var installerPath = await DownloadInstallerAsync(args.DownloadURL).ConfigureAwait(false);
+
+            InstallProgressChanged?.Invoke(
+                this,
+                new InstallProgressEventArgs(InstallProgressState.Launching));
 
             _logger.LogInformation(
                 "Launching installer {InstallerPath} with arguments '{Arguments}'",
@@ -165,10 +182,28 @@ public sealed class UpdateService : IUpdateService
         catch (Exception ex)
         {
             _logger.LogWarning(ex, "Update install failed");
+
+            var userMessage = ex switch
+            {
+                HttpRequestException => "Download failed. Check your internet connection and try again.",
+                UnauthorizedAccessException => "File access denied — your antivirus may be blocking the installer. " +
+                       "Try disabling it temporarily or download the update manually from GitHub.",
+                IOException io when io.Message.Contains("access", StringComparison.OrdinalIgnoreCase)
+                    => "File access denied — your antivirus may be blocking the installer. " +
+                       "Try disabling it temporarily or download the update manually from GitHub.",
+                IOException => "Could not save the installer file. Check disk space and try again.",
+                System.ComponentModel.Win32Exception => "Could not launch the installer — it may have been " +
+                       "blocked by your antivirus. Try downloading manually from GitHub.",
+                _ => $"Update failed: {ex.Message}"
+            };
+
+            InstallProgressChanged?.Invoke(
+                this,
+                new InstallProgressEventArgs(InstallProgressState.Failed, userMessage));
         }
     }
 
-    private static async Task<string> DownloadInstallerAsync(string url)
+    private async Task<string> DownloadInstallerAsync(string url)
     {
         var fileName = Path.GetFileName(new Uri(url).AbsolutePath);
         if (string.IsNullOrWhiteSpace(fileName))
@@ -179,9 +214,35 @@ public sealed class UpdateService : IUpdateService
         using var http = new HttpClient();
         http.DefaultRequestHeaders.UserAgent.ParseAdd("DbClone-AutoUpdater");
 
-        using var stream = await http.GetStreamAsync(url);
+        using var response = await http.GetAsync(url, HttpCompletionOption.ResponseHeadersRead).ConfigureAwait(false);
+        response.EnsureSuccessStatusCode();
+
+        var totalBytes = response.Content.Headers.ContentLength;
+        await using var contentStream = await response.Content.ReadAsStreamAsync().ConfigureAwait(false);
         await using var file = File.Create(target);
-        await stream.CopyToAsync(file);
+
+        var buffer = new byte[81920];
+        long bytesRead = 0;
+        int lastReportedPercent = -1;
+        int read;
+
+        while ((read = await contentStream.ReadAsync(buffer).ConfigureAwait(false)) > 0)
+        {
+            await file.WriteAsync(buffer.AsMemory(0, read)).ConfigureAwait(false);
+            bytesRead += read;
+
+            if (totalBytes > 0)
+            {
+                var percent = (int)(bytesRead * 100 / totalBytes.Value);
+                if (percent != lastReportedPercent)
+                {
+                    lastReportedPercent = percent;
+                    InstallProgressChanged?.Invoke(
+                        this,
+                        new InstallProgressEventArgs(InstallProgressState.DownloadProgress, progressPercent: percent));
+                }
+            }
+        }
 
         return target;
     }

@@ -8,32 +8,126 @@
           WPF-UI 4.3's InfoBar template does NOT render the Content property,
           so the buttons are overlaid on top via Grid layering.  -->
     <Grid Margin="8,4,8,0">
+        <Grid.RowDefinitions>
+            <RowDefinition Height="Auto" />
+            <RowDefinition Height="Auto" />
+        </Grid.RowDefinitions>
+
         <ui:InfoBar
-            IsClosable="True"
+            Grid.Row="0"
+            IsClosable="{Binding IsDownloading, Converter={StaticResource InvertBoolConverter}}"
             IsOpen="{Binding IsOpen, Mode=TwoWay}"
-            Severity="Success"
             Title="Update available"
-            Message="{Binding Message}" />
+            Message="{Binding Message}">
+            <ui:InfoBar.Style>
+                <!--  BasedOn is required: without it this explicit style replaces WPF-UI's
+                      implicit theme style and the InfoBar loses its ControlTemplate
+                      (icon, title, message, close button, severity colors).  -->
+                <Style BasedOn="{StaticResource {x:Type ui:InfoBar}}" TargetType="ui:InfoBar">
+                    <Setter Property="Severity" Value="Success" />
+                    <Style.Triggers>
+                        <DataTrigger Binding="{Binding HasError}" Value="True">
+                            <Setter Property="Severity" Value="Error" />
+                        </DataTrigger>
+                        <DataTrigger Binding="{Binding IsDownloading}" Value="True">
+                            <Setter Property="Severity" Value="Informational" />
+                        </DataTrigger>
+                    </Style.Triggers>
+                </Style>
+            </ui:InfoBar.Style>
+        </ui:InfoBar>
 
         <!--  Action buttons (visible only when the bar is open)  -->
         <StackPanel
+            Grid.Row="0"
             Margin="0,0,52,0"
             HorizontalAlignment="Right"
             VerticalAlignment="Center"
             Orientation="Horizontal"
             Visibility="{Binding IsOpen, Converter={StaticResource BoolToVis}}">
 
+            <!--  Progress ring + percentage during download  -->
+            <StackPanel
+                Orientation="Horizontal"
+                Margin="0,0,10,0"
+                Visibility="{Binding IsDownloading, Converter={StaticResource BoolToVis}}">
+                <ui:ProgressRing
+                    Width="18"
+                    Height="18"
+                    Margin="0,0,6,0"
+                    IsIndeterminate="True" />
+                <TextBlock
+                    VerticalAlignment="Center"
+                    FontSize="12"
+                    Text="{Binding ProgressText}" />
+            </StackPanel>
+
+            <!--  What's new button (hidden during download/error)  -->
             <ui:Button
                 Margin="0,0,8,0"
                 Appearance="Secondary"
                 Command="{Binding ViewReleaseNotesCommand}"
-                Content="What's new"
-                Visibility="{Binding HasChangelog, Converter={StaticResource BoolToVis}}" />
+                Content="What's new">
+                <ui:Button.Style>
+                    <Style BasedOn="{StaticResource {x:Type ui:Button}}" TargetType="ui:Button">
+                        <Setter Property="Visibility" Value="Visible" />
+                        <Style.Triggers>
+                            <DataTrigger Binding="{Binding HasChangelog}" Value="False">
+                                <Setter Property="Visibility" Value="Collapsed" />
+                            </DataTrigger>
+                            <DataTrigger Binding="{Binding IsDownloading}" Value="True">
+                                <Setter Property="Visibility" Value="Collapsed" />
+                            </DataTrigger>
+                            <DataTrigger Binding="{Binding HasError}" Value="True">
+                                <Setter Property="Visibility" Value="Collapsed" />
+                            </DataTrigger>
+                        </Style.Triggers>
+                    </Style>
+                </ui:Button.Style>
+            </ui:Button>
 
+            <!--  Update button (disabled during download, hidden on error)  -->
             <ui:Button
                 Appearance="Primary"
                 Command="{Binding InstallUpdateCommand}"
-                Content="Update" />
+                Content="Update"
+                IsEnabled="{Binding IsDownloading, Converter={StaticResource InvertBoolConverter}}">
+                <ui:Button.Style>
+                    <Style BasedOn="{StaticResource {x:Type ui:Button}}" TargetType="ui:Button">
+                        <Setter Property="Visibility" Value="Visible" />
+                        <Style.Triggers>
+                            <DataTrigger Binding="{Binding HasError}" Value="True">
+                                <Setter Property="Visibility" Value="Collapsed" />
+                            </DataTrigger>
+                        </Style.Triggers>
+                    </Style>
+                </ui:Button.Style>
+            </ui:Button>
+
+            <!--  Retry button (visible only on error)  -->
+            <ui:Button
+                Margin="0,0,8,0"
+                Appearance="Primary"
+                Command="{Binding InstallUpdateCommand}"
+                Content="Retry"
+                Visibility="{Binding HasError, Converter={StaticResource BoolToVis}}" />
+
+            <!--  Dismiss error button  -->
+            <ui:Button
+                Appearance="Secondary"
+                Command="{Binding DismissErrorCommand}"
+                Content="Dismiss"
+                Visibility="{Binding HasError, Converter={StaticResource BoolToVis}}" />
         </StackPanel>
+
+        <!--  Error detail text (shown below the bar when there's an error)  -->
+        <TextBlock
+            Grid.Row="1"
+            Margin="12,2,12,4"
+            FontSize="11"
+            Foreground="{ui:ThemeResource SystemFillColorCriticalBrush}"
+            Text="{Binding ErrorMessage}"
+            TextWrapping="Wrap"
+            Visibility="{Binding HasError, Converter={StaticResource BoolToVis}}" />
     </Grid>
 </UserControl>
