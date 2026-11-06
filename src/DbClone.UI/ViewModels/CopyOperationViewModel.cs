@@ -3,6 +3,7 @@ using System.Windows.Input;
 using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
 
+using DbClone.Application.Copy;
 using DbClone.Application.DTOs;
 using DbClone.Application.Enums;
 using DbClone.Application.Interfaces;
@@ -10,6 +11,8 @@ using DbClone.UI.Services;
 using DbClone.UI.Settings;
 
 using Microsoft.Extensions.Logging;
+using CanonicalModel.Enums;
+using CanonicalModel.DTOs;
 
 namespace DbClone.UI.ViewModels;
 
@@ -19,13 +22,11 @@ namespace DbClone.UI.ViewModels;
 /// </summary>
 public sealed partial class CopyOperationViewModel : ObservableObject, IWorkflowViewModel
 {
-    private readonly ICopyEngine _copyEngine;
-
     private readonly OperationContext _ctx;
 
     private readonly ILogger<CopyOperationViewModel> _logger;
 
-    private readonly CopyOperationOrchestrator _orchestrator;
+    private readonly ICopyWorkflow _workflow;
 
     private readonly ManualResetEventSlim _pauseGate = new(true);
 
@@ -92,8 +93,7 @@ public sealed partial class CopyOperationViewModel : ObservableObject, IWorkflow
 
     public CopyOperationViewModel(
         ILogger<CopyOperationViewModel> logger,
-        ICopyEngine copyEngine,
-        CopyOperationOrchestrator orchestrator,
+        ICopyWorkflow workflow,
         SettingsPersistenceManager settingsPersister,
         ViewModelStateManager stateManager,
         ITableSelectionService tableSelectionService,
@@ -101,8 +101,7 @@ public sealed partial class CopyOperationViewModel : ObservableObject, IWorkflow
         OperationContext ctx)
     {
         _logger = logger;
-        _copyEngine = copyEngine;
-        _orchestrator = orchestrator;
+        _workflow = workflow;
         _settingsPersister = settingsPersister;
         _stateManager = stateManager;
         _tableSelectionService = tableSelectionService;
@@ -216,31 +215,38 @@ public sealed partial class CopyOperationViewModel : ObservableObject, IWorkflow
 
         try
         {
-            var request = new CopyRequest(
-                Source: ConnectionInfoFactory.FromViewModel(_ctx.Source),
-                Destination: ConnectionInfoFactory.FromViewModel(_ctx.Destination),
-                Options: new CopyOptions(
-                    CopyData: Settings.CopyData,
-                    CopyIndexes: Settings.CopyIndexes,
-                    CopyConstraints: true,
-                    CopyFunctions: Settings.CopyFunctions,
-                    CopyTriggers: Settings.CopyTriggers,
-                    CopyViews: Settings.CopyViews,
-                    CopySequences: true,
-                    CopyMode: Settings.SelectedCopyMode,
-                    VerifyMode: Settings.SelectedVerifyMode,
-                    ExcludePlatformSchemas: !Settings.CopyPlatformSchemas,
-                    TableSelection: tableSelection));
+            var options = new CopyOptions(
+                CopyData: Settings.CopyData,
+                CopyIndexes: Settings.CopyIndexes,
+                CopyConstraints: true,
+                CopyFunctions: Settings.CopyFunctions,
+                CopyTriggers: Settings.CopyTriggers,
+                CopyViews: Settings.CopyViews,
+                CopySequences: true,
+                CopyMode: Settings.SelectedCopyMode,
+                VerifyMode: Settings.SelectedVerifyMode,
+                ExcludePlatformSchemas: !Settings.CopyPlatformSchemas);
 
             var listener = new CopyProgressUIListener(this, State);
 
-            var workflowResult = await _orchestrator.ExecuteAsync(
-                                     _ctx.Source,
-                                     _ctx.Destination,
-                                     Settings.SelectedCopyMode,
-                                     request,
+            var sourceInfo = ConnectionInfoFactory.FromViewModel(_ctx.Source);
+            var destInfo = ConnectionInfoFactory.FromViewModel(_ctx.Destination);
+            var backupPrefix = _ctx.Source.SelectedSavedConnection?.BackupName;
+
+            var workflowResult = await _workflow.ExecuteAsync(
+                                     sourceInfo,
+                                     destInfo,
+                                     backupPrefix,
+                                     options,
+                                     tableSelection,
                                      listener,
                                      ct);
+
+            // If backup mode created a new database, point the destination VM at it
+            if (workflowResult.BackupDestination is { } backupDest)
+            {
+                _ctx.Destination.DatabaseName = backupDest.DatabaseName;
+            }
 
             ProgressPercent = 100;
             IsCopyingData = false;

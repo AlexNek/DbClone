@@ -38,8 +38,8 @@ public class AutoSelectFirstTests
                     connectionStore.Save(conn);
 
                 var groupStore = new InMemoryConnectionGroupStore();
-                var connectionStringService = Substitute.For<IConnectionStringService>();
-                var maintenanceProvider = Substitute.For<IDatabaseMaintenanceProvider>();
+                var connectionStringService = Substitute.For<IConnectionTextService>();
+                var maintenanceProvider = Substitute.For<IServerAdminService>();
 
                 // Act
                 var vm = new UnifiedConnectionManagerViewModel(
@@ -83,8 +83,8 @@ public class AutoSelectFirstTests
                 foreach (var group in groups)
                     groupStore.Save(group);
 
-                var connectionStringService = Substitute.For<IConnectionStringService>();
-                var maintenanceProvider = Substitute.For<IDatabaseMaintenanceProvider>();
+                var connectionStringService = Substitute.For<IConnectionTextService>();
+                var maintenanceProvider = Substitute.For<IServerAdminService>();
 
                 // Act — initialTab: 1 activates the Groups tab
                 var vm = new UnifiedConnectionManagerViewModel(

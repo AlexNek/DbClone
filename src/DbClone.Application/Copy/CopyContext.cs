@@ -1,6 +1,7 @@
-using DbClone.Application.DTOs;
-using DbClone.Application.Models;
-using DbClone.Application.Platforms;
+using CanonicalModel.Models;
+using CanonicalModel.DTOs;
+using CanonicalModel.Platforms;
+using DbAdapter.Definitions;
 
 namespace DbClone.Application.Copy;
 
@@ -104,7 +105,7 @@ public sealed class CopyContext
     /// <summary>
     /// Gets or sets the source database model.
     /// </summary>
-    public Models.DatabaseModel? SourceModel { get; set; }
+    public DatabaseModel? SourceModel { get; set; }
 
     /// <summary>
     /// Gets or sets the resolved platform definition for the source connection.

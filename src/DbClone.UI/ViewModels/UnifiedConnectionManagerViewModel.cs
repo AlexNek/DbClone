@@ -6,13 +6,13 @@ using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
 
 using DbClone.Application.DTOs;
-using DbClone.Application.Enums;
 using DbClone.Application.Interfaces;
 using DbClone.Application.Models;
-using DbClone.Application.Platforms;
 using DbClone.UI.Models;
 using DbClone.UI.Services;
 using DbClone.UI.Views;
+using CanonicalModel.Enums;
+using CanonicalModel.Platforms;
 
 namespace DbClone.UI.ViewModels;
 
@@ -36,7 +36,7 @@ public sealed partial class UnifiedConnectionManagerViewModel : ObservableObject
 
     private readonly IConnectionStore _connectionStore;
 
-    private readonly IConnectionStringService _connectionStringService;
+    private readonly IConnectionTextService _connectionStringService;
 
     private readonly IConnectionExportService _exportService;
 
@@ -44,9 +44,9 @@ public sealed partial class UnifiedConnectionManagerViewModel : ObservableObject
 
     private readonly IConnectionImportService _importService;
 
-    private readonly IDatabaseMaintenanceProvider _maintenanceProvider;
+    private readonly IServerAdminService _serverAdmin;
 
-    private readonly PlatformSchemaResolver _platformResolver;
+    private readonly IPlatformService _platformService;
 
     private readonly ISettingsService? _settingsService;
 
@@ -181,12 +181,12 @@ public sealed partial class UnifiedConnectionManagerViewModel : ObservableObject
     public UnifiedConnectionManagerViewModel(
         IConnectionStore connectionStore,
         IConnectionGroupStore groupStore,
-        IConnectionStringService connectionStringService,
-        IDatabaseMaintenanceProvider maintenanceProvider,
+        IConnectionTextService connectionStringService,
+        IServerAdminService serverAdmin,
         IConnectionImportService importService,
         IConnectionExportService exportService,
         IBackupEncryptionService backupEncryptionService,
-        PlatformSchemaResolver platformResolver,
+        IPlatformService platformService,
         int initialTab = 0,
         string? selectGroupId = null,
         string? selectConnectionId = null,
@@ -195,15 +195,15 @@ public sealed partial class UnifiedConnectionManagerViewModel : ObservableObject
         _connectionStore = connectionStore;
         _groupStore = groupStore;
         _connectionStringService = connectionStringService;
-        _maintenanceProvider = maintenanceProvider;
+        _serverAdmin = serverAdmin;
         _importService = importService;
         _exportService = exportService;
         _settingsService = settingsService;
         _backupEncryptionService = backupEncryptionService;
-        _platformResolver = platformResolver;
+        _platformService = platformService;
 
         // Populate the connection type dropdown from .platform files
-        ConnectionTypeValues = _platformResolver.GetAllPlatforms();
+        ConnectionTypeValues = _platformService.GetAllPlatforms();
         var defaultPlatformId = ConnectionTypeValues.FirstOrDefault()?.Id;
 
         // Initialize tab: explicit navigation requests take priority over
@@ -472,7 +472,7 @@ public sealed partial class UnifiedConnectionManagerViewModel : ObservableObject
                 FormUsername,
                 FormPassword,
                 sslMode);
-            var databases = await _maintenanceProvider.ListDatabasesAsync(info, ct);
+            var databases = await _serverAdmin.ListDatabasesAsync(info, ct);
 
             if (databases.Count == 0)
             {
@@ -732,7 +732,7 @@ public sealed partial class UnifiedConnectionManagerViewModel : ObservableObject
     /// Returns null when no platform matches (base engine).
     /// </summary>
     private string? DetectConnectionType(string host) =>
-        _platformResolver.DetectPlatformId(host);
+        _platformService.DetectPlatformId(host);
 
     private SavedConnection MapToSavedConnection(DatabaseConnection dc)
     {
@@ -816,7 +816,7 @@ public sealed partial class UnifiedConnectionManagerViewModel : ObservableObject
     partial void OnFormConnectionTypeChanged(string? value)
     {
         // Unconditionally overwrite Port and SslMode per requirements 4.3
-        var defaults = _platformResolver.GetConnectionDefaults(value);
+        var defaults = _platformService.GetConnectionDefaults(value);
         FormPort = defaults.Port.ToString();
         FormSslMode = defaults.SslMode;
     }
@@ -1101,9 +1101,9 @@ public sealed partial class UnifiedConnectionManagerViewModel : ObservableObject
                 FormUsername,
                 FormPassword,
                 sslMode);
-            var version = await _maintenanceProvider.TestConnectionAsync(info, ct);
+            var version = await _serverAdmin.TestConnectionAsync(info, ct);
             TestResult = version != null
-                             ? $"OK — {_maintenanceProvider.ProviderName} {version}"
+                             ? $"OK — {_serverAdmin.GetProviderName(info)} {version}"
                              : "FAILED";
         }
         catch (OperationCanceledException)

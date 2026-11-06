@@ -1,4 +1,5 @@
-using DbClone.Application.DTOs;
+using CanonicalModel.DTOs;
+using DbAdapter.Definitions;
 
 namespace DbClone.Application.Interfaces;
 

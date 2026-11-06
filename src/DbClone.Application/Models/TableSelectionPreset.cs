@@ -1,3 +1,5 @@
+using CanonicalModel.Models;
+
 namespace DbClone.Application.Models;
 
 /// <summary>

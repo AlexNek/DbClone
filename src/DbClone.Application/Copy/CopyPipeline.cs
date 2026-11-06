@@ -1,9 +1,10 @@
 using System.Diagnostics;
 
 using DbClone.Application.DTOs;
-using DbClone.Application.Enums;
 
 using Microsoft.Extensions.Logging;
+using CanonicalModel.Enums;
+using CanonicalModel.DTOs;
 
 namespace DbClone.Application.Copy;
 

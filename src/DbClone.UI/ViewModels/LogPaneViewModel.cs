@@ -7,9 +7,9 @@ using System.Windows.Data;
 using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
 
-using DbClone.Application.Enums;
 using DbClone.UI.Logging;
 using DbClone.UI.Models;
+using CanonicalModel.Enums;
 
 namespace DbClone.UI.ViewModels;
 

@@ -3,11 +3,12 @@ using System.Collections.ObjectModel;
 using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
 
-using DbClone.Application.DTOs;
 using DbClone.Application.Interfaces;
-using DbClone.Application.Platforms;
 using DbClone.UI.Models;
 using DbClone.UI.Services;
+using CanonicalModel.DTOs;
+using CanonicalModel.Enums;
+using CanonicalModel.Platforms;
 
 namespace DbClone.UI.ViewModels;
 
@@ -17,11 +18,11 @@ public sealed partial class ConnectionViewModel : ObservableObject
 
     public event EventHandler? EditConnectionRequested;
 
-    private readonly IConnectionStringService _connectionStringService;
+    private readonly IConnectionTextService _connectionStringService;
 
-    private readonly IDatabaseMaintenanceProvider _maintenanceProvider;
+    private readonly IServerAdminService _serverAdmin;
 
-    private readonly PlatformSchemaResolver _platformResolver;
+    private readonly IPlatformService _platformService;
 
     [ObservableProperty]
     private string _connectionString = string.Empty;
@@ -62,7 +63,7 @@ public sealed partial class ConnectionViewModel : ObservableObject
     public int PortNumber =>
         int.TryParse(Port, out var p)
             ? p
-            : _platformResolver.GetConnectionDefaults(ConnectionType).Port;
+            : _platformService.GetConnectionDefaults(ConnectionType).Port;
 
     public ObservableCollection<SavedConnection> SavedConnections { get; } = [];
 
@@ -86,26 +87,30 @@ public sealed partial class ConnectionViewModel : ObservableObject
             : $"{Host}:{Port}/{DatabaseName}";
 
     public ConnectionViewModel(
-        IConnectionStringService connectionStringService,
-        IDatabaseMaintenanceProvider maintenanceProvider,
-        PlatformSchemaResolver platformResolver)
+        IConnectionTextService connectionStringService,
+        IServerAdminService serverAdmin,
+        IPlatformService platformService)
     {
         _connectionStringService = connectionStringService;
-        _maintenanceProvider = maintenanceProvider;
-        _platformResolver = platformResolver;
-        ConnectionTypeValues = platformResolver.GetAllPlatforms();
+        _serverAdmin = serverAdmin;
+        _platformService = platformService;
+        ConnectionTypeValues = platformService.GetAllPlatforms();
         _connectionType = ConnectionTypeValues.FirstOrDefault()?.Id;
     }
 
     public string BuildConnectionString()
     {
+        var sslMode = Enum.TryParse<ESslMode>(SslMode, true, out var parsed)
+                          ? parsed
+                          : ESslMode.Prefer;
+
         var fields = new ConnectionStringFields(
             Host,
             PortNumber,
             DatabaseName,
             Username,
             Password,
-            SslMode);
+            sslMode);
         return _connectionStringService.BuildKeyValue(fields);
     }
 
@@ -148,7 +153,7 @@ public sealed partial class ConnectionViewModel : ObservableObject
                 DatabaseName = fields.Database;
                 Username = fields.Username;
                 Password = fields.Password;
-                SslMode = fields.SslMode;
+                SslMode = fields.SslMode.ToString();
             }
         }
         catch (Exception ex)
@@ -159,7 +164,7 @@ public sealed partial class ConnectionViewModel : ObservableObject
 
     partial void OnConnectionTypeChanged(string? value)
     {
-        var defaults = _platformResolver.GetConnectionDefaults(value);
+        var defaults = _platformService.GetConnectionDefaults(value);
         SslMode = defaults.SslMode;
         Port = defaults.Port.ToString();
     }
@@ -194,8 +199,8 @@ public sealed partial class ConnectionViewModel : ObservableObject
         try
         {
             var info = ConnectionInfoFactory.FromViewModel(this);
-            var version = await _maintenanceProvider.TestConnectionAsync(info, ct);
-            TestResult = $"OK — {_maintenanceProvider.ProviderName} {version}";
+            var version = await _serverAdmin.TestConnectionAsync(info, ct);
+            TestResult = $"OK — {_serverAdmin.GetProviderName(info)} {version}";
         }
         catch (Exception ex)
         {

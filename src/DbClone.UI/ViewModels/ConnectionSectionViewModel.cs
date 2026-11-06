@@ -4,7 +4,6 @@ using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
 
 using DbClone.Application.Interfaces;
-using DbClone.Application.Platforms;
 using DbClone.UI.Models;
 using DbClone.UI.Services;
 using DbClone.UI.Settings;
@@ -23,7 +22,7 @@ public sealed partial class ConnectionSectionViewModel : ObservableObject
 
     private readonly IConnectionStore _connectionStore;
 
-    private readonly IConnectionStringService _connectionStringService;
+    private readonly IConnectionTextService _connectionStringService;
 
     private readonly OperationContext _ctx;
 
@@ -31,9 +30,9 @@ public sealed partial class ConnectionSectionViewModel : ObservableObject
 
     private readonly IConnectionImportService _importService;
 
-    private readonly IDatabaseMaintenanceProvider _maintenanceProvider;
+    private readonly IServerAdminService _serverAdmin;
 
-    private readonly PlatformSchemaResolver _platformResolver;
+    private readonly IPlatformService _platformService;
 
     private readonly SettingsPersistenceManager _settingsPersister;
 
@@ -52,13 +51,13 @@ public sealed partial class ConnectionSectionViewModel : ObservableObject
     public ConnectionSectionViewModel(
         IConnectionGroupStore connectionGroupStore,
         IConnectionStore connectionStore,
-        IConnectionStringService connectionStringService,
-        IDatabaseMaintenanceProvider maintenanceProvider,
+        IConnectionTextService connectionStringService,
+        IServerAdminService serverAdmin,
         IConnectionImportService importService,
         IConnectionExportService exportService,
         ISettingsService settingsService,
         IBackupEncryptionService backupEncryptionService,
-        PlatformSchemaResolver platformResolver,
+        IPlatformService platformService,
         SettingsPersistenceManager settingsPersister,
         UserSettings settings,
         OperationContext ctx)
@@ -66,12 +65,12 @@ public sealed partial class ConnectionSectionViewModel : ObservableObject
         _connectionGroupStore = connectionGroupStore;
         _connectionStore = connectionStore;
         _connectionStringService = connectionStringService;
-        _maintenanceProvider = maintenanceProvider;
+        _serverAdmin = serverAdmin;
         _importService = importService;
         _exportService = exportService;
         _backupEncryptionService = backupEncryptionService;
         _settingsService = settingsService;
-        _platformResolver = platformResolver;
+        _platformService = platformService;
         _settingsPersister = settingsPersister;
         Settings = settings;
         _ctx = ctx;
@@ -160,11 +159,11 @@ public sealed partial class ConnectionSectionViewModel : ObservableObject
             _connectionStore,
             _connectionGroupStore,
             _connectionStringService,
-            _maintenanceProvider,
+            _serverAdmin,
             _importService,
             _exportService,
             _backupEncryptionService,
-            _platformResolver,
+            _platformService,
             initialTab: 1,
             selectGroupId: groupId,
             settingsService: _settingsService);

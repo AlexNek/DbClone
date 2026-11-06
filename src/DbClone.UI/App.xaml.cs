@@ -1,12 +1,16 @@
 using System.IO;
 using System.Windows;
 
+using DbClone.Application.Catalog;
 using DbClone.Application.Compare;
 using DbClone.Application.Compare.Comparers;
+using DbClone.Application.Comparison;
+using DbClone.Application.Copy;
 using DbClone.Application.Enums;
 using DbClone.Application.Interfaces;
 using DbClone.Application.TableFilter;
-using DbClone.PostgreSql;
+using DbClone.Application.Targets;
+using DbAdapter.PostgreSql;
 using DbClone.UI.Logging;
 using DbClone.UI.Services;
 using DbClone.UI.ViewModels;
@@ -135,7 +139,9 @@ public partial class App : System.Windows.Application, IDisposable
             .ConfigureServices((_, services) =>
                 {
                     services.AddPostgreSqlProvider();
-                    services.AddSingleton<IDialogService, WpfDialogService>();
+                    services.AddSingleton<WpfDialogService>();
+                    services.AddSingleton<IDialogService>(sp => sp.GetRequiredService<WpfDialogService>());
+                    services.AddSingleton<IConfirmationService>(sp => sp.GetRequiredService<WpfDialogService>());
                     services.AddSingleton<IConnectionStore, ConnectionStore>();
                     services.AddSingleton<IConnectionGroupStore, ConnectionGroupStore>();
                     services.AddSingleton<ITableSelectionPresetStore, TableSelectionPresetStore>();
@@ -143,8 +149,13 @@ public partial class App : System.Windows.Application, IDisposable
                     services.AddSingleton<ITableFilterApplier, TableFilterApplier>();
                     services.AddSingleton<ITableSelectionPresetNameValidator, TableSelectionPresetNameValidator>();
                     services.AddSingleton<IBackupEncryptionService, BackupEncryptionService>();
-                    services.AddTransient<IDatabaseService, DatabaseService>();
-                    services.AddTransient<IDatabaseComparerService, DatabaseComparerService>();
+                    services.AddSingleton<DatabaseTargetFactory>();
+                    services.AddTransient<ITableCatalogService, TableCatalogService>();
+                    services.AddTransient<IComparisonService, ComparisonService>();
+                    services.AddTransient<ICopyWorkflow, CopyWorkflow>();
+                    services.AddSingleton<IPlatformService, DbClone.Application.Services.PlatformService>();
+                    services.AddSingleton<IConnectionTextService, DbClone.Application.Services.ConnectionTextService>();
+                    services.AddSingleton<IServerAdminService, DbClone.Application.Services.ServerAdminService>();
 
                     // Model comparers (IModelComparer) — OCP: add new ones here without editing DatabaseComparerService
                     services.AddTransient<IModelComparer, SchemaPresenceComparer>();
@@ -156,7 +167,6 @@ public partial class App : System.Windows.Application, IDisposable
                     services.AddTransient<IModelComparer, TypeComparer>();
                     services.AddTransient<IModelComparer, TableDdlComparer>();
 
-                    services.AddTransient<CopyOperationOrchestrator>();
                     services.AddSingleton<ISettingsService, SettingsService>();
                     services.AddReportGenerators();
                     services.AddSingleton<ReportExportService>();

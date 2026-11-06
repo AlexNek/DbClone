@@ -1,7 +1,8 @@
 using System.Text.RegularExpressions;
 using DbClone.Application.Enums;
 using DbClone.Application.Compare;
-using DbClone.Application.Models;
+using CanonicalModel.Models;
+using CanonicalModel.Enums;
 
 namespace DbClone.Application.Compare.Comparers;
 

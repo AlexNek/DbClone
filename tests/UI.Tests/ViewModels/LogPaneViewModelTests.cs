@@ -1,8 +1,8 @@
-using DbClone.Application.Enums;
 using DbClone.UI.Models;
 using DbClone.UI.ViewModels;
 
 using FluentAssertions;
+using CanonicalModel.Enums;
 
 namespace UI.Tests.ViewModels;
 

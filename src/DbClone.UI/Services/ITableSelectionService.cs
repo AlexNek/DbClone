@@ -1,6 +1,7 @@
 using DbClone.Application.Models;
 using DbClone.Application.TableFilter;
 using DbClone.UI.Models;
+using CanonicalModel.Models;
 
 namespace DbClone.UI.Services;
 

@@ -44,8 +44,8 @@ public class TabMemoryTests
         return new UnifiedConnectionManagerViewModel(
             new InMemoryConnectionStore(),
             new InMemoryConnectionGroupStore(),
-            Substitute.For<IConnectionStringService>(),
-            Substitute.For<IDatabaseMaintenanceProvider>(),
+            Substitute.For<IConnectionTextService>(),
+            Substitute.For<IServerAdminService>(),
             Substitute.For<IConnectionImportService>(),
             Substitute.For<IConnectionExportService>(),
             Substitute.For<IBackupEncryptionService>(),

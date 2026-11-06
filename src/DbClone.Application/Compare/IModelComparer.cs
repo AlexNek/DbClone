@@ -1,4 +1,4 @@
-using DbClone.Application.Models;
+using CanonicalModel.Models;
 
 namespace DbClone.Application.Compare;
 

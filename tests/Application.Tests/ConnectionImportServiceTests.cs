@@ -2,13 +2,16 @@ using DbClone.Application.Enums;
 using DbClone.Application.Interfaces;
 using DbClone.Application.Models;
 using DbClone.Application.Services;
-using DbClone.PostgreSql.Formats;
+using DbAdapter.Definitions;
+using DbAdapter.PostgreSql.Formats;
 
 using FluentAssertions;
 
 using Microsoft.Extensions.Logging.Abstractions;
 
 using NSubstitute;
+using CanonicalModel.Enums;
+using CanonicalModel.DTOs;
 
 namespace Application.Tests;
 
@@ -64,15 +67,14 @@ public class ConnectionImportServiceTests
     public void Import_ConnectionWithNoOptions_ProducesNoAdditionalParameterWarnings()
     {
         // Arrange
-        var connection = new DatabaseConnection
-                             {
-                                 Host = "localhost",
-                                 Port = 5432,
-                                 Database = "db",
-                                 Username = "user",
-                                 Password = "pass"
-                             };
-        var format = CreateFakeFormat(parsedConnection: connection);
+        var fields = new ConnectionStringFields(
+            Host: "localhost",
+            Port: 5432,
+            Database: "db",
+            Username: "user",
+            Password: "pass",
+            SslMode: ESslMode.Prefer);
+        var format = CreateFakeFormat(parsedFields: fields);
         var service = CreateService(format);
 
         // Act
@@ -100,14 +102,14 @@ public class ConnectionImportServiceTests
     public void Import_MissingPassword_ProducesWarning()
     {
         // Arrange
-        var connection = new DatabaseConnection
-                             {
-                                 Host = "localhost",
-                                 Database = "db",
-                                 Username = "user",
-                                 Password = null
-                             };
-        var format = CreateFakeFormat(parsedConnection: connection);
+        var fields = new ConnectionStringFields(
+            Host: "localhost",
+            Port: 5432,
+            Database: "db",
+            Username: "user",
+            Password: string.Empty,
+            SslMode: ESslMode.Prefer);
+        var format = CreateFakeFormat(parsedFields: fields);
         var service = CreateService(format);
 
         // Act
@@ -244,13 +246,13 @@ public class ConnectionImportServiceTests
         result.Warnings.Should().NotContain(w => w.Message.Contains("Unknown"));
     }
 
-    private static IConnectionFormat CreateFakeFormat(
+    private static IConnectionTextFormat CreateFakeFormat(
         string id = "test-format",
         string displayName = "Test Format",
         bool canImport = true,
-        DatabaseConnection? parsedConnection = null)
+        ConnectionStringFields? parsedFields = null)
     {
-        var format = Substitute.For<IConnectionFormat>();
+        var format = Substitute.For<IConnectionTextFormat>();
         format.Id.Returns(id);
         format.DisplayName.Returns(displayName);
         format.Provider.Returns(EDatabaseProvider.PostgreSql);
@@ -258,18 +260,18 @@ public class ConnectionImportServiceTests
         format.TypicalSource.Returns("Test");
         format.CanImport(Arg.Any<string>()).Returns(canImport);
         format.Parse(Arg.Any<string>()).Returns(
-            parsedConnection ?? new DatabaseConnection
-                                    {
-                                        Host = "localhost",
-                                        Port = 5432,
-                                        Database = "testdb",
-                                        Username = "user",
-                                        Password = "pass"
-                                    });
+            parsedFields ?? new ConnectionStringFields(
+                                Host: "localhost",
+                                Port: 5432,
+                                Database: "testdb",
+                                Username: "user",
+                                Password: "pass",
+                                SslMode: ESslMode.Prefer));
         return format;
     }
 
-    private static ConnectionImportService CreateService(params IConnectionFormat[] formats) =>
+    private static ConnectionImportService CreateService(
+        params IConnectionTextFormat[] formats) =>
         new(formats, NullLogger<ConnectionImportService>.Instance);
 
     private static ConnectionImportService CreateServiceWithRealFormats() =>

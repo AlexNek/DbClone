@@ -1,9 +1,9 @@
 using DbClone.Application.Compare;
 using DbClone.Application.Compare.Comparers;
 using DbClone.Application.Enums;
-using DbClone.Application.Models;
 
 using FluentAssertions;
+using CanonicalModel.Models;
 
 namespace Application.Tests;
 

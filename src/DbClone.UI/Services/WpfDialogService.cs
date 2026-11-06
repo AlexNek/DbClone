@@ -1,6 +1,6 @@
 using System.Windows;
 
-using DbClone.UI.Models;
+using DbClone.Application.Interfaces;
 using DbClone.UI.Views;
 
 using Microsoft.Win32;
@@ -8,9 +8,10 @@ using Microsoft.Win32;
 namespace DbClone.UI.Services;
 
 /// <summary>
-/// WPF implementation of <see cref="IDialogService"/> using MessageBox.
+/// WPF implementation of <see cref="IDialogService"/> and
+/// <see cref="IConfirmationService"/> using MessageBox.
 /// </summary>
-public sealed class WpfDialogService : IDialogService
+public sealed class WpfDialogService : IDialogService, IConfirmationService
 {
     /// <inheritdoc />
     public Task<bool> ConfirmAsync(string title, string message)

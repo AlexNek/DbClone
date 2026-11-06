@@ -1,5 +1,6 @@
 using DbClone.Application.DTOs;
-using DbClone.Application.Enums;
+using CanonicalModel.Enums;
+using CanonicalModel.DTOs;
 
 namespace DbClone.Application.Copy;
 

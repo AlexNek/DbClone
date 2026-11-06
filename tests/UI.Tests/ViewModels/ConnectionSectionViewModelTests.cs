@@ -173,8 +173,8 @@ public class ConnectionSectionViewModelTests
         OperationContext ctx)
         CreateViewModel(UserSettings? settings = null)
     {
-        var connectionStringService = Substitute.For<IConnectionStringService>();
-        var maintenanceProvider = Substitute.For<IDatabaseMaintenanceProvider>();
+        var connectionStringService = Substitute.For<IConnectionTextService>();
+        var maintenanceProvider = Substitute.For<IServerAdminService>();
         var connectionStore = new InMemoryConnectionStore();
         var groupStore = new InMemoryConnectionGroupStore();
         var settingsService = Substitute.For<ISettingsService>();

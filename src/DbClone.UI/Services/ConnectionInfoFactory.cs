@@ -1,6 +1,6 @@
 using DbClone.Application.DTOs;
-using DbClone.Application.Enums;
 using DbClone.UI.ViewModels;
+using CanonicalModel.Enums;
 
 namespace DbClone.UI.Services;
 

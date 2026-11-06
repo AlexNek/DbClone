@@ -1,6 +1,6 @@
 using CommunityToolkit.Mvvm.ComponentModel;
 
-using DbClone.Application.Models;
+using CanonicalModel.Models;
 
 namespace DbClone.UI.Models;
 

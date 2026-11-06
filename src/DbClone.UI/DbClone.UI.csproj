@@ -16,8 +16,9 @@
   </ItemGroup>
 
   <ItemGroup>
+    <ProjectReference Include="..\..\CanonicalModel\CanonicalModel.csproj" />
     <ProjectReference Include="..\DbClone.Application\DbClone.Application.csproj" />
-    <ProjectReference Include="..\DbClone.PostgreSql\DbClone.PostgreSql.csproj" />
+    <ProjectReference Include="..\..\DbAdapter.PostgreSql\DbAdapter.PostgreSql.csproj" />
   </ItemGroup>
 
   <ItemGroup>

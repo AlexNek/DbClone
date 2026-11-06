@@ -28,8 +28,8 @@ public class ConnectionAutoNameTests
         // Arrange — create VM with empty stores
         var connectionStore = new InMemoryConnectionStore();
         var groupStore = new InMemoryConnectionGroupStore();
-        var connectionStringService = Substitute.For<IConnectionStringService>();
-        var maintenanceProvider = Substitute.For<IDatabaseMaintenanceProvider>();
+        var connectionStringService = Substitute.For<IConnectionTextService>();
+        var maintenanceProvider = Substitute.For<IServerAdminService>();
 
         var vm = new UnifiedConnectionManagerViewModel(
             connectionStore,

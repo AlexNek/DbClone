@@ -1,7 +1,7 @@
-using DbClone.Application.Models;
 using DbClone.Application.TableFilter;
 
 using FluentAssertions;
+using CanonicalModel.Models;
 
 namespace Application.Tests;
 

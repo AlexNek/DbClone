@@ -1,3 +1,4 @@
+using DbClone.Application.DTOs;
 using DbClone.Application.Models;
 
 namespace DbClone.Application.Interfaces;
@@ -12,5 +13,5 @@ public interface IConnectionExportService
     string Export(DatabaseConnection connection, string formatId);
 
     /// <summary>Returns all formats that can export the given connection.</summary>
-    IReadOnlyList<IConnectionFormat> GetSupportedFormats(DatabaseConnection connection);
+    IReadOnlyList<ConnectionFormatInfo> GetSupportedFormats(DatabaseConnection connection);
 }

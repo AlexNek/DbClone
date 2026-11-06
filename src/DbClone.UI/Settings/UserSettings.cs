@@ -4,6 +4,7 @@ using CommunityToolkit.Mvvm.ComponentModel;
 
 using DbClone.Application.Enums;
 using DbClone.UI.Models;
+using CanonicalModel.Enums;
 
 namespace DbClone.UI.Settings;
 

@@ -1,6 +1,6 @@
 using CommunityToolkit.Mvvm.ComponentModel;
 
-using DbClone.Application.Enums;
+using CanonicalModel.Enums;
 
 namespace DbClone.UI.ViewModels;
 

@@ -1,4 +1,5 @@
 using DbClone.Application.Enums;
+using CanonicalModel.Enums;
 
 namespace DbClone.Application.Compare;
 

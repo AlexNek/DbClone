@@ -1,6 +1,7 @@
 using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
 
+using DbClone.Application.Catalog;
 using DbClone.UI.Models;
 using DbClone.UI.Services;
 
@@ -16,7 +17,7 @@ namespace DbClone.UI.ViewModels;
 /// </summary>
 public sealed partial class TableOverviewPanelViewModel : ObservableObject
 {
-    private readonly IDatabaseService _dbService;
+    private readonly ITableCatalogService _catalogService;
 
     private readonly ConnectionViewModel _connection;
 
@@ -37,10 +38,10 @@ public sealed partial class TableOverviewPanelViewModel : ObservableObject
 
     /// <summary>Initializes a new instance.</summary>
     public TableOverviewPanelViewModel(
-        IDatabaseService dbService,
+        ITableCatalogService catalogService,
         ConnectionViewModel connection)
     {
-        _dbService = dbService;
+        _catalogService = catalogService;
         _connection = connection;
     }
 
@@ -96,7 +97,8 @@ public sealed partial class TableOverviewPanelViewModel : ObservableObject
     {
         try
         {
-            var tables = await _dbService.GetTablesAsync(_connection, CancellationToken.None);
+            var info = ConnectionInfoFactory.FromViewModel(_connection);
+            var tables = await _catalogService.GetTablesAsync(info, CancellationToken.None);
             CountText = $"{tables.Count}";
             StatusNote = null;
         }

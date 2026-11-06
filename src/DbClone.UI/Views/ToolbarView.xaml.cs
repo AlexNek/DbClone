@@ -9,6 +9,7 @@ using DbClone.UI.Models;
 using DbClone.UI.ViewModels;
 
 using Wpf.Ui.Appearance;
+using CanonicalModel.DTOs;
 
 namespace DbClone.UI.Views;
 

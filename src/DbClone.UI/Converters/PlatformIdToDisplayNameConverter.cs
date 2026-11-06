@@ -1,7 +1,7 @@
 using System.Globalization;
 using System.Windows.Data;
 
-using DbClone.Application.Platforms;
+using CanonicalModel.Platforms;
 
 namespace DbClone.UI.Converters;
 

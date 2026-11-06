@@ -1,4 +1,5 @@
 using DbClone.Application.DTOs;
+using CanonicalModel.DTOs;
 
 namespace DbClone.Application.Copy;
 

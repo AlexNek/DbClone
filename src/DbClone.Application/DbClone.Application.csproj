@@ -11,6 +11,11 @@
   </ItemGroup>
 
   <ItemGroup>
+    <ProjectReference Include="..\..\CanonicalModel\CanonicalModel.csproj" />
+    <ProjectReference Include="..\..\DbAdapter.Definitions\DbAdapter.Definitions.csproj" />
+  </ItemGroup>
+
+  <ItemGroup>
     <InternalsVisibleTo Include="Application.Tests" />
   </ItemGroup>
 

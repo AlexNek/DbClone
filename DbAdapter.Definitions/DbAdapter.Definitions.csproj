@@ -1,0 +1,15 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <!--
+    The contract of the boundary: every role an engine block fills, plus the three types that
+    travel through it (AdapterInfo, DatabaseTarget, CopyRequest). Declarations only — no
+    implementation, no package of its own, one project reference (refactors/08/adapterConceptDesign.md, D10).
+    TargetFramework, Nullable, ImplicitUsings, GenerateDocumentationFile and the build-time
+    GitVersion.MsBuild package come from the repository-root Directory.Build.props.
+  -->
+
+  <ItemGroup>
+    <ProjectReference Include="..\CanonicalModel\CanonicalModel.csproj" />
+  </ItemGroup>
+
+</Project>

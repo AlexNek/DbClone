@@ -6,6 +6,9 @@ using System.Windows.Input;
 using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
 
+using DbClone.Application.Catalog;
+using DbClone.Application.Comparison;
+using DbClone.Application.DTOs;
 using DbClone.Application.Enums;
 using DbClone.UI.Models;
 using DbClone.UI.Services;
@@ -14,6 +17,7 @@ using DbClone.UI.Settings;
 using Microsoft.Extensions.Logging;
 
 using Wpf.Ui.Controls;
+using CanonicalModel.Enums;
 
 namespace DbClone.UI.ViewModels;
 
@@ -33,13 +37,13 @@ public sealed partial class CompareViewModel : ObservableObject, IWorkflowViewMo
 
     private readonly List<CompareResultItem> _allCompareResultItems = [];
 
-    private readonly IDatabaseComparerService _comparerService;
+    private readonly IComparisonService _comparisonService;
 
     private readonly ManualResetEventSlim _comparePauseGate = new(true);
 
     private readonly OperationContext _ctx;
 
-    private readonly IDatabaseService _dbService;
+    private readonly ITableCatalogService _catalogService;
 
     private readonly IDialogService _dialogService;
 
@@ -212,8 +216,8 @@ public sealed partial class CompareViewModel : ObservableObject, IWorkflowViewMo
 
     public CompareViewModel(
         ILogger<CompareViewModel> logger,
-        IDatabaseComparerService comparerService,
-        IDatabaseService dbService,
+        IComparisonService comparisonService,
+        ITableCatalogService catalogService,
         IDialogService dialogService,
         ReportExportService reportExportService,
         SettingsPersistenceManager settingsPersister,
@@ -223,8 +227,8 @@ public sealed partial class CompareViewModel : ObservableObject, IWorkflowViewMo
         OperationContext ctx)
     {
         _logger = logger;
-        _comparerService = comparerService;
-        _dbService = dbService;
+        _comparisonService = comparisonService;
+        _catalogService = catalogService;
         _dialogService = dialogService;
         _reportExportService = reportExportService;
         _settingsPersister = settingsPersister;
@@ -431,8 +435,9 @@ public sealed partial class CompareViewModel : ObservableObject, IWorkflowViewMo
             }
 
             State.StatusMessage = "Checking source connection...";
+            var sourceInfo = ConnectionInfoFactory.FromViewModel(_ctx.Source);
             var sourceVersion =
-                await _dbService.TestConnectionAsync(_ctx.Source, ct);
+                await _catalogService.TestConnectionAsync(sourceInfo, ct);
             if (sourceVersion == null)
             {
                 State.LogError("Failed to connect to source");
@@ -442,8 +447,9 @@ public sealed partial class CompareViewModel : ObservableObject, IWorkflowViewMo
             State.Log($"Connected to source ({_ctx.Source.Summary})");
 
             State.StatusMessage = "Checking destination connection...";
-            var destVersion = await _dbService.TestConnectionAsync(
-                                  _ctx.Destination,
+            var destInfo = ConnectionInfoFactory.FromViewModel(_ctx.Destination);
+            var destVersion = await _catalogService.TestConnectionAsync(
+                                  destInfo,
                                   ct);
             if (destVersion == null)
             {
@@ -455,7 +461,7 @@ public sealed partial class CompareViewModel : ObservableObject, IWorkflowViewMo
 
             State.StatusMessage = "Reading schema...";
             var metadata =
-                await _dbService.ReadDatabaseMetadataAsync(_ctx.Source, ct);
+                await _catalogService.ReadDatabaseMetadataAsync(sourceInfo, ct);
             State.ObjectsPanel.SetCount(EDatabaseObjectType.Table, metadata.Tables);
             State.ObjectsPanel.SetCount(EDatabaseObjectType.View, metadata.Views + metadata.MaterializedViews);
             State.ObjectsPanel.SetCount(EDatabaseObjectType.Sequence, metadata.Sequences);
@@ -470,10 +476,20 @@ public sealed partial class CompareViewModel : ObservableObject, IWorkflowViewMo
 
             State.StatusMessage = "Comparing databases...";
             var compareProgress = new Progress<CompareProgressInfo>(OnCompareProgress);
-            var result = await _comparerService.CompareDatabasesAsync(
-                             _ctx.Source,
-                             _ctx.Destination,
-                             State,
+            Action<ELogLevel, string> logAdapter = (level, msg) =>
+            {
+                switch (level)
+                {
+                    case ELogLevel.Warning: State.LogWarning(msg); break;
+                    case ELogLevel.Hint: State.LogHint(msg); break;
+                    case ELogLevel.Error: State.LogError(msg); break;
+                    default: State.Log(msg); break;
+                }
+            };
+            var result = await _comparisonService.CompareDatabasesAsync(
+                             sourceInfo,
+                             destInfo,
+                             logAdapter,
                              Settings.SelectedVerifyMode,
                              !Settings.ComparePlatformSchemas,
                              compareProgress,

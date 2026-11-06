@@ -1,5 +1,4 @@
 using DbClone.Application.Interfaces;
-using DbClone.Application.Platforms;
 using DbClone.UI.ViewModels;
 
 using NSubstitute;
@@ -33,8 +32,8 @@ public class ConnectionTypePresetTests
         // Arrange — create VM with empty stores
         var connectionStore = new InMemoryConnectionStore();
         var groupStore = new InMemoryConnectionGroupStore();
-        var connectionStringService = Substitute.For<IConnectionStringService>();
-        var maintenanceProvider = Substitute.For<IDatabaseMaintenanceProvider>();
+        var connectionStringService = Substitute.For<IConnectionTextService>();
+        var maintenanceProvider = Substitute.For<IServerAdminService>();
         var platformResolver = TestPlatformResolver.Create();
 
         var vm = new UnifiedConnectionManagerViewModel(
@@ -51,7 +50,7 @@ public class ConnectionTypePresetTests
         vm.FormConnectionType = platformId;
 
         // Assert — port and SSL mode match the .platform defaults
-        var defaults = platformResolver.GetConnectionDefaults("postgresql", platformId);
+        var defaults = platformResolver.GetConnectionDefaults(platformId);
         Assert.Equal(defaults.Port.ToString(), vm.FormPort);
         Assert.Equal(defaults.SslMode, vm.FormSslMode);
     }

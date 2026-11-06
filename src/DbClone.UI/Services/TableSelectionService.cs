@@ -4,6 +4,7 @@ using DbClone.Application.TableFilter;
 using DbClone.UI.Models;
 
 using Serilog;
+using CanonicalModel.Models;
 
 namespace DbClone.UI.Services;
 
