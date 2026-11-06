@@ -17,12 +17,12 @@ public sealed class PostgreSqlNpgsqlFormat : IConnectionTextFormat
 
     public string Id => "pg-npgsql";
 
-    public EDatabaseProvider Provider => EDatabaseProvider.PostgreSql;
+    public string Provider => "postgresql";
 
     public string TypicalSource => ".NET / C#";
 
     public bool CanExport(ConnectionStringFields fields) =>
-        fields.Provider == EDatabaseProvider.PostgreSql;
+        fields.Provider == "postgresql";
 
     public bool CanImport(string text)
     {
@@ -124,7 +124,7 @@ public sealed class PostgreSqlNpgsqlFormat : IConnectionTextFormat
             Username: hasUsername ? builder.Username ?? string.Empty : string.Empty,
             Password: builder.Password ?? string.Empty,
             SslMode: MapSslMode(builder.SslMode),
-            Provider: EDatabaseProvider.PostgreSql,
+            Provider: "postgresql",
             Options: options);
     }
 

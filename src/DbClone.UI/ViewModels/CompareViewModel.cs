@@ -10,6 +10,7 @@ using DbClone.Application.Catalog;
 using DbClone.Application.Comparison;
 using DbClone.Application.DTOs;
 using DbClone.Application.Enums;
+using DbAdapter.Definitions;
 using DbClone.UI.Models;
 using DbClone.UI.Services;
 using DbClone.UI.Settings;

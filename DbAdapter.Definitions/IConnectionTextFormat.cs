@@ -1,5 +1,4 @@
 using CanonicalModel.DTOs;
-using CanonicalModel.Enums;
 
 namespace DbAdapter.Definitions;
 
@@ -19,8 +18,8 @@ public interface IConnectionTextFormat
     /// <summary>Unique identifier (e.g. "pg-uri", "pg-jdbc").</summary>
     string Id { get; }
 
-    /// <summary>The database provider this format belongs to.</summary>
-    EDatabaseProvider Provider { get; }
+    /// <summary>The dialect identity of the engine this format belongs to.</summary>
+    string Provider { get; }
 
     /// <summary>Typical source ecosystem (e.g. "Java", ".NET", "Python").</summary>
     string TypicalSource { get; }

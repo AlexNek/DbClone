@@ -1,6 +1,7 @@
 using DbAdapter.Definitions;
 using DbAdapter.PostgreSql.Providers;
 using CanonicalModel.DTOs;
+using CanonicalModel.Enums;
 
 namespace DbAdapter.PostgreSql.Adapters;
 
@@ -24,7 +25,21 @@ internal sealed class ConnectionStringSyntaxAdapter : IConnectionStringSyntax
     public IReadOnlyList<IConnectionTextFormat> Formats { get; }
 
     /// <inheritdoc />
+    public IReadOnlyList<string> SecurityOptions { get; } = ["Disable", "Prefer", "Require"];
+
+    /// <inheritdoc />
+    public string DefaultFormatId => "pg-npgsql";
+
+    /// <inheritdoc />
     public string BuildKeyValue(ConnectionStringFields fields) => _service.BuildKeyValue(fields);
+
+    /// <inheritdoc />
+    public ESslMode ToSslMode(string identifier) => identifier switch
+    {
+        "Disable" => ESslMode.Disable,
+        "Require" => ESslMode.Require,
+        _ => ESslMode.Prefer
+    };
 
     /// <inheritdoc />
     public bool TryParse(string value, out ConnectionStringFields fields) =>

@@ -92,6 +92,9 @@ public sealed class ConnectionStore : IConnectionStore
         [JsonConverter(typeof(ConnectionTypeConverter))]
         public string? ConnectionType { get; set; }
 
+        /// <summary>Engine dialect that selects the adapter (refactors/09 P4). Absent on pre-refactor files.</summary>
+        public string? Engine { get; set; }
+
         public string DatabaseName { get; set; } = string.Empty;
 
         /// <summary>DPAPI-encrypted password (Base64).</summary>
@@ -107,11 +110,11 @@ public sealed class ConnectionStore : IConnectionStore
 
         public string Notes { get; set; } = string.Empty;
 
-        public string Port { get; set; } = "5432";
+        public string Port { get; set; } = string.Empty;
 
-        public string SslMode { get; set; } = "Prefer";
+        public string SslMode { get; set; } = string.Empty;
 
-        public string Username { get; set; } = "postgres";
+        public string Username { get; set; } = string.Empty;
 
         public static ConnectionDto FromModel(SavedConnection m) =>
             new()
@@ -125,6 +128,7 @@ public sealed class ConnectionStore : IConnectionStore
                     EncryptedPassword = Encrypt(m.Password),
                     SslMode = m.SslMode,
                     ConnectionType = m.ConnectionType,
+                    Engine = m.Engine,
                     Notes = m.Notes,
                     BackupName = m.BackupName,
                     Folder = m.Folder,
@@ -143,6 +147,7 @@ public sealed class ConnectionStore : IConnectionStore
                     Password = Decrypt(EncryptedPassword),
                     SslMode = SslMode,
                     ConnectionType = ConnectionType,
+                    Engine = Engine,
                     Notes = Notes,
                     BackupName = BackupName,
                     Folder = Folder,

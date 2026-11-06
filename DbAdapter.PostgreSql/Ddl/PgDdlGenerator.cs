@@ -1,6 +1,6 @@
 using System.Text;
+using DbAdapter.Definitions;
 
-using DbClone.Application.Interfaces;
 using DbAdapter.PostgreSql.Execution;
 using CanonicalModel.Models;
 

@@ -19,10 +19,9 @@ public class NewConnectionResetsFormTests
 {
     /// <summary>
     /// For any form state (arbitrary values in all connection form fields), invoking
-    /// NewConnectionCommand SHALL reset all fields to: Name=empty, Host="localhost",
-    /// Port="5432", DatabaseName=empty, Username="postgres", Password=empty,
-    /// SslMode="Prefer", ConnectionType=PostgreSql, Notes=empty, Color=null,
-    /// and IsEditingConnection SHALL be false.
+    /// NewConnectionCommand SHALL reset every field to blank, except the connection defaults
+    /// (host, port, TLS, username, connection type), which come from the injected platform
+    /// service — the UI writes no engine default of its own (refactors/09 P5).
     /// </summary>
     [Property(Arbitrary = [typeof(ArbitraryConnections)], MaxTest = 100)]
     public bool NewConnection_resets_form_to_defaults(SavedConnection connection)
@@ -35,6 +34,11 @@ public class NewConnectionResetsFormTests
         var connectionStringService = Substitute.For<IConnectionTextService>();
         var maintenanceProvider = Substitute.For<IServerAdminService>();
 
+        // The defaults the form must land on are whatever the active engine's platform stub reports;
+        // with an empty platform list the reset resolves them through the null (plain-engine) id.
+        var platformService = TestPlatformResolver.Create();
+        var defaults = platformService.GetConnectionDefaults(null);
+
         var vm = new UnifiedConnectionManagerViewModel(
             connectionStore,
             groupStore,
@@ -43,7 +47,7 @@ public class NewConnectionResetsFormTests
             Substitute.For<IConnectionImportService>(),
             Substitute.For<IConnectionExportService>(),
             Substitute.For<IBackupEncryptionService>(),
-                        TestPlatformResolver.Create());
+            platformService);
 
         // Seed the form with arbitrary values by selecting the connection
         vm.SelectedConnection = vm.FilteredConnections.First(c => c.Id == connection.Id);
@@ -51,14 +55,14 @@ public class NewConnectionResetsFormTests
         // Act — invoke NewConnectionCommand to reset the form
         vm.NewConnectionCommand.Execute(null);
 
-        // Assert — all fields are reset to defaults
+        // Assert — all fields are reset; the connection defaults match the platform stub
         return vm.FormName == "" &&
                vm.FormHost == "localhost" &&
-               vm.FormPort == "5432" &&
+               vm.FormPort == defaults.Port.ToString() &&
                vm.FormDatabaseName == "" &&
-               vm.FormUsername == "postgres" &&
+               vm.FormUsername == defaults.Username &&
                vm.FormPassword == "" &&
-               vm.FormSslMode == "Prefer" &&
+               vm.FormSslMode == defaults.SslMode &&
                vm.FormConnectionType == null &&
                vm.FormNotes == "" &&
                vm.FormColor == null &&

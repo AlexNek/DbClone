@@ -1,5 +1,5 @@
 using DbClone.Application.Enums;
-using DbClone.Application.Compare;
+using DbAdapter.Definitions;
 using CanonicalModel.Models;
 using CanonicalModel.Enums;
 

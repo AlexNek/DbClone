@@ -1,4 +1,5 @@
 using DbAdapter.Definitions;
+using DbClone.Application.Adapters;
 using DbClone.Application.DTOs;
 using DbClone.Application.TableFilter;
 using DbClone.Application.Targets;
@@ -11,32 +12,35 @@ namespace DbClone.Application.Catalog;
 /// The catalog of one database: what tables it holds, how large they are,
 /// what metadata they carry, and the destructive preparation of a target
 /// before a copy writes to it. Each method builds the roles it needs from
-/// the adapter for the target the given connection describes.
+/// the adapter that serves the given connection, resolved through the catalog.
 /// </summary>
 public sealed class TableCatalogService : ITableCatalogService
 {
-    private readonly IDatabaseAdapter _adapter;
+    private readonly IAdapterCatalog _catalog;
 
     private readonly DatabaseTargetFactory _targetFactory;
 
     /// <inheritdoc />
-    public string ProviderName => _adapter.ProviderName;
+    public string ProviderName => _catalog.All.FirstOrDefault()?.ProviderName ?? string.Empty;
 
     /// <summary>Initializes a new instance.</summary>
     public TableCatalogService(
-        IDatabaseAdapter adapter,
+        IAdapterCatalog catalog,
         DatabaseTargetFactory targetFactory)
     {
-        _adapter = adapter ?? throw new ArgumentNullException(nameof(adapter));
+        _catalog = catalog ?? throw new ArgumentNullException(nameof(catalog));
         _targetFactory = targetFactory ?? throw new ArgumentNullException(nameof(targetFactory));
     }
+
+    /// <summary>Resolves the adapter that serves the given connection's engine value.</summary>
+    private IDatabaseAdapter AdapterFor(ConnectionInfo connection) => _catalog.Resolve(connection.Engine);
 
     /// <inheritdoc />
     public async Task<bool> CheckDestinationHasDataAsync(
         ConnectionInfo connection,
         CancellationToken ct)
     {
-        var admin = _adapter.CreateAdmin(_targetFactory.Create(connection));
+        var admin = AdapterFor(connection).CreateAdmin(_targetFactory.Create(connection));
         return await admin.HasDataAsync(ct);
     }
 
@@ -46,7 +50,7 @@ public sealed class TableCatalogService : ITableCatalogService
         EPermissionCheck checks,
         CancellationToken ct)
     {
-        var cleaner = _adapter.CreateCleaner(_targetFactory.Create(connection));
+        var cleaner = AdapterFor(connection).CreateCleaner(_targetFactory.Create(connection));
         return await cleaner.CheckPermissionsAsync(checks, ct);
     }
 
@@ -56,7 +60,7 @@ public sealed class TableCatalogService : ITableCatalogService
         Action<string> logMessage,
         CancellationToken ct)
     {
-        var cleaner = _adapter.CreateCleaner(_targetFactory.Create(connection));
+        var cleaner = AdapterFor(connection).CreateCleaner(_targetFactory.Create(connection));
         return await cleaner.CleanDatabaseAsync(logMessage, ct);
     }
 
@@ -76,7 +80,7 @@ public sealed class TableCatalogService : ITableCatalogService
             .Where(id => !spec.IsExcluded(id))
             .ToList();
 
-        var cleaner = _adapter.CreateCleaner(_targetFactory.Create(destination));
+        var cleaner = AdapterFor(destination).CreateCleaner(_targetFactory.Create(destination));
         return await cleaner.CleanTablesAsync(selected, logMessage, ct);
     }
 
@@ -87,7 +91,7 @@ public sealed class TableCatalogService : ITableCatalogService
         Action<string> logMessage,
         CancellationToken ct)
     {
-        var admin = _adapter.CreateAdmin(_targetFactory.Create(connection));
+        var admin = AdapterFor(connection).CreateAdmin(_targetFactory.Create(connection));
         return await admin.CreateDatabaseAsync(newDbName, logMessage, ct);
     }
 
@@ -96,7 +100,7 @@ public sealed class TableCatalogService : ITableCatalogService
         ConnectionInfo connection,
         CancellationToken ct)
     {
-        var metadata = _adapter.CreateMetadataSource(_targetFactory.Create(connection));
+        var metadata = AdapterFor(connection).CreateMetadataSource(_targetFactory.Create(connection));
         return await metadata.GetTablesAsync(ct);
     }
 
@@ -105,7 +109,7 @@ public sealed class TableCatalogService : ITableCatalogService
         ConnectionInfo connection,
         CancellationToken ct)
     {
-        var metadata = _adapter.CreateMetadataSource(_targetFactory.Create(connection));
+        var metadata = AdapterFor(connection).CreateMetadataSource(_targetFactory.Create(connection));
         return await metadata.GetTableSizesAsync(ct);
     }
 
@@ -114,7 +118,7 @@ public sealed class TableCatalogService : ITableCatalogService
         ConnectionInfo connection,
         CancellationToken ct)
     {
-        var metadata = _adapter.CreateMetadataSource(_targetFactory.Create(connection));
+        var metadata = AdapterFor(connection).CreateMetadataSource(_targetFactory.Create(connection));
         var model = await metadata.ReadDatabaseModelAsync(ct: ct);
 
         return new DatabaseMetadata(
@@ -137,7 +141,7 @@ public sealed class TableCatalogService : ITableCatalogService
         ConnectionInfo connection,
         CancellationToken ct)
     {
-        var metadata = _adapter.CreateMetadataSource(_targetFactory.Create(connection));
+        var metadata = AdapterFor(connection).CreateMetadataSource(_targetFactory.Create(connection));
         return await metadata.ReadDatabaseModelAsync(ct: ct);
     }
 
@@ -146,7 +150,7 @@ public sealed class TableCatalogService : ITableCatalogService
         ConnectionInfo connection,
         CancellationToken ct)
     {
-        var admin = _adapter.CreateAdmin(_targetFactory.Create(connection));
+        var admin = AdapterFor(connection).CreateAdmin(_targetFactory.Create(connection));
         return await admin.TestConnectionAsync(ct);
     }
 }

@@ -15,12 +15,12 @@ public sealed class PostgreSqlUriFormat : IConnectionTextFormat
 
     public string Id => "pg-uri";
 
-    public EDatabaseProvider Provider => EDatabaseProvider.PostgreSql;
+    public string Provider => "postgresql";
 
     public string TypicalSource => "General / CLI / Cloud platforms";
 
     public bool CanExport(ConnectionStringFields fields) =>
-        fields.Provider == EDatabaseProvider.PostgreSql;
+        fields.Provider == "postgresql";
 
     public bool CanImport(string text) =>
         text.StartsWith("postgres://", StringComparison.OrdinalIgnoreCase)
@@ -67,7 +67,7 @@ public sealed class PostgreSqlUriFormat : IConnectionTextFormat
             Username: parsed.Username ?? "postgres",
             Password: parsed.Password ?? string.Empty,
             SslMode: sslMode,
-            Provider: EDatabaseProvider.PostgreSql,
+            Provider: "postgresql",
             Options: options);
     }
 

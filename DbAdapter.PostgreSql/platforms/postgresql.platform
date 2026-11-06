@@ -5,7 +5,8 @@
   "formatVersion": "1.0",
   "defaults": {
     "port": 5432,
-    "sslMode": "Prefer"
+    "sslMode": "Prefer",
+    "username": "postgres"
   },
   "versions": [
     {

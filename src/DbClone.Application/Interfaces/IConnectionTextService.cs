@@ -1,4 +1,5 @@
 using CanonicalModel.DTOs;
+using CanonicalModel.Enums;
 
 namespace DbClone.Application.Interfaces;
 
@@ -9,6 +10,21 @@ namespace DbClone.Application.Interfaces;
 /// </summary>
 public interface IConnectionTextService
 {
+    /// <summary>
+    /// The dialect of the active engine, reported by its adapter. Lets the UI stamp a connection's
+    /// provider identity without naming an engine (refactors/09 P5). Throws when no engine is installed.
+    /// </summary>
+    string Dialect { get; }
+
+    /// <summary>The TLS identifiers the active engine offers the connection form.</summary>
+    IReadOnlyList<string> SecurityOptions { get; }
+
+    /// <summary>The format id to use when the user picks none, taken from the active engine.</summary>
+    string DefaultFormatId { get; }
+
+    /// <summary>Maps a TLS identifier onto the shared enum for boundary types that still take it.</summary>
+    ESslMode ToSslMode(string identifier);
+
     string BuildKeyValue(ConnectionStringFields fields);
 
     /// <summary>

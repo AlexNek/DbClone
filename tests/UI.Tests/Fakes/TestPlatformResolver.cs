@@ -18,6 +18,6 @@ public static class TestPlatformResolver
         public string? DetectPlatformId(string host) => null;
 
         public PlatformDefaults GetConnectionDefaults(string? platformId) =>
-            new(Port: 5432, SslMode: "Prefer");
+            new(Port: 5432, SslMode: "Prefer", Username: "postgres");
     }
 }

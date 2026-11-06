@@ -19,12 +19,12 @@ public sealed class PostgreSqlJdbcFormat : IConnectionTextFormat
 
     public string Id => "pg-jdbc";
 
-    public EDatabaseProvider Provider => EDatabaseProvider.PostgreSql;
+    public string Provider => "postgresql";
 
     public string TypicalSource => "Java / Kotlin / Scala";
 
     public bool CanExport(ConnectionStringFields fields) =>
-        fields.Provider == EDatabaseProvider.PostgreSql;
+        fields.Provider == "postgresql";
 
     public bool CanImport(string text) =>
         text.StartsWith("jdbc:postgresql://", StringComparison.OrdinalIgnoreCase);
@@ -102,7 +102,7 @@ public sealed class PostgreSqlJdbcFormat : IConnectionTextFormat
             Username: username,
             Password: password ?? string.Empty,
             SslMode: sslMode,
-            Provider: EDatabaseProvider.PostgreSql,
+            Provider: "postgresql",
             Options: options);
     }
 }

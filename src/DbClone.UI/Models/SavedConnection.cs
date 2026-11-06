@@ -50,6 +50,14 @@ public sealed class SavedConnection : INotifyPropertyChanged
     [JsonConverter(typeof(ConnectionTypeConverter))]
     public string? ConnectionType { get; set; }
 
+    /// <summary>
+    /// The engine dialect that selects this connection's adapter (refactors/09 P4). Written when a
+    /// connection is created or imported from the import/detection result, never from a constant.
+    /// Absent (<see langword="null"/>) on files saved before the engine was recorded; the single
+    /// installed adapter then serves them.
+    /// </summary>
+    public string? Engine { get; set; }
+
     /// <summary>Database name to connect to.</summary>
     public string DatabaseName { get; set; } = string.Empty;
 
@@ -71,15 +79,16 @@ public sealed class SavedConnection : INotifyPropertyChanged
     /// <summary>Password — stored DPAPI-encrypted on disk; plain text only in memory.</summary>
     public string Password { get; set; } = string.Empty;
 
-    /// <summary>Port number as a string for easy WPF binding.</summary>
-    public string Port { get; set; } = "5432";
+    /// <summary>Port number as a string for easy WPF binding. Empty until set; a new connection's
+    /// port comes from the platform defaults, not from an engine value stored here (refactors/09 P5).</summary>
+    public string Port { get; set; } = string.Empty;
 
-    /// <summary>Gets the parsed port as an integer, falling back to 5432.</summary>
+    /// <summary>Gets the parsed port as an integer, or 0 when no port is set.</summary>
     [JsonIgnore]
-    public int PortNumber => int.TryParse(Port, out var p) ? p : 5432;
+    public int PortNumber => int.TryParse(Port, out var p) ? p : 0;
 
-    /// <summary>SSL mode: Disable, Prefer, or Require.</summary>
-    public string SslMode { get; set; } = "Prefer";
+    /// <summary>SSL mode carried as the engine's TLS identifier; the adapter converts at the boundary.</summary>
+    public string SslMode { get; set; } = string.Empty;
 
     /// <summary>Gets a summary string for display: host:port/database.</summary>
     [JsonIgnore]
@@ -88,8 +97,8 @@ public sealed class SavedConnection : INotifyPropertyChanged
             ? $"{Host}:{Port}"
             : $"{Host}:{Port}/{DatabaseName}";
 
-    /// <summary>Login username.</summary>
-    public string Username { get; set; } = "postgres";
+    /// <summary>Login username. Empty until set; a new connection's username comes from the platform defaults.</summary>
+    public string Username { get; set; } = string.Empty;
 
     /// <summary>Creates a deep copy of this connection.</summary>
     public SavedConnection Clone() =>
@@ -104,6 +113,7 @@ public sealed class SavedConnection : INotifyPropertyChanged
                 Password = Password,
                 SslMode = SslMode,
                 ConnectionType = ConnectionType,
+                Engine = Engine,
                 Notes = Notes,
                 BackupName = BackupName,
                 Folder = Folder,

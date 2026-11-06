@@ -163,20 +163,13 @@ public sealed partial class TableOverviewViewModel : ObservableObject
 
         try
         {
-            var sslMode = _connection.SslMode switch
-            {
-                "Require" => ESslMode.Require,
-                "Disable" => ESslMode.Disable,
-                _ => ESslMode.Prefer
-            };
-
             var info = new ConnectionInfo(
                 _connection.Host,
                 _connection.PortNumber,
                 string.Empty,
                 _connection.Username,
                 _connection.Password,
-                sslMode);
+                _connection.SslMode);
 
             var databases = await _serverAdmin.ListDatabasesAsync(info, ct);
 

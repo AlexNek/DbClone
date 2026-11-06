@@ -30,9 +30,9 @@ public static class AppInfo
     /// <summary>Short version string, e.g. "1.2.3" or "1.2.3 (build 44)".</summary>
     public static string Version { get; } = BuildVersion();
 
-    /// <summary>Full title, e.g. "DbClone — PostgreSQL Database Copy Tool v1.2.3 (build 44)".</summary>
+    /// <summary>Full title, e.g. "DbClone — Database Copy Tool v1.2.3 (build 44)".</summary>
     public static string FullTitle { get; } =
-        $"{ProductName} — PostgreSQL Database Copy Tool v{Version}";
+        $"{ProductName} — Database Copy Tool v{Version}";
 
     private static string BuildVersion()
     {

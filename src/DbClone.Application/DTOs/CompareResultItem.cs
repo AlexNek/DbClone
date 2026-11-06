@@ -1,3 +1,4 @@
+using DbAdapter.Definitions;
 using DbClone.Application.Enums;
 using CanonicalModel.Enums;
 

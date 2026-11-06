@@ -113,21 +113,74 @@ public class ArchitectureTests
             "the pipeline's stages all live in the engine block");
     }
 
+    /// <summary>Gets engine names, driver packages and SQL keywords that must not appear in the contract's code.</summary>
+    private static readonly Regex DefinitionsEngineOrSqlInCode = new(
+        @"\b(postgres(?:ql)?|supabase|aiven|neon|mysql|npgsql)\b|\bpg_[a-z_]+|\b(select|insert|update|delete|create|drop|alter|truncate)\b|information_schema",
+        RegexOptions.Compiled | RegexOptions.IgnoreCase);
+
     [Fact]
-    public void DefinitionsAssemblyDeclaresOnlyInterfacesRecordsAndEnums()
+    public void DefinitionsCodeNamesNoEngineSqlOrDriver()
     {
+        // Arrange
+        const string definitionsProject = DefinitionsDirName + "/" + DefinitionsDirName + ".csproj";
+
         // Act
-        var declared = typeof(AdapterInfo).Assembly
-            .GetTypes()
-            .Where(type => !type.IsDefined(typeof(CompilerGeneratedAttribute), false))
+        // The contract now holds the shared copy runner and the platform reader, so the old
+        // "declarations only" rule is replaced by a narrower, checkable one (refactors/09 P5):
+        // no file here writes SQL and no file here names an engine or a driver. Prose is out of
+        // scope — the project's existing remarks (in files this refactor does not move) carry
+        // engine examples, so the scan runs over code with comments stripped, not raw text.
+        var offenders = ProjectFiles(definitionsProject)
+            .Select(file => new { Path = file, Code = StripComments(File.ReadAllText(file)) })
+            .Where(x => DefinitionsEngineOrSqlInCode.IsMatch(x.Code))
+            .Select(x => Path.GetRelativePath(RepoRoot, x.Path))
             .ToList();
 
         // Assert
-        declared.Should().NotBeEmpty("the boundary contract declares the roles and the travelling values");
-        declared.Where(type => !IsDeclaration(type))
-            .Select(type => type.FullName)
-            .Should()
-            .BeEmpty("DbAdapter.Definitions contains no implementation (D10)");
+        offenders.Should().BeEmpty(
+            "DbAdapter.Definitions holds no SQL, no engine name and no driver reference in code (refactors/09 P5)");
+    }
+
+
+    /// <summary>Gets the regular expression matching a using of a Microsoft.Extensions namespace other than the logging abstraction.</summary>
+    private static readonly Regex NonLoggingExtensionsUsing = new(@"^using\s+Microsoft\.Extensions\.(?!Logging[\w.]*\s*;)[\w.]+\s*;$", RegexOptions.Compiled | RegexOptions.Multiline);
+
+    /// <summary>Gets the regular expression matching the engine block's project or adapter class name.</summary>
+    private static readonly Regex EngineBlockOrAdapterName = new(@"\bPostgreSqlAdapter\b|\bDbAdapter\.PostgreSql\b", RegexOptions.Compiled);
+
+    [Fact]
+    public void NoSrcFileNamesTheEngineBlockOrAdapter()
+    {
+        // Arrange — refactors/09 Phase 4 box 78.
+        var srcRoot = Path.Combine(RepoRoot, "src");
+
+        // Act
+        var offenders = Directory.EnumerateFiles(srcRoot, "*.cs", SearchOption.AllDirectories)
+            .Where(file => !file.Contains($"{Path.DirectorySeparatorChar}bin{Path.DirectorySeparatorChar}")
+                           && !file.Contains($"{Path.DirectorySeparatorChar}obj{Path.DirectorySeparatorChar}"))
+            .Where(file => EngineBlockOrAdapterName.IsMatch(File.ReadAllText(file)))
+            .Select(file => Path.GetRelativePath(RepoRoot, file))
+            .ToList();
+
+        // Assert — only DbClone.UI.csproj may name the adapter project (a build-ordering ProjectReference
+        // plus the PublishAdapters target), and only that csproj — no C# file under src.
+        offenders.Should().BeEmpty(
+            "no C# file under src may name the engine block or its adapter class (refactors/09 Phase 4)");
+    }
+
+    [Fact]
+    public void BlockProjectDoesNotReferenceApplication()
+    {
+        // Arrange — refactors/09 Phase 4 box 78; the strict one-way layer rule.
+        const string blockProject = BlockDirName + "/" + BlockDirName + ".csproj";
+
+        // Act
+        var references = ProjectReferencesOf(blockProject).ToList();
+
+        // Assert — the block depends only on the shared boundary and the shared model.
+        references.Should().NotContain(
+            reference => reference.Equals("DbClone.Application.csproj", StringComparison.Ordinal),
+            "the engine block must not reference the application (refactors/09 Phase 4)");
     }
 
     [Fact]
@@ -139,32 +192,33 @@ public class ArchitectureTests
         // Act
         var projectReferences = ProjectReferencesOf(definitionsProject);
         var packageReferences = PackageReferencesOf(definitionsProject);
+        // The shared copy runner and platform reader log, so the logging abstraction is now the
+        // one package the contract may declare and the one Microsoft.Extensions namespace its code
+        // may reach (refactors/09 P5). Anything beyond logging still fails the rule.
         var offenders = ProjectFiles(definitionsProject)
-            .Where(file => ExtensionsUsing.IsMatch(File.ReadAllText(file)))
+            .Where(file => NonLoggingExtensionsUsing.IsMatch(File.ReadAllText(file)))
             .Select(file => Path.GetRelativePath(RepoRoot, file))
             .ToList();
 
         // Assert
         projectReferences.Should().BeEquivalentTo(new[] { "CanonicalModel.csproj" },
             "the contract speaks the shared language and nothing else");
-        packageReferences.Should().BeEmpty("DbAdapter.Definitions declares no package of its own");
-        offenders.Should().BeEmpty("DbAdapter.Definitions must not reach a Microsoft.Extensions namespace");
+        packageReferences.Should().BeEquivalentTo(new[] { "Microsoft.Extensions.Logging.Abstractions" },
+            "the logging abstraction is the only package DbAdapter.Definitions declares");
+        offenders.Should().BeEmpty("DbAdapter.Definitions may reach only the Microsoft.Extensions.Logging namespace");
     }
 
-    /// <summary>Tests whether a type is one of the three declaration kinds the contract allows.</summary>
-    private static bool IsDeclaration(Type type) =>
-        type.IsInterface
-        || type.IsEnum
-        || IsRecord(type);
 
     /// <summary>
-    /// Tests whether a type is a record. The compiler synthesizes <c>PrintMembers</c> for every
-    /// record, which is the only reliable reflection marker it leaves on the type itself.
+    /// Strips C# line and block comments so the contract's engine-free rule is measured over code
+    /// only. Approximate by design: the definitions project writes no <c>//</c> or <c>/*</c> inside a
+    /// string literal, so a text strip is enough to ignore the prose the rule deliberately excludes.
     /// </summary>
-    private static bool IsRecord(Type type) =>
-        type.IsClass
-        && type.GetMethod("PrintMembers",
-            BindingFlags.Instance | BindingFlags.NonPublic | BindingFlags.Public) is not null;
+    private static string StripComments(string source)
+    {
+        var noBlock = Regex.Replace(source, @"/\*.*?\*/", string.Empty, RegexOptions.Singleline);
+        return Regex.Replace(noBlock, @"//[^\n]*", string.Empty);
+    }
 
     private static IEnumerable<string> ProjectReferencesOf(string relativeProjectPath) =>
         ReferencesOf(relativeProjectPath, "ProjectReference");

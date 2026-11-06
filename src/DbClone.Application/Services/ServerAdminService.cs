@@ -6,29 +6,28 @@ using DbClone.Application.Targets;
 namespace DbClone.Application.Services;
 
 /// <summary>
-/// Answers the server-fact questions the connection form asks, delegating to the adapter's
-/// admin role for the target each call names (D5, D9). Nothing destructive reaches this class.
+/// Answers the server-fact questions the connection form asks, delegating to the admin role of
+/// the adapter that serves the target each call names (D5, D9). Nothing destructive reaches this
+/// class. The adapter is resolved by the connection's engine value, never named here.
 /// </summary>
 public sealed class ServerAdminService : IServerAdminService
 {
-    private readonly IDatabaseAdapter _adapter;
     private readonly DatabaseTargetFactory _targetFactory;
 
-    public ServerAdminService(IDatabaseAdapter adapter, DatabaseTargetFactory targetFactory)
-    {
-        _adapter = adapter ?? throw new ArgumentNullException(nameof(adapter));
+    public ServerAdminService(DatabaseTargetFactory targetFactory) =>
         _targetFactory = targetFactory ?? throw new ArgumentNullException(nameof(targetFactory));
-    }
+
+    private IDatabaseAdmin AdminFor(ConnectionInfo connection) =>
+        _targetFactory.ResolveAdapter(connection.Engine).CreateAdmin(_targetFactory.Create(connection));
 
     /// <inheritdoc />
-    public string GetProviderName(ConnectionInfo connection) =>
-        _adapter.CreateAdmin(_targetFactory.Create(connection)).ProviderName;
+    public string GetProviderName(ConnectionInfo connection) => AdminFor(connection).ProviderName;
 
     /// <inheritdoc />
     public Task<string?> TestConnectionAsync(ConnectionInfo connection, CancellationToken ct) =>
-        _adapter.CreateAdmin(_targetFactory.Create(connection)).TestConnectionAsync(ct);
+        AdminFor(connection).TestConnectionAsync(ct);
 
     /// <inheritdoc />
     public Task<IReadOnlyList<string>> ListDatabasesAsync(ConnectionInfo connection, CancellationToken ct) =>
-        _adapter.CreateAdmin(_targetFactory.Create(connection)).ListDatabasesAsync(ct);
+        AdminFor(connection).ListDatabasesAsync(ct);
 }

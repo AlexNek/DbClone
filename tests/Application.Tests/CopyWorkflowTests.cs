@@ -236,11 +236,9 @@ public class CopyWorkflowTests
     {
         var filterApplier = new TableFilterApplier();
         var targetFactory = CreateTargetFactory();
-        var adapter = Substitute.For<IDatabaseAdapter>();
         var confirmationService = Substitute.For<IConfirmationService>();
 
         return new CopyWorkflow(
-            adapter,
             targetFactory,
             filterApplier,
             confirmationService,
@@ -258,14 +256,18 @@ public class CopyWorkflowTests
         adapter.Info.Returns(new AdapterInfo("test.postgresql", "postgresql", "*", "1.0.0"));
         adapter.Syntax.Returns(syntax);
 
-        return new DatabaseTargetFactory(adapter);
+        var catalog = Substitute.For<DbClone.Application.Adapters.IAdapterCatalog>();
+        catalog.All.Returns(new[] { adapter });
+        catalog.Find(Arg.Any<string>()).Returns(adapter);
+
+        return new DatabaseTargetFactory(catalog);
     }
 
     private static ConnectionInfo Source() =>
-        new("test.example.com", 5432, "source_db", "test_user", "pass", ESslMode.Prefer);
+        new("test.example.com", 5432, "source_db", "test_user", "pass", "Prefer");
 
     private static ConnectionInfo Destination() =>
-        new("test.example.com", 5432, "dest_db", "test_user", "pass", ESslMode.Prefer);
+        new("test.example.com", 5432, "dest_db", "test_user", "pass", "Prefer");
 
     private static DatabaseModel CreateModel(params TableDefinition[] tables) =>
         new(

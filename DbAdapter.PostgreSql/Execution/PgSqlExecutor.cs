@@ -1,6 +1,6 @@
 using System.Data.Common;
+using DbAdapter.Definitions;
 
-using DbClone.Application.Interfaces;
 
 using Microsoft.Extensions.Logging;
 

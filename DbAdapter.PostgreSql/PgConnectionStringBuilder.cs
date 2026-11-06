@@ -1,8 +1,6 @@
 using DbAdapter.Definitions;
-using DbClone.Application.DTOs;
 
 using Npgsql;
-using CanonicalModel.Enums;
 
 namespace DbAdapter.PostgreSql;
 
@@ -11,40 +9,6 @@ namespace DbAdapter.PostgreSql;
 /// </summary>
 internal static class PgConnectionStringBuilder
 {
-    public static NpgsqlConnectionStringBuilder BuildConnectionString(
-        ConnectionInfo connection,
-        string? databaseOverride = null)
-    {
-        return new NpgsqlConnectionStringBuilder
-                   {
-                       Host = connection.Host,
-                       Port = connection.Port,
-                       Database = databaseOverride ?? connection.DatabaseName,
-                       Username = connection.Username,
-                       Password = connection.Password,
-                       SslMode = MapSslMode(connection.SslMode),
-                       Timeout = 30
-                   };
-    }
-
-    /// <summary>
-    /// Builds a connection string with additional settings for long-running copy operations.
-    /// </summary>
-    public static string BuildCopyConnectionString(ConnectionInfo connection)
-    {
-        var builder = BuildConnectionString(connection);
-        builder.KeepAlive = 30;
-        return builder.ConnectionString;
-    }
-
-    public static SslMode MapSslMode(ESslMode sslMode) =>
-        sslMode switch
-            {
-                ESslMode.Disable => SslMode.Disable,
-                ESslMode.Require => SslMode.Require,
-                _ => SslMode.Prefer
-            };
-
     /// <summary>
     /// Reads a target's connection text back into a builder.
     /// </summary>
@@ -82,29 +46,4 @@ internal static class PgConnectionStringBuilder
     /// </summary>
     public static string HostOf(DatabaseTarget target) =>
         new NpgsqlConnectionStringBuilder(target.ConnectionString).Host ?? string.Empty;
-
-    /// <summary>
-    /// The profile a target's connection text describes, for the classes that still take it.
-    /// </summary>
-    public static ConnectionInfo ToConnectionInfo(DatabaseTarget target)
-    {
-        var builder = new NpgsqlConnectionStringBuilder(target.ConnectionString);
-        return new ConnectionInfo(
-            builder.Host ?? "localhost",
-            builder.Port,
-            builder.Database ?? string.Empty,
-            builder.Username ?? "postgres",
-            builder.Password ?? string.Empty,
-            MapSslMode(builder.SslMode));
-    }
-
-    private static ESslMode MapSslMode(SslMode sslMode) =>
-        sslMode switch
-            {
-                SslMode.Disable => ESslMode.Disable,
-                SslMode.Require => ESslMode.Require,
-                SslMode.VerifyCA => ESslMode.VerifyCA,
-                SslMode.VerifyFull => ESslMode.VerifyFull,
-                _ => ESslMode.Prefer
-            };
 }

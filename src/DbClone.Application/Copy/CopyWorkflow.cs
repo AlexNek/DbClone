@@ -31,8 +31,6 @@ public sealed class CopyWorkflow : ICopyWorkflow
     /// <summary>No engine stage ran, so nothing was copied.</summary>
     private static readonly CopyStatistics NothingCopied = new(0, 0, 0, 0, 0, 0, 0, 0, 0);
 
-    private readonly IDatabaseAdapter _adapter;
-
     private readonly DatabaseTargetFactory _targetFactory;
 
     private readonly ITableFilterApplier _filterApplier;
@@ -43,13 +41,11 @@ public sealed class CopyWorkflow : ICopyWorkflow
 
     /// <summary>Initializes a new instance.</summary>
     public CopyWorkflow(
-        IDatabaseAdapter adapter,
         DatabaseTargetFactory targetFactory,
         ITableFilterApplier filterApplier,
         IConfirmationService confirmationService,
         ILogger<CopyWorkflow> logger)
     {
-        _adapter = adapter ?? throw new ArgumentNullException(nameof(adapter));
         _targetFactory = targetFactory ?? throw new ArgumentNullException(nameof(targetFactory));
         _filterApplier = filterApplier ?? throw new ArgumentNullException(nameof(filterApplier));
         _confirmationService = confirmationService
@@ -68,6 +64,7 @@ public sealed class CopyWorkflow : ICopyWorkflow
         CancellationToken cancellationToken)
     {
         ConnectionInfo? backupDestination = null;
+        var adapter = _targetFactory.ResolveAdapter(source.Engine);
         try
         {
             _logger.LogInformation("Copy operation started");
@@ -75,10 +72,10 @@ public sealed class CopyWorkflow : ICopyWorkflow
 
             var sourceTarget = _targetFactory.Create(source);
             var destTarget = _targetFactory.Create(destination);
-            var sourceAdmin = _adapter.CreateAdmin(sourceTarget);
-            var destAdmin = _adapter.CreateAdmin(destTarget);
-            var destCleaner = _adapter.CreateCleaner(destTarget);
-            var sourceMetadata = _adapter.CreateMetadataSource(sourceTarget);
+            var sourceAdmin = adapter.CreateAdmin(sourceTarget);
+            var destAdmin = adapter.CreateAdmin(destTarget);
+            var destCleaner = adapter.CreateCleaner(destTarget);
+            var sourceMetadata = adapter.CreateMetadataSource(sourceTarget);
 
             // Step 1: Verify source connection
             listener.OnPhaseChanged(ECopyOperationPhase.CheckingSourceConnection);
@@ -201,7 +198,7 @@ public sealed class CopyWorkflow : ICopyWorkflow
             if (options.CopyMode != ECopyMode.Backup)
             {
                 listener.OnPhaseChanged(ECopyOperationPhase.CheckingDestination);
-                var destHasData = await _adapter.CreateAdmin(destTargetToUse).HasDataAsync(cancellationToken);
+                var destHasData = await adapter.CreateAdmin(destTargetToUse).HasDataAsync(cancellationToken);
 
                 if (destHasData)
                 {
@@ -263,7 +260,7 @@ public sealed class CopyWorkflow : ICopyWorkflow
                     }
 
                     listener.OnPhaseChanged(ECopyOperationPhase.CleaningDestination);
-                    var latestCleaner = _adapter.CreateCleaner(destTargetToUse);
+                    var latestCleaner = adapter.CreateCleaner(destTargetToUse);
                     bool cleaned;
                     if (clearAll)
                     {
@@ -331,7 +328,7 @@ public sealed class CopyWorkflow : ICopyWorkflow
             }
             else
             {
-                await using var session = _adapter.CreateCopySession();
+                await using var session = adapter.CreateCopySession();
                 engineResult = await session.ExecuteAsync(
                                    step.Request!,
                                    progressHandler,

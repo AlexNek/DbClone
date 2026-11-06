@@ -1,8 +1,7 @@
 using System.Data;
+using DbAdapter.Definitions;
 using System.Diagnostics;
 
-using DbClone.Application.DTOs;
-using DbClone.Application.Interfaces;
 using DbAdapter.PostgreSql.Execution;
 
 using Microsoft.Extensions.Logging;

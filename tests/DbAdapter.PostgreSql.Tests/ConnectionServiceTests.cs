@@ -32,7 +32,7 @@ public class ConnectionImportServiceTests
 
         detection.IsDetected.Should().BeTrue();
         detection.FormatId.Should().Be("pg-uri");
-        detection.Provider.Should().Be(EDatabaseProvider.PostgreSql);
+        detection.Provider.Should().Be("postgresql");
         detection.Confidence.Should().Be(1.0);
     }
 
@@ -244,7 +244,7 @@ public class ConnectionExportServiceTests
     private static DatabaseConnection Sample() =>
         new()
             {
-                Provider = EDatabaseProvider.PostgreSql,
+                Provider = "postgresql",
                 Host = "localhost",
                 Port = 5432,
                 Database = "mydb",

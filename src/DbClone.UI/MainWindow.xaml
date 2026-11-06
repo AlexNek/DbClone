@@ -4,7 +4,7 @@
     xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
     xmlns:ui="http://schemas.lepo.co/wpfui/2022/xaml"
     xmlns:views="clr-namespace:DbClone.UI.Views"
-    Title="DbClone — PostgreSQL Database Copy Tool"
+    Title="DbClone — Database Copy Tool"
     Width="1280"
     Height="860"
     MinWidth="900"

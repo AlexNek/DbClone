@@ -1,7 +1,4 @@
 using DbAdapter.Definitions;
-using DbClone.Application.DTOs;
-using DbClone.Application.Interfaces;
-using DbClone.Application.Copy;
 
 using Microsoft.Extensions.Logging;
 

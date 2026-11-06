@@ -1,3 +1,4 @@
+using DbAdapter.Definitions;
 using DbAdapter.PostgreSql.Platforms;
 
 using FluentAssertions;

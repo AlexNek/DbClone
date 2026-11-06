@@ -1,7 +1,6 @@
-using DbClone.Application.DTOs;
-using DbClone.Application.Copy;
 using CanonicalModel.Enums;
 using CanonicalModel.DTOs;
+using DbAdapter.Definitions;
 
 namespace DbAdapter.PostgreSql.Pipeline;
 

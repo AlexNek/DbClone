@@ -1,6 +1,3 @@
-using DbClone.Application.DTOs;
-using DbClone.Application.Interfaces;
-using DbClone.Application.Copy;
 using DbAdapter.PostgreSql.Ddl;
 using DbAdapter.PostgreSql.Execution;
 
@@ -8,6 +5,7 @@ using Microsoft.Extensions.Logging;
 using CanonicalModel.Models;
 using CanonicalModel.Enums;
 using CanonicalModel.DTOs;
+using DbAdapter.Definitions;
 
 namespace DbAdapter.PostgreSql.Pipeline;
 

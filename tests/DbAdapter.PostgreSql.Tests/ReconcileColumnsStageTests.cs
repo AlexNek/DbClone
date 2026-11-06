@@ -58,7 +58,7 @@ public class ReconcileColumnsStageTests
         result.ObjectsProcessed.Should().Be(1);
         await _executor.Received(1)
             .ExecuteNonQueryAsync(
-                Arg.Is<string>(sql => sql.Contains("SET NOT NULL")),
+                Arg.Is<string>(sql => sql!.Contains("SET NOT NULL")),
                 Arg.Any<CancellationToken>());
     }
 
@@ -126,7 +126,7 @@ public class ReconcileColumnsStageTests
         // Should only query metadata and alter for normal_tbl, not skipped_tbl
         await _executor.Received(1)
             .ExecuteNonQueryAsync(
-                Arg.Is<string>(sql => sql.Contains("normal_tbl") && sql.Contains("SET NOT NULL")),
+                Arg.Is<string>(sql => sql!.Contains("normal_tbl") && sql.Contains("SET NOT NULL")),
                 Arg.Any<CancellationToken>());
     }
 
@@ -241,7 +241,7 @@ public class ReconcileColumnsStageTests
     private void StubDestNotNullColumns(string schema, string table)
     {
         _executor.QueryAsync(
-                Arg.Is<string>(sql => sql.Contains(schema) && sql.Contains(table)),
+                Arg.Is<string>(sql => sql!.Contains(schema) && sql.Contains(table)),
                 Arg.Any<Func<System.Data.Common.DbDataReader, string>>(),
                 Arg.Any<CancellationToken>())
             .Returns(new List<string>());

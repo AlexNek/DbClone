@@ -10,7 +10,8 @@
   },
   "defaults": {
     "port": 5432,
-    "sslMode": "Require"
+    "sslMode": "Require",
+    "username": "postgres"
   },
   "versions": [
     {

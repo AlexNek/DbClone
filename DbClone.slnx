@@ -14,6 +14,7 @@
   </Folder>
   <Folder Name="/tests/">
     <Project Path="tests/Application.Tests/Application.Tests.csproj" />
+    <Project Path="tests/DbAdapter.StubPlugin/DbAdapter.StubPlugin.csproj" />
     <Project Path="tests/Integration.Tests/Integration.Tests.csproj" />
     <Project Path="tests/DbAdapter.PostgreSql.Tests/DbAdapter.PostgreSql.Tests.csproj" />
     <Project Path="tests/UI.Tests/UI.Tests.csproj" />

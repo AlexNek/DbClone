@@ -86,7 +86,7 @@ public sealed class ConnectionImportService : IConnectionImportService
                                Connection = connection,
                                Warnings = warnings,
                                DetectedFormatName = format.DisplayName,
-                               DetectedProvider = format.Provider.ToString(),
+                               DetectedProvider = format.Provider,
                                Confidence = 1.0,
                                TypicalSource = format.TypicalSource
                            };

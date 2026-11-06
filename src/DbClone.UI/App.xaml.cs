@@ -1,8 +1,9 @@
 using System.IO;
 using System.Windows;
 
+using DbClone.Application.Adapters;
 using DbClone.Application.Catalog;
-using DbClone.Application.Compare;
+using DbAdapter.Definitions;
 using DbClone.Application.Compare.Comparers;
 using DbClone.Application.Comparison;
 using DbClone.Application.Copy;
@@ -11,7 +12,6 @@ using DbClone.Application.Interchange;
 using DbClone.Application.Interfaces;
 using DbClone.Application.TableFilter;
 using DbClone.Application.Targets;
-using DbAdapter.PostgreSql;
 using DbClone.UI.Logging;
 using DbClone.UI.Services;
 using DbClone.UI.ViewModels;
@@ -19,6 +19,7 @@ using DbClone.UI.ViewModels;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
+using Microsoft.Extensions.Logging;
 
 using Serilog;
 
@@ -139,7 +140,25 @@ public partial class App : System.Windows.Application, IDisposable
             .UseSerilog(Log.Logger)
             .ConfigureServices((_, services) =>
                 {
-                    services.AddPostgreSqlProvider();
+                    // The plugin catalog is the single route from a connection to an adapter
+                    // (refactors/09 P2/P3). It scans the publish folder's plugins/ directory; the
+                    // engine is discovered there, never registered by name in this file.
+                    services.AddSingleton<IAdapterCatalog>(sp =>
+                        new DatabaseAdapterCatalog(
+                            Path.Combine(AppContext.BaseDirectory, "plugins"),
+                            sp.GetRequiredService<ILoggerFactory>()));
+
+                    // Connection-text import/export orchestration is engine-neutral and lives in
+                    // the application; it is built over the union of every adapter's formats.
+                    services.AddSingleton<IConnectionImportService>(sp =>
+                        new DbClone.Application.Services.ConnectionImportService(
+                            sp.GetRequiredService<IAdapterCatalog>().Formats,
+                            sp.GetRequiredService<ILogger<DbClone.Application.Services.ConnectionImportService>>()));
+                    services.AddSingleton<IConnectionExportService>(sp =>
+                        new DbClone.Application.Services.ConnectionExportService(
+                            sp.GetRequiredService<IAdapterCatalog>().Formats,
+                            sp.GetRequiredService<ILogger<DbClone.Application.Services.ConnectionExportService>>()));
+
                     services.AddInterchangeServices();
                     services.AddSingleton<WpfDialogService>();
                     services.AddSingleton<IDialogService>(sp => sp.GetRequiredService<WpfDialogService>());
@@ -159,7 +178,9 @@ public partial class App : System.Windows.Application, IDisposable
                     services.AddSingleton<IConnectionTextService, DbClone.Application.Services.ConnectionTextService>();
                     services.AddSingleton<IServerAdminService, DbClone.Application.Services.ServerAdminService>();
 
-                    // Model comparers (IModelComparer) — OCP: add new ones here without editing ComparisonService
+                    // Provider-neutral model comparers — OCP: add new ones here without editing
+                    // ComparisonService. The engine-specific comparer (table DDL) is contributed by
+                    // the adapter through IDatabaseAdapter.CreateModelComparers(), not registered here.
                     services.AddTransient<IModelComparer, SchemaPresenceComparer>();
                     services.AddTransient<IModelComparer, IndexComparer>();
                     services.AddTransient<IModelComparer, ViewComparer>();
@@ -167,7 +188,6 @@ public partial class App : System.Windows.Application, IDisposable
                     services.AddTransient<IModelComparer, SequenceComparer>();
                     services.AddTransient<IModelComparer, TriggerComparer>();
                     services.AddTransient<IModelComparer, TypeComparer>();
-                    services.AddTransient<IModelComparer, TableDdlComparer>();
 
                     services.AddSingleton<ISettingsService, SettingsService>();
                     services.AddReportGenerators();

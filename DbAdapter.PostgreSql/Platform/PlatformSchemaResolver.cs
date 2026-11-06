@@ -2,6 +2,7 @@ using System.Collections.Immutable;
 
 using Microsoft.Extensions.Logging;
 using CanonicalModel.Platforms;
+using DbAdapter.Definitions;
 
 namespace DbAdapter.PostgreSql.Platforms;
 
@@ -153,7 +154,7 @@ public sealed class PlatformSchemaResolver
 
         def ??= allDefs.FirstOrDefault(d => d.Detection is null);
 
-        return def?.Defaults ?? new PlatformDefaults(Port: 5432, SslMode: "Prefer");
+        return def?.Defaults ?? new PlatformDefaults(Port: 5432, SslMode: "Prefer", Username: "postgres");
     }
 
     /// <summary>

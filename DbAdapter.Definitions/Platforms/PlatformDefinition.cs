@@ -1,0 +1,84 @@
+using System.Text.Json.Serialization;
+using CanonicalModel.Platforms;
+
+namespace DbAdapter.Definitions;
+
+/// <summary>
+/// Deserialization model for a .platform definition file.
+/// </summary>
+/// <param name="Id">
+/// Stable machine identifier supplied by the adapter. Used as the persistence key
+/// in saved connections. Never changes, even if displayName is localized.
+/// Falls back to displayName (lowercased) when absent for backward compatibility.
+/// </param>
+/// <param name="Engine">Database engine identifier supplied by the adapter.</param>
+/// <param name="DisplayName">Human-readable platform name. Localizable.</param>
+/// <param name="FormatVersion">File format version for forward compatibility.</param>
+/// <param name="Detection">
+/// Detection rules. Null/absent = base engine file (fallback when no platform matches).
+/// </param>
+/// <param name="Defaults">
+/// Default connection settings (port, TLS mode, username) for this platform.
+/// Null/absent = use the adapter's engine fallback.
+/// </param>
+/// <param name="Versions">Version-range entries. The resolver picks exactly one.</param>
+/// <param name="SourceFileName">
+/// Populated by the loader at runtime — the file name this definition was read from.
+/// Not serialized from JSON.
+/// </param>
+public sealed record PlatformDefinition(
+    [property: JsonPropertyName("id")]
+    string? Id,
+    [property: JsonPropertyName("engine")]
+    string Engine,
+    [property: JsonPropertyName("displayName")]
+    string DisplayName,
+    [property: JsonPropertyName("formatVersion")]
+    string FormatVersion,
+    [property: JsonPropertyName("detection")]
+    PlatformDetection? Detection,
+    [property: JsonPropertyName("defaults")]
+    PlatformDefaults? Defaults,
+    [property: JsonPropertyName("versions")]
+    IReadOnlyList<VersionEntry> Versions,
+    [property: JsonIgnore]
+    string SourceFileName = "")
+{
+    /// <summary>
+    /// The stable platform identifier. Falls back to lowercased displayName
+    /// when the "id" field is absent (backward compatibility with older files).
+    /// </summary>
+    [JsonIgnore]
+    public string StableId => Id ?? DisplayName.ToLowerInvariant();
+}
+
+/// <summary>
+/// Detection rules for identifying a hosting platform from the connection host.
+/// </summary>
+/// <param name="HostPatterns">
+/// Glob-style host patterns supplied by the adapter. Matched case-insensitively.
+/// </param>
+public sealed record PlatformDetection(
+    [property: JsonPropertyName("hostPatterns")]
+    IReadOnlyList<string>? HostPatterns);
+
+/// <summary>
+/// Everything that applies to a specific version range.
+/// Each entry is complete and self-contained — no merging across entries.
+/// </summary>
+/// <param name="VersionRange">Range expression: "*", "&gt;=15.0 &lt;16.0", etc.</param>
+/// <param name="SystemSchemas">Engine-internal schemas (always excluded from content reads).</param>
+/// <param name="PlatformSchemas">Provider-managed schemas (excluded when user setting enabled).</param>
+/// <param name="PlatformExtensions">Provider-managed extensions.</param>
+/// <param name="Notes">Optional documentation — not used at runtime.</param>
+public sealed record VersionEntry(
+    [property: JsonPropertyName("versionRange")]
+    string VersionRange,
+    [property: JsonPropertyName("systemSchemas")]
+    IReadOnlyList<string> SystemSchemas,
+    [property: JsonPropertyName("platformSchemas")]
+    IReadOnlyList<string> PlatformSchemas,
+    [property: JsonPropertyName("platformExtensions")]
+    IReadOnlyList<string> PlatformExtensions,
+    [property: JsonPropertyName("notes")]
+    string? Notes = null);

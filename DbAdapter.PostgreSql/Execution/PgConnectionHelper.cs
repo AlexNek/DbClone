@@ -1,11 +1,11 @@
 using System.Data;
 
-using DbClone.Application.Copy;
 
 using Microsoft.Extensions.Logging;
 
 using Npgsql;
 using CanonicalModel.Enums;
+using DbAdapter.Definitions;
 
 namespace DbAdapter.PostgreSql.Execution;
 

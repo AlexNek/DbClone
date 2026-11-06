@@ -255,7 +255,7 @@ public class ConnectionImportServiceTests
         var format = Substitute.For<IConnectionTextFormat>();
         format.Id.Returns(id);
         format.DisplayName.Returns(displayName);
-        format.Provider.Returns(EDatabaseProvider.PostgreSql);
+        format.Provider.Returns("postgresql");
         format.DetectionPriority.Returns(10);
         format.TypicalSource.Returns("Test");
         format.CanImport(Arg.Any<string>()).Returns(canImport);

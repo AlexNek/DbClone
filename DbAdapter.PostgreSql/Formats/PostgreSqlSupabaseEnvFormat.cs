@@ -33,7 +33,7 @@ public sealed class PostgreSqlSupabaseEnvFormat : IConnectionTextFormat
 
     public string Id => "pg-supabase-env";
 
-    public EDatabaseProvider Provider => EDatabaseProvider.PostgreSql;
+    public string Provider => "postgresql";
 
     public string TypicalSource => "React / Next.js / .env";
 
@@ -91,7 +91,7 @@ public sealed class PostgreSqlSupabaseEnvFormat : IConnectionTextFormat
             Username: "postgres",
             Password: string.Empty, // not available from env — user must supply
             SslMode: ESslMode.Require,
-            Provider: EDatabaseProvider.PostgreSql,
+            Provider: "postgresql",
             Options: options);
     }
 }

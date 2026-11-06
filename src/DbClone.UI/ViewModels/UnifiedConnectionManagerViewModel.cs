@@ -176,7 +176,8 @@ public sealed partial class UnifiedConnectionManagerViewModel : ObservableObject
 
     // ── Static data ─────────────────────────────────────────────────────────────
 
-    public static string[] SslModeValues { get; } = ["Disable", "Prefer", "Require"];
+    /// <summary>The TLS choices the active engine offers, supplied by its adapter (refactors/09 P7).</summary>
+    public IReadOnlyList<string> SslModeValues { get; }
 
     public UnifiedConnectionManagerViewModel(
         IConnectionStore connectionStore,
@@ -202,6 +203,8 @@ public sealed partial class UnifiedConnectionManagerViewModel : ObservableObject
         _backupEncryptionService = backupEncryptionService;
         _platformService = platformService;
 
+        SslModeValues = connectionStringService.SecurityOptions;
+
         // Populate the connection type dropdown from .platform files
         ConnectionTypeValues = _platformService.GetAllPlatforms();
         var defaultPlatformId = ConnectionTypeValues.FirstOrDefault()?.Id;
@@ -216,12 +219,14 @@ public sealed partial class UnifiedConnectionManagerViewModel : ObservableObject
         else
             _selectedTabIndex = initialTab == 0 ? s_lastTabIndex : initialTab;
 
-        // Set default form values
+        // Set default form values from the active engine's platform defaults, never an
+        // engine value written in the UI (refactors/09 P5).
+        var connectionDefaults = _platformService.GetConnectionDefaults(defaultPlatformId);
         _formHost = "localhost";
-        _formPort = "5432";
-        _formUsername = "postgres";
+        _formPort = connectionDefaults.Port.ToString();
+        _formUsername = connectionDefaults.Username;
         _formPassword = string.Empty;
-        _formSslMode = "Prefer";
+        _formSslMode = connectionDefaults.SslMode;
         _formConnectionType = defaultPlatformId;
         _formName = string.Empty;
         _formDatabaseName = string.Empty;
@@ -458,20 +463,14 @@ public sealed partial class UnifiedConnectionManagerViewModel : ObservableObject
 
         try
         {
-            var port = int.TryParse(FormPort, out var p) ? p : 5432;
-            var sslMode = FormSslMode switch
-                {
-                    "Require" => ESslMode.Require,
-                    "Disable" => ESslMode.Disable,
-                    _ => ESslMode.Prefer
-                };
+            var port = int.TryParse(FormPort, out var p) ? p : _platformService.GetConnectionDefaults(FormConnectionType).Port;
             var info = new ConnectionInfo(
                 FormHost,
                 port,
                 string.Empty,
                 FormUsername,
                 FormPassword,
-                sslMode);
+                FormSslMode);
             var databases = await _serverAdmin.ListDatabasesAsync(info, ct);
 
             if (databases.Count == 0)
@@ -501,17 +500,15 @@ public sealed partial class UnifiedConnectionManagerViewModel : ObservableObject
     /// </summary>
     private DatabaseConnection BuildDatabaseConnectionFromForm()
     {
-        var sslMode = Enum.TryParse<ESslMode>(FormSslMode, true, out var ssl)
-                          ? ssl
-                          : ESslMode.Prefer;
+        var sslMode = _connectionStringService.ToSslMode(FormSslMode);
 
         if (!int.TryParse(FormPort, out var port) || port <= 0)
-            port = 5432;
+            port = _platformService.GetConnectionDefaults(FormConnectionType).Port;
 
         return new DatabaseConnection
                    {
                        Name = FormName.Trim(),
-                       Provider = EDatabaseProvider.PostgreSql,
+                       Provider = _connectionStringService.Dialect,
                        Host = FormHost.Trim(),
                        Port = port,
                        Database = FormDatabaseName.Trim(),
@@ -564,11 +561,11 @@ public sealed partial class UnifiedConnectionManagerViewModel : ObservableObject
 
         public string? Password { get; set; }
 
-        public string Port { get; set; } = "5432";
+        public string Port { get; set; } = string.Empty;
 
-        public string SslMode { get; set; } = "Prefer";
+        public string SslMode { get; set; } = string.Empty;
 
-        public string Username { get; set; } = "postgres";
+        public string Username { get; set; } = string.Empty;
     }
 
     [RelayCommand]
@@ -619,7 +616,10 @@ public sealed partial class UnifiedConnectionManagerViewModel : ObservableObject
     private string ExportSelectedAsDefault()
     {
         var dbConnection = BuildDatabaseConnectionFromForm();
-        var formatId = _settingsService?.Load().DefaultClipboardFormatId ?? "pg-npgsql";
+        var configured = _settingsService?.Load().DefaultClipboardFormatId;
+        var formatId = string.IsNullOrWhiteSpace(configured)
+                           ? _connectionStringService.DefaultFormatId
+                           : configured;
         return _exportService.Export(dbConnection, formatId);
     }
 
@@ -759,11 +759,12 @@ public sealed partial class UnifiedConnectionManagerViewModel : ObservableObject
         IsEditingConnection = false;
         FormName = string.Empty;
         FormHost = "localhost";
-        FormPort = "5432";
+        var newDefaults = _platformService.GetConnectionDefaults(ConnectionTypeValues.FirstOrDefault()?.Id);
+        FormPort = newDefaults.Port.ToString();
         FormDatabaseName = string.Empty;
-        FormUsername = "postgres";
+        FormUsername = newDefaults.Username;
         FormPassword = string.Empty;
-        FormSslMode = "Prefer";
+        FormSslMode = newDefaults.SslMode;
         FormConnectionType = ConnectionTypeValues.FirstOrDefault()?.Id;
         FormNotes = string.Empty;
         FormBackupName = string.Empty;
@@ -1087,20 +1088,14 @@ public sealed partial class UnifiedConnectionManagerViewModel : ObservableObject
         TestResult = "Testing...";
         try
         {
-            var port = int.TryParse(FormPort, out var p) ? p : 5432;
-            var sslMode = FormSslMode switch
-                {
-                    "Require" => ESslMode.Require,
-                    "Disable" => ESslMode.Disable,
-                    _ => ESslMode.Prefer
-                };
+            var port = int.TryParse(FormPort, out var p) ? p : _platformService.GetConnectionDefaults(FormConnectionType).Port;
             var info = new ConnectionInfo(
                 FormHost,
                 port,
                 FormDatabaseName,
                 FormUsername,
                 FormPassword,
-                sslMode);
+                FormSslMode);
             var version = await _serverAdmin.TestConnectionAsync(info, ct);
             TestResult = version != null
                              ? $"OK — {_serverAdmin.GetProviderName(info)} {version}"

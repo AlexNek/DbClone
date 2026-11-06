@@ -1,6 +1,5 @@
 using DbAdapter.Definitions;
 using CanonicalModel.DTOs;
-using DbClone.Application.Interfaces;
 
 namespace DbAdapter.PostgreSql.Adapters;
 

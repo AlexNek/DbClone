@@ -43,12 +43,12 @@ public class TargetConnectionStringTests
     public void DatabaseOverrideBuiltFromTarget_ReAppliesConnectTimeout()
     {
         // The maintenance calls connect to a database other than the target's own, so the
-        // override string is rebuilt from the target profile.
+        // override string is rebuilt from the target's connection text (the pattern
+        // PgDatabaseAdmin uses): re-parse, then set the database.
         // Act
-        var target = TestTargets.Local();
-        var connectionString = PgConnectionStringBuilder
-            .BuildConnectionString(PgConnectionStringBuilder.ToConnectionInfo(target), "postgres")
-            .ConnectionString;
+        var builder = PgConnectionStringBuilder.ParseConnectionString(TestTargets.Local());
+        builder.Database = "postgres";
+        var connectionString = builder.ConnectionString;
 
         // Assert
         connectionString.Should().Contain("Timeout=30");

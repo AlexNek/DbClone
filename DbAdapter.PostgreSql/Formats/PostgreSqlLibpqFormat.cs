@@ -15,12 +15,12 @@ public sealed class PostgreSqlLibpqFormat : IConnectionTextFormat
 
     public string Id => "pg-libpq";
 
-    public EDatabaseProvider Provider => EDatabaseProvider.PostgreSql;
+    public string Provider => "postgresql";
 
     public string TypicalSource => "C / psql / pgAdmin";
 
     public bool CanExport(ConnectionStringFields fields) =>
-        fields.Provider == EDatabaseProvider.PostgreSql;
+        fields.Provider == "postgresql";
 
     public bool CanImport(string text)
     {
@@ -99,7 +99,7 @@ public sealed class PostgreSqlLibpqFormat : IConnectionTextFormat
             Username: username,
             Password: password ?? string.Empty,
             SslMode: sslMode,
-            Provider: EDatabaseProvider.PostgreSql,
+            Provider: "postgresql",
             Options: options);
     }
 

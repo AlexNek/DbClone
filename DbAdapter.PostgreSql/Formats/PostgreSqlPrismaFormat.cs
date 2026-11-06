@@ -16,12 +16,12 @@ public sealed class PostgreSqlPrismaFormat : IConnectionTextFormat
 
     public string Id => "pg-prisma";
 
-    public EDatabaseProvider Provider => EDatabaseProvider.PostgreSql;
+    public string Provider => "postgresql";
 
     public string TypicalSource => "TypeScript / Node.js";
 
     public bool CanExport(ConnectionStringFields fields) =>
-        fields.Provider == EDatabaseProvider.PostgreSql;
+        fields.Provider == "postgresql";
 
     public bool CanImport(string text) => false;
 

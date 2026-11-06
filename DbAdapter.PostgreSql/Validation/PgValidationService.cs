@@ -1,6 +1,4 @@
-using DbClone.Application.DTOs;
-using DbClone.Application.Enums;
-using DbClone.Application.Interfaces;
+using DbAdapter.Definitions;
 using DbAdapter.PostgreSql.Execution;
 
 using Microsoft.Extensions.Logging;

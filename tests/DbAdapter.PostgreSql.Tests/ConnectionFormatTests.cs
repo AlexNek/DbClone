@@ -94,7 +94,7 @@ public class PostgreSqlUriFormatTests
         // Arrange
         var conn = new DatabaseConnection
                        {
-                           Provider = EDatabaseProvider.PostgreSql,
+                           Provider = "postgresql",
                            Host = "db.example.com",
                            Port = 5433,
                            Database = "sales",
@@ -120,7 +120,7 @@ public class PostgreSqlUriFormatTests
         var conn = _sut.Parse(input);
 
         // Assert
-        conn.Provider.Should().Be(EDatabaseProvider.PostgreSql);
+        conn.Provider.Should().Be("postgresql");
         conn.Host.Should().Be("db.example.com");
         conn.Port.Should().Be(5433);
         conn.Database.Should().Be("sales");
@@ -403,7 +403,7 @@ public class PostgreSqlNpgsqlFormatTests
         // Arrange
         var original = new DatabaseConnection
                            {
-                               Provider = EDatabaseProvider.PostgreSql,
+                               Provider = "postgresql",
                                Host = "db.example.com",
                                Port = 5433,
                                Database = "sales",
@@ -1102,7 +1102,7 @@ public class ExportOnlyFormatTests
     private static DatabaseConnection SampleConnection() =>
         new()
             {
-                Provider = EDatabaseProvider.PostgreSql,
+                Provider = "postgresql",
                 Host = "db.example.com",
                 Port = 5433,
                 Database = "sales",

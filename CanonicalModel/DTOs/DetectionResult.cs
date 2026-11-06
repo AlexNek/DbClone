@@ -1,5 +1,3 @@
-using CanonicalModel.Enums;
-
 namespace CanonicalModel.DTOs;
 
 /// <summary>
@@ -7,12 +5,12 @@ namespace CanonicalModel.DTOs;
 /// </summary>
 public sealed record DetectionResult(
     bool IsDetected,
-    EDatabaseProvider Provider,
+    string Provider,
     string FormatId,
     string FormatDisplayName,
     double Confidence,
     string TypicalSource)
 {
     public static DetectionResult None =>
-        new(false, default, string.Empty, string.Empty, 0, string.Empty);
+        new(false, string.Empty, string.Empty, string.Empty, 0, string.Empty);
 }

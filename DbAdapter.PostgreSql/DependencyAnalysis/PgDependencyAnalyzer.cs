@@ -1,4 +1,4 @@
-using DbClone.Application.Interfaces;
+using DbAdapter.Definitions;
 
 using Microsoft.Extensions.Logging;
 using CanonicalModel.Models;

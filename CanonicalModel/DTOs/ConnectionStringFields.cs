@@ -9,5 +9,5 @@ public sealed record ConnectionStringFields(
     string Username,
     string Password,
     ESslMode SslMode,
-    EDatabaseProvider Provider = default,
+    string Provider = "",
     Dictionary<string, string>? Options = null);

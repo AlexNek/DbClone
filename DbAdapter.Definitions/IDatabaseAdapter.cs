@@ -30,6 +30,13 @@ public interface IDatabaseAdapter
     /// <summary>Comparison role. Both targets arrive on each call.</summary>
     ITableComparer CreateComparer();
 
+    /// <summary>
+    /// The adapter's engine-specific model comparers, appended to the host's provider-neutral
+    /// comparers when a comparison runs. Returns only what the engine owns (e.g. its DDL comparer);
+    /// the shared comparers stay registered by the host (refactors/09 P6).
+    /// </summary>
+    IReadOnlyList<IModelComparer> CreateModelComparers();
+
     /// <summary>Copy role. Both targets travel in the request.</summary>
     ICopySession CreateCopySession();
 }

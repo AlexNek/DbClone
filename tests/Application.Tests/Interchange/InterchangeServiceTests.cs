@@ -29,7 +29,11 @@ public class InterchangeServiceTests
         adapter.Syntax.BuildKeyValue(Arg.Any<CanonicalModel.DTOs.ConnectionStringFields>())
             .Returns("Host=test.example.com;Port=5432;Database=testdb;Username=test_user");
 
-        _targetFactory = new DatabaseTargetFactory(adapter);
+        var catalog = Substitute.For<DbClone.Application.Adapters.IAdapterCatalog>();
+        catalog.All.Returns(new[] { adapter });
+        catalog.Find(Arg.Any<string>()).Returns(adapter);
+
+        _targetFactory = new DatabaseTargetFactory(catalog);
         _logger = Substitute.For<ILogger<InterchangeService>>();
         _sut = new InterchangeService(_targetFactory, _logger);
     }
@@ -39,7 +43,7 @@ public class InterchangeServiceTests
     {
         // Arrange
         var request = new InterchangeStoreRequest(
-            Connection: new ConnectionInfo("test.example.com", 5432, "testdb", "test_user", "pass", CanonicalModel.Enums.ESslMode.Prefer),
+            Connection: new ConnectionInfo("test.example.com", 5432, "testdb", "test_user", "pass", "Prefer"),
             TableSelection: TableSelectionSpec.All,
             CatalogPath: @"C:\test\catalog.rdbx",
             ChunkBytes: 8_388_608,
@@ -75,7 +79,7 @@ public class InterchangeServiceTests
         // Arrange
         var request = new InterchangeRestoreRequest(
             CatalogPath: @"C:\test\catalog.rdbx",
-            Connection: new ConnectionInfo("test.example.com", 5432, "testdb", "test_user", "pass", CanonicalModel.Enums.ESslMode.Prefer),
+            Connection: new ConnectionInfo("test.example.com", 5432, "testdb", "test_user", "pass", "Prefer"),
             UnsupportedFeaturePolicy: "fail");
 
         // Act

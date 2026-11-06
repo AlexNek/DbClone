@@ -33,7 +33,7 @@ public sealed class PostgreSqlEnvVarFormat : IConnectionTextFormat
 
     public string Id => "pg-envvar";
 
-    public EDatabaseProvider Provider => EDatabaseProvider.PostgreSql;
+    public string Provider => "postgresql";
 
     public string TypicalSource => "Docker / .env / CI/CD";
 
@@ -73,7 +73,7 @@ public sealed class PostgreSqlEnvVarFormat : IConnectionTextFormat
             Username: username,
             Password: password ?? string.Empty,
             SslMode: ESslMode.Prefer,
-            Provider: EDatabaseProvider.PostgreSql);
+            Provider: "postgresql");
     }
 
     private static Dictionary<string, string> ParseEnvVars(string text)

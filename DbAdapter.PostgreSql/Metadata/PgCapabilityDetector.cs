@@ -1,4 +1,4 @@
-using DbClone.Application.Interfaces;
+using DbAdapter.Definitions;
 using DbAdapter.PostgreSql.Execution;
 
 using Microsoft.Extensions.Logging;

@@ -43,19 +43,19 @@ public sealed partial class ConnectionViewModel : ObservableObject
     private string _password = string.Empty;
 
     [ObservableProperty]
-    private string _port = "5432";
+    private string _port = string.Empty;
 
     [ObservableProperty]
     private SavedConnection? _selectedSavedConnection;
 
     [ObservableProperty]
-    private string _sslMode = "Prefer";
+    private string _sslMode = string.Empty;
 
     [ObservableProperty]
     private string _testResult = string.Empty;
 
     [ObservableProperty]
-    private string _username = "postgres";
+    private string _username = string.Empty;
 
     /// <summary>Platform entries loaded from .platform files (for the type dropdown).</summary>
     public IReadOnlyList<PlatformEntry> ConnectionTypeValues { get; }
@@ -79,7 +79,8 @@ public sealed partial class ConnectionViewModel : ObservableObject
     /// </summary>
     public TableOverviewPanelViewModel? TableOverview { get; set; }
 
-    public static string[] SslModeValues { get; } = ["Disable", "Prefer", "Require"];
+    /// <summary>The TLS choices the active engine offers, supplied by its adapter (refactors/09 P7).</summary>
+    public IReadOnlyList<string> SslModeValues { get; }
 
     public string Summary =>
         string.IsNullOrEmpty(DatabaseName)
@@ -96,21 +97,25 @@ public sealed partial class ConnectionViewModel : ObservableObject
         _platformService = platformService;
         ConnectionTypeValues = platformService.GetAllPlatforms();
         _connectionType = ConnectionTypeValues.FirstOrDefault()?.Id;
+        SslModeValues = connectionStringService.SecurityOptions;
+
+        // A brand-new (unsaved) connection starts from the active engine's platform defaults,
+        // never from an engine value written in the UI (refactors/09 P5).
+        var defaults = platformService.GetConnectionDefaults(_connectionType);
+        _port = defaults.Port.ToString();
+        _username = defaults.Username;
+        _sslMode = defaults.SslMode;
     }
 
     public string BuildConnectionString()
     {
-        var sslMode = Enum.TryParse<ESslMode>(SslMode, true, out var parsed)
-                          ? parsed
-                          : ESslMode.Prefer;
-
         var fields = new ConnectionStringFields(
             Host,
             PortNumber,
             DatabaseName,
             Username,
             Password,
-            sslMode);
+            _connectionStringService.ToSslMode(SslMode));
         return _connectionStringService.BuildKeyValue(fields);
     }
 

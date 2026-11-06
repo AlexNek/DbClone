@@ -19,12 +19,12 @@ public sealed class PostgreSqlSupabaseFormat : IConnectionTextFormat
 
     public string Id => "pg-supabase";
 
-    public EDatabaseProvider Provider => EDatabaseProvider.PostgreSql;
+    public string Provider => "postgresql";
 
     public string TypicalSource => "Supabase dashboard";
 
     public bool CanExport(ConnectionStringFields fields) =>
-        fields.Provider == EDatabaseProvider.PostgreSql;
+        fields.Provider == "postgresql";
 
     public bool CanImport(string text) =>
         (text.StartsWith("postgres://", StringComparison.OrdinalIgnoreCase)

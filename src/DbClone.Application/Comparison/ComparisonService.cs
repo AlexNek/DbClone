@@ -1,5 +1,4 @@
 using DbAdapter.Definitions;
-using DbClone.Application.Compare;
 using DbClone.Application.DTOs;
 using DbClone.Application.Enums;
 using DbClone.Application.Interfaces;
@@ -21,8 +20,6 @@ namespace DbClone.Application.Comparison;
 /// </summary>
 public sealed class ComparisonService : IComparisonService
 {
-    private readonly IDatabaseAdapter _adapter;
-
     private readonly DatabaseTargetFactory _targetFactory;
 
     private readonly ITableFilterApplier _filterApplier;
@@ -33,13 +30,11 @@ public sealed class ComparisonService : IComparisonService
 
     /// <summary>Initializes a new instance.</summary>
     public ComparisonService(
-        IDatabaseAdapter adapter,
         DatabaseTargetFactory targetFactory,
         IEnumerable<IModelComparer> modelComparers,
         ITableFilterApplier filterApplier,
         ILogger<ComparisonService> logger)
     {
-        _adapter = adapter ?? throw new ArgumentNullException(nameof(adapter));
         _targetFactory = targetFactory ?? throw new ArgumentNullException(nameof(targetFactory));
         _modelComparers = modelComparers ?? throw new ArgumentNullException(nameof(modelComparers));
         _filterApplier = filterApplier ?? throw new ArgumentNullException(nameof(filterApplier));
@@ -60,8 +55,13 @@ public sealed class ComparisonService : IComparisonService
     {
         var sourceTarget = _targetFactory.Create(source);
         var destTarget = _targetFactory.Create(destination);
-        var metadata = _adapter.CreateMetadataSource(sourceTarget);
-        var comparer = _adapter.CreateComparer();
+        var adapter = _targetFactory.ResolveAdapter(source.Engine);
+        var metadata = adapter.CreateMetadataSource(sourceTarget);
+        var comparer = adapter.CreateComparer();
+        // The seven provider-neutral comparers arrive from the host; the engine-specific ones
+        // (TableDdlComparer today) come from the adapter, appended last — the same set in the
+        // same order the host registered before adapters became plugins (refactors/09 P6).
+        var modelComparers = _modelComparers.Concat(adapter.CreateModelComparers()).ToList();
 
         // ─── Log effective compare settings ───
         log(ELogLevel.Info,
@@ -93,7 +93,7 @@ public sealed class ComparisonService : IComparisonService
             TotalTables = 0
         });
 
-        var destMetadata = _adapter.CreateMetadataSource(destTarget);
+        var destMetadata = adapter.CreateMetadataSource(destTarget);
         log(ELogLevel.Info,
             $"Reading database model from destination ({destination.Host}:{destination.Port}/{destination.DatabaseName})...");
 
@@ -170,7 +170,7 @@ public sealed class ComparisonService : IComparisonService
 
         // ─── 2. Compare schema objects via IModelComparer implementations ───
         log(ELogLevel.Info, "Comparing schema objects (schemas, indexes, views, functions, sequences, triggers, types, table DDL)...");
-        await RunModelComparersAsync(sourceModel, destModel, allItems, progress, waitWhilePaused, ct);
+        await RunModelComparersAsync(modelComparers, sourceModel, destModel, allItems, progress, waitWhilePaused, ct);
 
         progress?.Report(new CompareProgressInfo
         {
@@ -289,6 +289,7 @@ public sealed class ComparisonService : IComparisonService
     // ─────────────────────────────────────────────────────────────────────────
 
     private async Task RunModelComparersAsync(
+        IReadOnlyList<IModelComparer> comparers,
         DatabaseModel source,
         DatabaseModel dest,
         List<CompareResultItem> allItems,
@@ -296,7 +297,7 @@ public sealed class ComparisonService : IComparisonService
         Func<CancellationToken, Task>? waitWhilePaused,
         CancellationToken ct)
     {
-        var comparerList = _modelComparers.ToList();
+        var comparerList = comparers;
         var totalComparers = comparerList.Count;
         var processed = 0;
 

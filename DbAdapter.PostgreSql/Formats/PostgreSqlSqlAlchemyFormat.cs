@@ -16,12 +16,12 @@ public sealed class PostgreSqlSqlAlchemyFormat : IConnectionTextFormat
 
     public string Id => "pg-sqlalchemy";
 
-    public EDatabaseProvider Provider => EDatabaseProvider.PostgreSql;
+    public string Provider => "postgresql";
 
     public string TypicalSource => "Python";
 
     public bool CanExport(ConnectionStringFields fields) =>
-        fields.Provider == EDatabaseProvider.PostgreSql;
+        fields.Provider == "postgresql";
 
     public bool CanImport(string text) => false;
 
