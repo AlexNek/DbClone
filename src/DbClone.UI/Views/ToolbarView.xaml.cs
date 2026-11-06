@@ -83,25 +83,28 @@ public partial class ToolbarView : UserControl
         ModeSelectorTrack.Background = trackBg;
         ModeSelectorTrack.BorderBrush = trackBorder;
 
-        if (mode == EWorkspaceMode.Copy)
-        {
-            CopyTab.Background = accentBrush;
-            CopyTabText.Foreground = Brushes.White;
-            CopyTabText.FontWeight = FontWeights.SemiBold;
+        // Reset all tabs to inactive
+        CopyTab.Background = Brushes.Transparent;
+        CopyTabText.Foreground = dimText;
+        CopyTabText.FontWeight = FontWeights.Normal;
 
-            CompareTab.Background = Brushes.Transparent;
-            CompareTabText.Foreground = dimText;
-            CompareTabText.FontWeight = FontWeights.Normal;
-        }
-        else
-        {
-            CompareTab.Background = accentBrush;
-            CompareTabText.Foreground = Brushes.White;
-            CompareTabText.FontWeight = FontWeights.SemiBold;
+        CompareTab.Background = Brushes.Transparent;
+        CompareTabText.Foreground = dimText;
+        CompareTabText.FontWeight = FontWeights.Normal;
 
-            CopyTab.Background = Brushes.Transparent;
-            CopyTabText.Foreground = dimText;
-            CopyTabText.FontWeight = FontWeights.Normal;
+        // Highlight the active tab
+        switch (mode)
+        {
+            case EWorkspaceMode.Copy:
+                CopyTab.Background = accentBrush;
+                CopyTabText.Foreground = Brushes.White;
+                CopyTabText.FontWeight = FontWeights.SemiBold;
+                break;
+            case EWorkspaceMode.Compare:
+                CompareTab.Background = accentBrush;
+                CompareTabText.Foreground = Brushes.White;
+                CompareTabText.FontWeight = FontWeights.SemiBold;
+                break;
         }
     }
 
@@ -119,5 +122,13 @@ public partial class ToolbarView : UserControl
         CompareOptionsPopup.IsOpen = !CompareOptionsPopup.IsOpen;
         Debug.WriteLine(
             $"[CompareOptions] Popup DataContext = {CompareOptionsPopup.DataContext?.GetType().Name ?? "null"}");
+    }
+
+    private void StoreOptionsButton_Click(object sender, RoutedEventArgs e)
+    {
+        StoreOptionsPopup.DataContext = DataContext;
+        StoreOptionsPopup.IsOpen = !StoreOptionsPopup.IsOpen;
+        Debug.WriteLine(
+            $"[StoreOptions] Popup DataContext = {StoreOptionsPopup.DataContext?.GetType().Name ?? "null"}");
     }
 }

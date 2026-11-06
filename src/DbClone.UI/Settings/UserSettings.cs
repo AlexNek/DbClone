@@ -48,6 +48,10 @@ public sealed partial class UserSettings : ObservableObject
     [ObservableProperty]
     private EWorkspaceMode _selectedWorkspaceMode = EWorkspaceMode.Copy;
 
+    /// <summary>Store / Restore workspace options (persisted as a nested JSON object).</summary>
+    [ObservableProperty]
+    private StoreRestoreOptions _storeRestore = new();
+
     [ObservableProperty]
     private EVerifyMode _selectedVerifyMode = EVerifyMode.RowCount;
 

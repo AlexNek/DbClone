@@ -7,6 +7,7 @@ using DbClone.Application.Compare.Comparers;
 using DbClone.Application.Comparison;
 using DbClone.Application.Copy;
 using DbClone.Application.Enums;
+using DbClone.Application.Interchange;
 using DbClone.Application.Interfaces;
 using DbClone.Application.TableFilter;
 using DbClone.Application.Targets;
@@ -139,6 +140,7 @@ public partial class App : System.Windows.Application, IDisposable
             .ConfigureServices((_, services) =>
                 {
                     services.AddPostgreSqlProvider();
+                    services.AddInterchangeServices();
                     services.AddSingleton<WpfDialogService>();
                     services.AddSingleton<IDialogService>(sp => sp.GetRequiredService<WpfDialogService>());
                     services.AddSingleton<IConfirmationService>(sp => sp.GetRequiredService<WpfDialogService>());
@@ -157,7 +159,7 @@ public partial class App : System.Windows.Application, IDisposable
                     services.AddSingleton<IConnectionTextService, DbClone.Application.Services.ConnectionTextService>();
                     services.AddSingleton<IServerAdminService, DbClone.Application.Services.ServerAdminService>();
 
-                    // Model comparers (IModelComparer) — OCP: add new ones here without editing DatabaseComparerService
+                    // Model comparers (IModelComparer) — OCP: add new ones here without editing ComparisonService
                     services.AddTransient<IModelComparer, SchemaPresenceComparer>();
                     services.AddTransient<IModelComparer, IndexComparer>();
                     services.AddTransient<IModelComparer, ViewComparer>();

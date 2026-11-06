@@ -45,6 +45,7 @@ public sealed class PostgreSqlAdapter : IDatabaseAdapter
         _copyEngine = copyEngine ?? throw new ArgumentNullException(nameof(copyEngine));
 
         Info = new AdapterInfo(
+            Id: "org.dbclone.postgresql",
             Dialect: "postgresql",
             EngineVersionRange: "*",
             AdapterVersion: typeof(PostgreSqlAdapter).Assembly.GetName().Version?.ToString()

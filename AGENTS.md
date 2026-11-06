@@ -7,7 +7,7 @@ DbClone.PostgreSql  →  DbClone.Application  ←  DbClone.UI
                               (interfaces only)
 ```
 
-- **DbClone.Application** — interfaces, DTOs, models, and shared provider-agnostic orchestration (e.g. `CopyPipeline`). NO provider-specific implementations. Only `Microsoft.Extensions.Logging.Abstractions` as NuGet dependency.
+- **DbClone.Application** — interfaces, DTOs, models, and shared provider-agnostic orchestration (e.g. `CopyPipeline`). NO provider-specific implementations. NuGet dependencies: `Microsoft.Extensions.Logging.Abstractions` and `Microsoft.Extensions.DependencyInjection.Abstractions`.
 - **DbClone.PostgreSql** — implements Application interfaces with PostgreSQL-specific code. References Application. Registers pipeline stages.
 - **DbClone.UI** — references Application (interfaces/DTOs) and PostgreSql **only for DI registration at the composition root** (`App.xaml.cs`). Must NOT use PostgreSql types in any other file.
 
@@ -32,9 +32,21 @@ No other `.cs` file in DbClone.UI may reference the PostgreSql namespace or type
 ## Forbidden in DbClone.Application
 
 - ❌ Provider-specific implementations (no PostgreSQL, MySQL, etc. — those go in provider projects)
-- ❌ Any NuGet package beyond `Microsoft.Extensions.Logging.Abstractions`
+- ❌ Any NuGet package beyond `Microsoft.Extensions.Logging.Abstractions` and `Microsoft.Extensions.DependencyInjection.Abstractions`
 - ❌ `using Npgsql;` or any provider-specific import
+- ❌ Interchange product types (format, transform, engine block) — the `Interchange/` folder wraps the product behind app DTOs; no product type leaks into view models or other Application files
 - ✅ Shared orchestration code that all providers use (e.g. `CopyPipeline`) is allowed
+- ✅ `Interchange/` folder: app-level DTOs (requests, results, progress, issues) and `IInterchangeService` / `InterchangeService` wrapper
+
+## Interchange consumer rules (Store / Restore)
+
+The interchange product (DatabaseInterchange) is complete on its own. DbClone consumes it through `IInterchangeService` in `DbClone.Application/Interchange/`. The rules:
+
+1. **The product is complete; the app is a consumer.** Export, import, verification, packing and the PostgreSQL engine block all live in the interchange projects. `InterchangeService` builds a `DatabaseTarget` through `DatabaseTargetFactory` and delegates to the product.
+2. **UI talks to Application, not to the product.** The UI sees `IInterchangeService` and app DTOs only. It does not reference the interchange projects, cannot parse a catalog, and cannot construct a model.
+3. **`App.xaml.cs`** is the one place that calls `services.AddInterchangeServices()`. When the product arrives, it will also construct the exchange runtime over the adapter already held there.
+4. **No engine mapping in DbClone.** The app contains no metadata-to-model conversion, no DDL generation, no value encoding for the catalog. If a change here would require writing those, it belongs in the product.
+5. **Settings are app preferences.** Chunk size, pack-after-store, restore mode and the unsupported-object policy live in `StoreRestoreOptions` on `UserSettings`, not in the product.
 
 ## Forbidden in DbClone.PostgreSql
 

@@ -255,7 +255,7 @@ public class CopyWorkflowTests
                              + call.Arg<ConnectionStringFields>()?.Database);
 
         var adapter = Substitute.For<IDatabaseAdapter>();
-        adapter.Info.Returns(new AdapterInfo("postgresql", "*", "1.0.0"));
+        adapter.Info.Returns(new AdapterInfo("test.postgresql", "postgresql", "*", "1.0.0"));
         adapter.Syntax.Returns(syntax);
 
         return new DatabaseTargetFactory(adapter);

@@ -23,6 +23,14 @@
             Key="C"
             Command="{Binding Compare.CompareDatabasesCommand}"
             Modifiers="Control+Shift" />
+        <KeyBinding
+            Key="S"
+            Command="{Binding StoreRestore.StartStoreCommand}"
+            Modifiers="Control+Shift" />
+        <KeyBinding
+            Key="R"
+            Command="{Binding StoreRestore.StartRestoreCommand}"
+            Modifiers="Control+Shift" />
         <KeyBinding Key="Escape" Command="{Binding StopActiveOperationCommand}" />
         <KeyBinding
             Key="L"
@@ -61,16 +69,26 @@
         <!--  ===== TOOLBAR =====  -->
         <views:ToolbarView Grid.Row="1" DataContext="{Binding Toolbar}" />
 
-        <!--  ===== NOTIFICATION BANNER (shows active workflow's messages) =====  -->
+        <!--  ===== NOTIFICATION BANNER (shows active workflow's messages; StoreRestore takes priority when running) =====  -->
         <StackPanel Grid.Row="2">
             <ui:InfoBar
                 Margin="8,4,8,0"
-                DataContext="{Binding DataContext.ActiveState, RelativeSource={RelativeSource AncestorType=Window}}"
                 IsClosable="True"
                 IsOpen="{Binding IsBannerOpen, Mode=TwoWay}"
                 Severity="{Binding BannerSeverity}"
                 Title="{Binding BannerTitle}"
-                Message="{Binding BannerMessage}" />
+                Message="{Binding BannerMessage}">
+                <ui:InfoBar.Style>
+                    <Style TargetType="ui:InfoBar">
+                        <Setter Property="DataContext" Value="{Binding DataContext.ActiveState, RelativeSource={RelativeSource AncestorType=Window}}" />
+                        <Style.Triggers>
+                            <DataTrigger Binding="{Binding DataContext.StoreRestore.IsRunning, RelativeSource={RelativeSource AncestorType=Window}}" Value="True">
+                                <Setter Property="DataContext" Value="{Binding DataContext.StoreRestoreState, RelativeSource={RelativeSource AncestorType=Window}}" />
+                            </DataTrigger>
+                        </Style.Triggers>
+                    </Style>
+                </ui:InfoBar.Style>
+            </ui:InfoBar>
 
             <!--  Update available banner (self-contained component)  -->
             <views:UpdateInfoBarView DataContext="{Binding Update}" />
@@ -106,6 +124,9 @@
                                 <Setter Property="Visibility" Value="Visible" />
                                 <Style.Triggers>
                                     <DataTrigger Binding="{Binding Toolbar.SelectedMode}" Value="Compare">
+                                        <Setter Property="Visibility" Value="Collapsed" />
+                                    </DataTrigger>
+                                    <DataTrigger Binding="{Binding Toolbar.SelectedMode}" Value="Store">
                                         <Setter Property="Visibility" Value="Collapsed" />
                                     </DataTrigger>
                                 </Style.Triggers>
@@ -202,12 +223,28 @@
                     </Grid>
 
                     <!--  Connection panels  -->
-                    <Grid Grid.Row="1" ColumnDefinitions="*,Auto,*"
-                          IsEnabled="{Binding Context.IsBusy, Converter={StaticResource InvertBoolConverter}}">
-                        <views:ConnectionView Grid.Column="0" DataContext="{Binding Context.Source}" />
+                    <StackPanel Grid.Row="1" Orientation="Horizontal"
+                                IsEnabled="{Binding Context.IsBusy, Converter={StaticResource InvertBoolConverter}}">
+                        <!--  Source panel + Store action button  -->
+                        <StackPanel Orientation="Vertical">
+                            <views:ConnectionView DataContext="{Binding Context.Source}" MinWidth="300" />
+                            <ui:Button
+                                Margin="0,8,0,0"
+                                HorizontalAlignment="Center"
+                                Command="{Binding DataContext.StoreRestore.StartStoreCommand, RelativeSource={RelativeSource AncestorType=Window}}"
+                                Style="{StaticResource CommandBarPrimaryButtonStyle}"
+                                ToolTip="Store database to catalog (Ctrl+Shift+S)">
+                                <ui:Button.Content>
+                                    <StackPanel Orientation="Horizontal">
+                                        <ui:SymbolIcon Symbol="Save16" Margin="0,0,6,0" />
+                                        <TextBlock Text="Store" />
+                                    </StackPanel>
+                                </ui:Button.Content>
+                            </ui:Button>
+                        </StackPanel>
 
-                        <!--  Group action buttons between source and destination  -->
-                        <StackPanel Grid.Column="1" Orientation="Vertical" VerticalAlignment="Center" Margin="8,0" DataContext="{Binding Connections}">
+                        <!--  Group action buttons  -->
+                        <StackPanel Orientation="Vertical" VerticalAlignment="Center" Margin="8,0" DataContext="{Binding Connections}">
                             <ui:Button
                                 Appearance="Transparent"
                                 Command="{Binding CreateGroupFromCurrentCommand}"
@@ -225,10 +262,26 @@
                             </ui:Button>
                         </StackPanel>
 
-                        <views:ConnectionView Grid.Column="2" DataContext="{Binding Context.Destination}" />
-                    </Grid>
+                        <!--  Destination panel + Restore action button  -->
+                        <StackPanel Orientation="Vertical">
+                            <views:ConnectionView DataContext="{Binding Context.Destination}" MinWidth="300" />
+                            <ui:Button
+                                Margin="0,8,0,0"
+                                HorizontalAlignment="Center"
+                                Command="{Binding DataContext.StoreRestore.StartRestoreCommand, RelativeSource={RelativeSource AncestorType=Window}}"
+                                Style="{StaticResource CommandBarPrimaryButtonStyle}"
+                                ToolTip="Restore catalog to database (Ctrl+Shift+R)">
+                                <ui:Button.Content>
+                                    <StackPanel Orientation="Horizontal">
+                                        <ui:SymbolIcon Symbol="ArrowUpload16" Margin="0,0,6,0" />
+                                        <TextBlock Text="Restore" />
+                                    </StackPanel>
+                                </ui:Button.Content>
+                            </ui:Button>
+                        </StackPanel>
+                    </StackPanel>
 
-                    <!--  Progress (DataContext switches by mode)  -->
+                    <!--  Progress (DataContext switches by mode; StoreRestore takes priority when running)  -->
                     <views:ProgressView Grid.Row="2">
                         <views:ProgressView.Style>
                             <Style TargetType="views:ProgressView">
@@ -236,6 +289,9 @@
                                 <Style.Triggers>
                                     <DataTrigger Binding="{Binding DataContext.Toolbar.SelectedMode, RelativeSource={RelativeSource AncestorType=Window}}" Value="Compare">
                                         <Setter Property="DataContext" Value="{Binding DataContext.Compare, RelativeSource={RelativeSource AncestorType=Window}}" />
+                                    </DataTrigger>
+                                    <DataTrigger Binding="{Binding DataContext.StoreRestore.IsRunning, RelativeSource={RelativeSource AncestorType=Window}}" Value="True">
+                                        <Setter Property="DataContext" Value="{Binding DataContext.StoreRestore, RelativeSource={RelativeSource AncestorType=Window}}" />
                                     </DataTrigger>
                                 </Style.Triggers>
                             </Style>

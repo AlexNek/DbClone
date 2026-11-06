@@ -7,6 +7,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+- Store / Restore operation — writes a connected database into a `.rdbx` catalog and restores one into a connected database, built on the DatabaseInterchange product contract
+  - Store button on the Source connection panel and Restore button on the Destination connection panel — always visible, clicking either button sets the direction and starts the operation; keyboard shortcuts Ctrl+Shift+S and Ctrl+Shift+R
+  - Pause/Stop controls always visible in the toolbar, enabled when a Store/Restore operation is running
+  - Progress, log, and notification banner automatically show Store/Restore state when an operation is running, otherwise show the active mode (Copy / Compare) state
+  - Settings panel with chunk size, rows per chunk, data inclusion, snapshot consistency, pack-after-store, and unsupported-feature policy
+  - The interchange product (DatabaseInterchange) is not yet integrated; the operation shell is fully functional and will activate once the product arrives (tracked in `refactors/04/implementationChecklist.md`)
+
+### Changed
+- Internal architecture refactored onto a single-adapter boundary (see `refactors/08/adapterConceptDesign.md`): the application now meets the database engine through one contract (`DbAdapter.Definitions`) with seven role interfaces (`IMetadataSource`, `IDatabaseAdmin`, `IDatabaseCleaner`, `ITableComparer`, `ICopySession`, `IConnectionStringSyntax`, `IPlatformResolver`), filled by `DbAdapter.PostgreSql`. Orchestration (connection verification, metadata reading, table filtering, permissions, backup, target cleaning, copy execution, result mapping) moved from the UI into `DbClone.Application` behind `ICopyWorkflow`, `ITableCatalogService`, and `IComparisonService`. `App.xaml.cs` remains the only file that constructs the adapter; no other UI file names an engine type. `CanonicalModel` holds the shared language (model records, copy options/results, platform data, enums); `DbAdapter.Definitions` holds the boundary DTOs (`DatabaseTarget`, `CopyRequest`, `AdapterInfo`) and the role interfaces. No user-visible behavior changes — Copy, Compare, and Backup work exactly as before
+
 ## [1.1.1] - 2026-08-12
 
 ### Fixed

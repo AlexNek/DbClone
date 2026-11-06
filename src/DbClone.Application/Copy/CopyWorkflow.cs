@@ -67,6 +67,7 @@ public sealed class CopyWorkflow : ICopyWorkflow
         ICopyProgressSink listener,
         CancellationToken cancellationToken)
     {
+        ConnectionInfo? backupDestination = null;
         try
         {
             _logger.LogInformation("Copy operation started");
@@ -172,7 +173,6 @@ public sealed class CopyWorkflow : ICopyWorkflow
             // Step 4: Handle backup mode (create new database)
             var destinationToUse = destination;
             var destTargetToUse = destTarget;
-            ConnectionInfo? backupDestination = null;
 
             if (options.CopyMode == ECopyMode.Backup)
             {
@@ -369,7 +369,12 @@ public sealed class CopyWorkflow : ICopyWorkflow
             listener.OnPhaseChanged(ECopyOperationPhase.Cancelled);
             listener.OnStatusMessageChanged("Operation cancelled");
             listener.OnLogMessage("Operation cancelled by user");
-            return new CopyWorkflowResult { Success = false, ErrorMessage = "Operation cancelled" };
+            return new CopyWorkflowResult
+                       {
+                           Success = false,
+                           ErrorMessage = "Operation cancelled",
+                           BackupDestination = backupDestination
+                       };
         }
         catch (Exception ex)
         {
@@ -386,7 +391,10 @@ public sealed class CopyWorkflow : ICopyWorkflow
                     ex));
             return new CopyWorkflowResult
                        {
-                           Success = false, ErrorMessage = ex.Message, Exception = ex
+                           Success = false,
+                           ErrorMessage = ex.Message,
+                           Exception = ex,
+                           BackupDestination = backupDestination
                        };
         }
         finally

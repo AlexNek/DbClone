@@ -11,6 +11,7 @@ using DbClone.Application.Interfaces;
 using DbClone.UI.Models;
 using DbClone.UI.Services;
 using DbClone.UI.Settings;
+using DbClone.UI.ViewModels.Workspaces.StoreRestore;
 
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
@@ -51,7 +52,7 @@ public sealed partial class MainViewModel : ObservableObject
 
     private readonly ITableSelectionService _tableSelectionService;
 
-    /// <summary>The two workflow components behind their common contract.</summary>
+    /// <summary>The three workflow components behind their common contract.</summary>
     private readonly IWorkflowViewModel[] _workflows;
 
     // ── App-level state ─────────────────────────────────────────────────────────
@@ -68,9 +69,15 @@ public sealed partial class MainViewModel : ObservableObject
     /// Workflow state of the currently selected workspace mode — the single source of
     /// truth for "which workflow is displayed". XAML and the window code-behind consume
     /// this instead of resolving the mode themselves.
+    /// Store/Restore is not a mode; when it runs, its state is exposed separately via
+    /// <see cref="StoreRestoreState"/>.
     /// </summary>
     public WorkflowState ActiveState =>
-        Toolbar.SelectedMode == EWorkspaceMode.Compare ? Compare.State : Copy.State;
+        Toolbar.SelectedMode switch
+        {
+            EWorkspaceMode.Compare => Compare.State,
+            _ => Copy.State
+        };
 
     public CompareViewModel Compare { get; }
 
@@ -85,6 +92,12 @@ public sealed partial class MainViewModel : ObservableObject
 
     /// <summary>Copy workflow state for XAML bindings (banner, objects strip, status bar).</summary>
     public WorkflowState CopyState => Copy.State;
+
+    /// <summary>Store/Restore workspace for XAML bindings (commands, direction).</summary>
+    public StoreRestoreViewModel StoreRestore { get; private set; }
+
+    /// <summary>Store/Restore workflow state for XAML bindings.</summary>
+    public WorkflowState StoreRestoreState => StoreRestore.State;
 
     public LogPaneViewModel Log { get; }
 
@@ -122,7 +135,8 @@ public sealed partial class MainViewModel : ObservableObject
         ITableSelectionService tableSelectionService,
         ITableSelectionPresetStore presetStore,
         ITableFilterApplier filterApplier,
-        ITableSelectionPresetNameValidator presetNameValidator)
+        ITableSelectionPresetNameValidator presetNameValidator,
+        Application.Interchange.IInterchangeService interchangeService)
     {
         _connectionStore = connectionStore;
         _serverAdmin = serverAdmin;
@@ -201,6 +215,12 @@ public sealed partial class MainViewModel : ObservableObject
             Settings,
             Context);
 
+        StoreRestore = new StoreRestoreViewModel(
+            interchangeService,
+            settingsPersister,
+            Settings,
+            serviceProvider.GetRequiredService<ILogger<StoreRestoreViewModel>>());
+
         _workflows = [Copy, Compare];
 
         // Route elapsed time to the currently running workflow (symmetric via IWorkflowViewModel)
@@ -211,7 +231,18 @@ public sealed partial class MainViewModel : ObservableObject
                 running.State.ElapsedTime = elapsed;
         };
 
-        Log = new LogPaneViewModel(Copy.State, Compare.State);
+        // Store/Restore elapsed time is routed separately (not a mode-bound workflow)
+        stateManager.ElapsedTimeUpdated += elapsed =>
+        {
+            if (StoreRestore.IsRunning)
+                StoreRestore.State.ElapsedTime = elapsed;
+        };
+
+        Log = new LogPaneViewModel(new Dictionary<EWorkspaceMode, WorkflowState>
+        {
+            [EWorkspaceMode.Copy] = Copy.State,
+            [EWorkspaceMode.Compare] = Compare.State
+        });
 
         Connections = new ConnectionSectionViewModel(
             connectionGroupStore,
@@ -230,6 +261,7 @@ public sealed partial class MainViewModel : ObservableObject
         Toolbar = new ToolbarViewModel(
             Copy,
             Compare,
+            StoreRestore,
             Log,
             Settings,
             connectionStore,
@@ -364,6 +396,7 @@ public sealed partial class MainViewModel : ObservableObject
             {
                 Copy.State.ClearResultDisplay();
                 Compare.State.ClearResultDisplay();
+                StoreRestore.State.ClearResultDisplay();
             }
         }
     }

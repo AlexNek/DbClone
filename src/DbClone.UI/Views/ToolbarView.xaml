@@ -74,6 +74,9 @@
                             <DataTrigger Binding="{Binding SelectedMode}" Value="Compare">
                                 <Setter Property="Visibility" Value="Collapsed" />
                             </DataTrigger>
+                            <DataTrigger Binding="{Binding SelectedMode}" Value="Store">
+                                <Setter Property="Visibility" Value="Collapsed" />
+                            </DataTrigger>
                         </Style.Triggers>
                     </Style>
                 </StackPanel.Style>
@@ -361,6 +364,115 @@
                     </ui:Button.Icon>
                 </ui:Button>
             </StackPanel>
+
+            <!--  ═══ Store/Restore controls (always visible, enabled when running) ═══  -->
+            <ui:Button
+                AutomationProperties.Name="Pause Store/Restore"
+                Command="{Binding StoreRestore.PauseCommand}"
+                IsEnabled="{Binding StoreRestore.IsRunning}"
+                Style="{StaticResource CommandBarButtonStyle}"
+                ToolTip="Pause/Resume Store/Restore (Ctrl+P)">
+                <ui:Button.Icon>
+                    <ui:SymbolIcon Symbol="Pause16" />
+                </ui:Button.Icon>
+            </ui:Button>
+            <ui:Button
+                AutomationProperties.Name="Stop Store/Restore"
+                Command="{Binding StoreRestore.StopCommand}"
+                IsEnabled="{Binding StoreRestore.IsRunning}"
+                Style="{StaticResource CommandBarButtonStyle}"
+                ToolTip="Stop Store/Restore (Escape)">
+                <ui:Button.Icon>
+                    <ui:SymbolIcon Symbol="Dismiss16" />
+                </ui:Button.Icon>
+            </ui:Button>
+            <!--  Store/Restore options popup  -->
+            <Grid>
+                <ui:Button
+                    x:Name="StoreOptionsButton"
+                    AutomationProperties.Name="Store/Restore Options"
+                    Click="StoreOptionsButton_Click"
+                    Content="Store Options"
+                    IsEnabled="{Binding Context.IsBusy, Converter={StaticResource InvertBoolConverter}}"
+                    Style="{StaticResource CommandBarButtonStyle}"
+                    ToolTip="Store/Restore Options">
+                    <ui:Button.Icon>
+                        <ui:SymbolIcon Symbol="Settings16" />
+                    </ui:Button.Icon>
+                </ui:Button>
+                <Popup
+                    x:Name="StoreOptionsPopup"
+                    AllowsTransparency="True"
+                    Placement="Bottom"
+                    PlacementTarget="{Binding ElementName=StoreOptionsButton}"
+                    StaysOpen="False">
+                    <Border
+                        Width="360"
+                        Margin="0,2,0,0"
+                        Padding="16"
+                        Background="{ui:ThemeResource SolidBackgroundFillColorBaseBrush}"
+                        BorderBrush="{ui:ThemeResource ControlStrokeColorDefaultBrush}"
+                        BorderThickness="1"
+                        CornerRadius="8">
+                        <Border.Effect>
+                            <DropShadowEffect
+                                BlurRadius="16"
+                                Direction="270"
+                                Opacity="0.3"
+                                ShadowDepth="4"
+                                Color="Black" />
+                        </Border.Effect>
+                        <StackPanel>
+                            <TextBlock
+                                Margin="0,0,0,8"
+                                FontWeight="SemiBold"
+                                Text="Catalog Location" />
+                            <TextBlock
+                                Margin="0,0,0,4"
+                                FontSize="11"
+                                Foreground="{ui:ThemeResource TextFillColorSecondaryBrush}"
+                                Text="Root folder for all catalogs. Subfolders are auto-created per operation."
+                                TextWrapping="Wrap" />
+                            <TextBox
+                                Margin="0,0,0,8"
+                                Text="{Binding Settings.StoreRestore.DefaultCatalogDirectory, UpdateSourceTrigger=PropertyChanged}"
+                                ToolTip="Root catalog directory" />
+                            <TextBlock
+                                Margin="0,0,0,4"
+                                FontWeight="SemiBold"
+                                Text="Subfolder Pattern" />
+                            <TextBlock
+                                Margin="0,0,0,4"
+                                FontSize="11"
+                                Foreground="{ui:ThemeResource TextFillColorSecondaryBrush}"
+                                Text="Placeholders: {Database} = source database name, {timestamp} = YYYY-MM-DD_HH-mm"
+                                TextWrapping="Wrap" />
+                            <TextBox
+                                Margin="0,0,0,12"
+                                Text="{Binding Settings.StoreRestore.CatalogSubfolderPattern, UpdateSourceTrigger=PropertyChanged}"
+                                ToolTip="Subfolder naming pattern" />
+                            <TextBlock
+                                Margin="0,0,0,8"
+                                FontWeight="SemiBold"
+                                Text="Store Settings" />
+                            <CheckBox
+                                Margin="0,0,0,4"
+                                Content="Include table data"
+                                IsChecked="{Binding Settings.StoreRestore.IncludeData}" />
+                            <CheckBox
+                                Margin="0,0,0,4"
+                                Content="Pack catalog after store (.rdbx.zip)"
+                                IsChecked="{Binding Settings.StoreRestore.PackAfterStore}" />
+                            <TextBlock
+                                Margin="0,8,0,4"
+                                FontSize="11"
+                                Foreground="{ui:ThemeResource TextFillColorSecondaryBrush}"
+                                Text="Chunk size and rows-per-chunk are advanced settings configured in settings.json."
+                                TextWrapping="Wrap" />
+                        </StackPanel>
+                    </Border>
+                </Popup>
+            </Grid>
 
             <Border
                 Width="1"
