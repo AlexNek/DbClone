@@ -3,49 +3,73 @@
 ## Layer Dependency Direction (strict one-way)
 
 ```
-DbClone.PostgreSql  →  DbClone.Application  ←  DbClone.UI
-                              (interfaces only)
+DbClone.UI → DbClone.Application → DbAdapter.Definitions → CanonicalModel
+                    (interfaces/DTOs)   (roles, shared records,
+                                          the execution loop)
+
+DbAdapter.PostgreSql → DbAdapter.Definitions, CanonicalModel
+plugins/postgresql   → a publish of DbAdapter.PostgreSql; never a project reference
 ```
 
-- **DbClone.Application** — interfaces, DTOs, models, and shared provider-agnostic orchestration (e.g. `CopyPipeline`). NO provider-specific implementations. Only `Microsoft.Extensions.Logging.Abstractions` as NuGet dependency.
-- **DbClone.PostgreSql** — implements Application interfaces with PostgreSQL-specific code. References Application. Registers pipeline stages.
-- **DbClone.UI** — references Application (interfaces/DTOs) and PostgreSql **only for DI registration at the composition root** (`App.xaml.cs`). Must NOT use PostgreSql types in any other file.
+- **DbAdapter.Definitions** — the shared boundary: role interfaces, adapter records (`AdapterInfo`, `DatabaseTarget`, …), `IConnectionStringSyntax`, `IConnectionTextFormat`, `IModelComparer`, and the provider-neutral execution loop (`ICopyStage`, `ICopyPipeline`, `CopyPipeline`, `CopyContext`) plus the platform file reader (`PlatformDefinitionLoader`, `PlatformSchemaResolver` contract, `VersionRangeParser`). Holds **no SQL, no engine name, no driver** — enforced by a test. NuGet dependencies: `Microsoft.Extensions.Logging.Abstractions` only.
+- **CanonicalModel** — the model records, enums (including `ESslMode`), and table identity. Names no engine.
+- **DbClone.Application** — the plugin catalog (`IAdapterCatalog`/`DatabaseAdapterCatalog`), DTOs, copy workflow, comparison, selection, settings, reports. References Definitions and CanonicalModel only. NO provider-specific implementations. NuGet dependencies: `Microsoft.Extensions.Logging.Abstractions` and `Microsoft.Extensions.DependencyInjection.Abstractions`.
+- **DbAdapter.PostgreSql** — implements the Definitions roles for PostgreSQL and composes its own engine graph (no DI container). Published into `plugins/postgresql`, never referenced by the UI at compile time.
+- **DbClone.UI** — project-references Application and CanonicalModel (Definitions types arrive transitively through Application). Names no engine and never reaches `DbAdapter.PostgreSql`; it may consume the engine-neutral boundary types the design places in `DbAdapter.Definitions` (`IAdapterCatalog`, `IModelComparer`, `ECompareStatus` — see `refactors/09/adapterPluginDesign.md` line 72 and 178).
 
-## Composition Root Exception
+## Adapters Are Plugins (Composition Root)
 
-`App.xaml.cs` is the composition root and is the **only** file in the UI project allowed to:
-- `using DbClone.PostgreSql;`
-- Call `services.AddPostgreSqlProvider()`
+An engine adapter is discovered from a `plugins/<dialect>` folder at startup — never constructed by name, registered as a service, or referenced in UI code. `App.xaml.cs` is the composition root and its only engine-related work is to register one `IAdapterCatalog` over `Path.Combine(AppContext.BaseDirectory, "plugins")` and build the connection-text import/export services from `IAdapterCatalog.Formats`. It contains no `using DbAdapter.PostgreSql` and no `AddPostgreSqlProvider()` call. `DbClone.UI.csproj` is the **only** file that names the adapter project, in exactly two lines: a `ReferenceOutputAssembly="false"` project reference (build ordering) and the `PublishAdapters` target that publishes it into `plugins/postgresql`.
 
-No other `.cs` file in DbClone.UI may reference the PostgreSql namespace or types.
+Selection is by the connection's dialect: `DatabaseTargetFactory` resolves the adapter through the catalog (`null` engine → the single installed adapter; an unknown engine → a reported error, never a silent fallback).
 
-## Forbidden in DbClone.UI (except App.xaml.cs)
+## Forbidden in DbClone.UI
 
 - ❌ `using Npgsql;` — never import
 - ❌ `new NpgsqlConnection(...)` — never open a database connection
 - ❌ `new NpgsqlConnectionStringBuilder(...)` — never parse/build connection strings directly
 - ❌ Any SQL string (`SELECT`, `CREATE`, `DROP`, `INSERT`, `UPDATE`, `DELETE`, `pg_`, `information_schema`)
-- ❌ `using DbClone.PostgreSql;` — only in App.xaml.cs
+- ❌ `using DbAdapter.PostgreSql;` — no engine type reaches the UI
+- ❌ `using DbAdapter.Definitions;` in any UI file other than `App.xaml.cs` (composition root, needs `IAdapterCatalog` + `IModelComparer`), `Services/HtmlReportService.cs` and `ViewModels/CompareViewModel.cs` (both need `ECompareStatus`); no other Definitions role may reach the UI — talk to `IAdapterCatalog`-backed Application services for everything else
 - ❌ `new PgSqlExecutor(...)`, `new PgMetadataReader(...)` — never instantiate provider types
-- ❌ `PackageReference` to `Npgsql` — remove if present; Npgsql arrives transitively through PostgreSql
+- ❌ `PackageReference` to `Npgsql` — never add; Npgsql lives only in the plugin folder
+- ❌ An engine default: no port (`5432`), username (`postgres`), TLS name (`Prefer`/`Require`/`Disable`), clipboard format id (`pg-npgsql`), system schema, dialect string, or `EDatabaseProvider` in any UI file. Defaults come from `IPlatformService.GetConnectionDefaults`; the TLS vocabulary and default format from `IConnectionTextService`; the provider identity from the import/detection result.
 
 ## Forbidden in DbClone.Application
 
 - ❌ Provider-specific implementations (no PostgreSQL, MySQL, etc. — those go in provider projects)
-- ❌ Any NuGet package beyond `Microsoft.Extensions.Logging.Abstractions`
+- ❌ Any NuGet package beyond `Microsoft.Extensions.Logging.Abstractions` and `Microsoft.Extensions.DependencyInjection.Abstractions`
 - ❌ `using Npgsql;` or any provider-specific import
+- ❌ Interchange product types (format, transform, engine block) — the `Interchange/` folder wraps the product behind app DTOs; no product type leaks into view models or other Application files
 - ✅ Shared orchestration code that all providers use (e.g. `CopyPipeline`) is allowed
+- ✅ `Interchange/` folder: app-level DTOs (requests, results, progress, issues) and `IInterchangeService` / `InterchangeService` wrapper
 
-## Forbidden in DbClone.PostgreSql
+## Interchange consumer rules (Store / Restore)
 
-- ❌ References to DbClone.UI (circular dependency)
+The interchange product (DatabaseInterchange) is complete on its own. DbClone consumes it through `IInterchangeService` in `DbClone.Application/Interchange/`. The rules:
+
+1. **The product is complete; the app is a consumer.** Export, import, verification, packing and the PostgreSQL engine block all live in the interchange projects. `InterchangeService` builds a `DatabaseTarget` through `DatabaseTargetFactory` and delegates to the product.
+2. **UI talks to Application, not to the product.** The UI sees `IInterchangeService` and app DTOs only. It does not reference the interchange projects, cannot parse a catalog, and cannot construct a model.
+3. **`App.xaml.cs`** is the one place that calls `services.AddInterchangeServices()`. When the product arrives, it will also construct the exchange runtime over the adapter already held there.
+4. **No engine mapping in DbClone.** The app contains no metadata-to-model conversion, no DDL generation, no value encoding for the catalog. If a change here would require writing those, it belongs in the product.
+5. **Settings are app preferences.** Chunk size, pack-after-store, restore mode and the unsupported-object policy live in `StoreRestoreOptions` on `UserSettings`, not in the product.
+
+## Forbidden in DbAdapter.PostgreSql (the engine block)
+
+- ❌ References to `DbClone.Application` or `DbClone.UI` (the block depends only on `DbAdapter.Definitions` + `CanonicalModel`; the `ProjectReference` to `DbClone.Application` is removed)
+- ❌ A DI container or an `AddPostgreSqlProvider()` extension — the block composes its own engine graph in a self-contained `Compose(ILoggerFactory, string pluginDirectory)` root called from its adapter constructor
+- ❌ Reading platform/data files from `AppContext.BaseDirectory` — a plugin reads its own files from the `pluginDirectory` it is handed
 
 ## How to add a new database provider
 
-1. Create `DbClone.MySql` project referencing `DbClone.Application`
-2. Implement `ITableInfoProvider`, `IDatabaseMaintenanceProvider`, `ITableComparerProvider`, `IConnectionStringService`
-3. Add a static `AddMySqlProvider(this IServiceCollection)` extension method
-4. In `App.xaml.cs`, call `services.AddMySqlProvider()` — no other UI changes
+A new engine is a plugin, not a product edit. No DI registration and no UI change are required.
+
+1. Create a provider project (e.g. `DbAdapter.MySql`) that references only `DbAdapter.Definitions` and `CanonicalModel` — never `DbClone.Application` or `DbClone.UI`
+2. Implement the Definitions roles (`IDatabaseAdapter`, `IDatabaseAdmin`, `IMetadataSource`, `ITableComparer`, `ICopySession`, `IConnectionStringSyntax`, `IPlatformResolver`, …) and expose a public constructor taking `(ILoggerFactory, string pluginDirectory)`; return engine-specific comparers from `CreateModelComparers()` and platform data from files inside `pluginDirectory`
+3. Declare `Info.Dialect` (non-empty, unique across plugins)
+4. Publish the project into `plugins/<dialect>` (e.g. add a `PublishAdapters`-style target to `DbClone.UI.csproj` running `dotnet publish` with `-o $(TargetDir)plugins\<dialect>`). The catalog discovers it at startup — the UI and Application name no engine and change nothing
+
+The catalog binds the plugin's shared contract assemblies (`DbAdapter.Definitions`, `CanonicalModel`, `Microsoft.Extensions.*`) from the host's default context, so a loaded adapter implements the host's `IDatabaseAdapter` — a single type identity across contexts.
 
 ## Connection string handling
 

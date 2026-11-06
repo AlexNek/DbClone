@@ -6,7 +6,7 @@ namespace DbClone.UI.Models;
 /// <summary>
 /// Deserializes the ConnectionType field as a lowercase stable platform id.
 /// Returns null for unrecognized legacy formats (integers, nulls) — the caller
-/// resolves null to the base engine default via PlatformSchemaResolver.
+/// resolves null to the base engine default supplied by the active adapter.
 /// No engine or platform knowledge in this converter.
 /// </summary>
 public sealed class ConnectionTypeConverter : JsonConverter<string?>

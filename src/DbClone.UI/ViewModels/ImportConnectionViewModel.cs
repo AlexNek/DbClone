@@ -6,6 +6,7 @@ using CommunityToolkit.Mvvm.Input;
 using DbClone.Application.DTOs;
 using DbClone.Application.Enums;
 using DbClone.Application.Interfaces;
+using CanonicalModel.DTOs;
 
 namespace DbClone.UI.ViewModels;
 

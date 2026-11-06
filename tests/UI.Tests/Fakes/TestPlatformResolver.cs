@@ -1,21 +1,23 @@
-using DbClone.Application.Platforms;
-
-using Microsoft.Extensions.Logging.Abstractions;
+using CanonicalModel.Platforms;
+using DbClone.Application.Interfaces;
 
 namespace UI.Tests.Fakes;
 
 /// <summary>
-/// Provides a <see cref="PlatformSchemaResolver"/> for tests.
-/// Points to a non-existent directory so no platform files are loaded
-/// and DetectPlatformId always returns null (generic PostgreSQL).
+/// Provides a fake <see cref="IPlatformService"/> for tests: an empty platform list,
+/// the plain-engine defaults, and <c>null</c> host detection (generic PostgreSQL).
 /// </summary>
 public static class TestPlatformResolver
 {
-    public static PlatformSchemaResolver Create()
+    public static IPlatformService Create() => new FakePlatformService();
+
+    private sealed class FakePlatformService : IPlatformService
     {
-        var loader = new PlatformDefinitionLoader(
-            Path.Combine(Path.GetTempPath(), "__nonexistent_platforms__"),
-            NullLogger<PlatformDefinitionLoader>.Instance);
-        return new PlatformSchemaResolver(loader, NullLogger<PlatformSchemaResolver>.Instance);
+        public IReadOnlyList<PlatformEntry> GetAllPlatforms() => [];
+
+        public string? DetectPlatformId(string host) => null;
+
+        public PlatformDefaults GetConnectionDefaults(string? platformId) =>
+            new(Port: 5432, SslMode: "Prefer", Username: "postgres");
     }
 }

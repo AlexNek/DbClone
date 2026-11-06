@@ -1,4 +1,4 @@
-using DbClone.Application.Enums;
+using CanonicalModel.Enums;
 
 namespace DbClone.Application.Models;
 
@@ -26,7 +26,7 @@ public sealed class DatabaseConnection
 
     public int Port { get; set; } = 5432;
 
-    public EDatabaseProvider Provider { get; set; }
+    public string Provider { get; set; } = string.Empty;
 
     public ESslMode SslMode { get; set; } = ESslMode.Prefer;
 

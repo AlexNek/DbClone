@@ -23,8 +23,8 @@ public class GroupSaveValidationTests
         // Arrange
         var connectionStore = new InMemoryConnectionStore();
         var groupStore = new InMemoryConnectionGroupStore();
-        var connectionStringService = Substitute.For<IConnectionStringService>();
-        var maintenanceProvider = Substitute.For<IDatabaseMaintenanceProvider>();
+        var connectionStringService = Substitute.For<IConnectionTextService>();
+        var maintenanceProvider = Substitute.For<IServerAdminService>();
 
         var vm = new UnifiedConnectionManagerViewModel(
             connectionStore,
@@ -60,8 +60,8 @@ public class GroupSaveValidationTests
         // Arrange
         var connectionStore = new InMemoryConnectionStore();
         var groupStore = new InMemoryConnectionGroupStore();
-        var connectionStringService = Substitute.For<IConnectionStringService>();
-        var maintenanceProvider = Substitute.For<IDatabaseMaintenanceProvider>();
+        var connectionStringService = Substitute.For<IConnectionTextService>();
+        var maintenanceProvider = Substitute.For<IServerAdminService>();
 
         destination.Id = Guid.NewGuid().ToString("N");
         connectionStore.Save(destination);
@@ -95,8 +95,8 @@ public class GroupSaveValidationTests
         // Arrange
         var connectionStore = new InMemoryConnectionStore();
         var groupStore = new InMemoryConnectionGroupStore();
-        var connectionStringService = Substitute.For<IConnectionStringService>();
-        var maintenanceProvider = Substitute.For<IDatabaseMaintenanceProvider>();
+        var connectionStringService = Substitute.For<IConnectionTextService>();
+        var maintenanceProvider = Substitute.For<IServerAdminService>();
 
         source.Id = Guid.NewGuid().ToString("N");
         connectionStore.Save(source);

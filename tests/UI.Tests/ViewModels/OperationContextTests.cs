@@ -52,8 +52,8 @@ public class OperationContextTests
 
     private static OperationContext CreateContext()
     {
-        var connectionStringService = Substitute.For<IConnectionStringService>();
-        var maintenanceProvider = Substitute.For<IDatabaseMaintenanceProvider>();
+        var connectionStringService = Substitute.For<IConnectionTextService>();
+        var maintenanceProvider = Substitute.For<IServerAdminService>();
 
         var source =
             new ConnectionViewModel(connectionStringService, maintenanceProvider, TestPlatformResolver.Create())

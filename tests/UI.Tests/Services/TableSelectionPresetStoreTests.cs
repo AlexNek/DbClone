@@ -2,6 +2,7 @@ using DbClone.Application.Models;
 using DbClone.UI.Services;
 
 using FluentAssertions;
+using CanonicalModel.Models;
 
 namespace UI.Tests.Services;
 

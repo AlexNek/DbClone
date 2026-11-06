@@ -30,8 +30,8 @@ public class GroupAutoNameTests
         // Arrange — seed store with two connections
         var connectionStore = new InMemoryConnectionStore();
         var groupStore = new InMemoryConnectionGroupStore();
-        var connectionStringService = Substitute.For<IConnectionStringService>();
-        var maintenanceProvider = Substitute.For<IDatabaseMaintenanceProvider>();
+        var connectionStringService = Substitute.For<IConnectionTextService>();
+        var maintenanceProvider = Substitute.For<IServerAdminService>();
 
         // Ensure distinct IDs
         source.Id = Guid.NewGuid().ToString("N");

@@ -1,5 +1,5 @@
 using DbClone.Application.Interfaces;
-using DbClone.Application.Models;
+using CanonicalModel.Models;
 
 namespace DbClone.Application.TableFilter;
 

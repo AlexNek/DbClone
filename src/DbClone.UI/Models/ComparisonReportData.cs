@@ -1,3 +1,5 @@
+using DbClone.Application.DTOs;
+
 namespace DbClone.UI.Models;
 
 public sealed record ComparisonReportData(

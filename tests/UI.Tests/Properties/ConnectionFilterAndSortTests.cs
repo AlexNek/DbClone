@@ -34,8 +34,8 @@ public class ConnectionFilterAndSortTests
             connectionStore.Save(conn);
 
         var groupStore = new InMemoryConnectionGroupStore();
-        var connectionStringService = Substitute.For<IConnectionStringService>();
-        var maintenanceProvider = Substitute.For<IDatabaseMaintenanceProvider>();
+        var connectionStringService = Substitute.For<IConnectionTextService>();
+        var maintenanceProvider = Substitute.For<IServerAdminService>();
 
         var vm = new UnifiedConnectionManagerViewModel(
             connectionStore,

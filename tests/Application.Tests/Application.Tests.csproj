@@ -23,7 +23,26 @@
 
   <ItemGroup>
     <ProjectReference Include="..\..\src\DbClone.Application\DbClone.Application.csproj" />
-    <ProjectReference Include="..\..\src\DbClone.PostgreSql\DbClone.PostgreSql.csproj" />
+    <ProjectReference Include="..\..\DbAdapter.PostgreSql\DbAdapter.PostgreSql.csproj" />
+    <!--
+      The P9 proof plugin (refactors/09). ReferenceOutputAssembly=false keeps the stub assembly out
+      of this test's compile surface and out of its default load context — the catalog must bind it
+      from a folder in its own PluginAssemblyLoadContext to prove single type identity across
+      contexts. The reference exists only to guarantee the stub is built before this project's
+      CopyStubPluginForCatalogTests target stages it into $(OutDir)stubplugin\ for the catalog test.
+    -->
+    <ProjectReference Include="..\DbAdapter.StubPlugin\DbAdapter.StubPlugin.csproj" ReferenceOutputAssembly="false" Private="false" />
   </ItemGroup>
+
+  <Target Name="CopyStubPluginForCatalogTests" AfterTargets="Build">
+    <PropertyGroup>
+      <_StubPluginOutput>$(MSBuildThisFileDirectory)..\DbAdapter.StubPlugin\bin\$(Configuration)\$(TargetFramework)\</_StubPluginOutput>
+    </PropertyGroup>
+    <ItemGroup>
+      <_StubPluginFile Include="$(_StubPluginOutput)DbAdapter.StubPlugin.dll" />
+      <_StubPluginFile Include="$(_StubPluginOutput)DbAdapter.StubPlugin.deps.json" />
+    </ItemGroup>
+    <Copy SourceFiles="@(_StubPluginFile)" DestinationFolder="$(OutDir)stubplugin\" SkipUnchangedFiles="true" />
+  </Target>
 
 </Project>

@@ -1,6 +1,6 @@
 using System.Windows;
 
-using DbClone.UI.Models;
+using DbClone.Application.Interfaces;
 
 namespace DbClone.UI.Views;
 

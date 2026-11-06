@@ -1,9 +1,9 @@
-using DbClone.Application.Enums;
 using DbClone.UI.ViewModels;
 
 using FluentAssertions;
 
 using Wpf.Ui.Controls;
+using CanonicalModel.Enums;
 
 namespace UI.Tests.ViewModels;
 

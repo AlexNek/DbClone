@@ -42,8 +42,8 @@ public class NewGroupResetsFormTests
         var groupStore = new InMemoryConnectionGroupStore();
         groupStore.Save(group);
 
-        var connectionStringService = Substitute.For<IConnectionStringService>();
-        var maintenanceProvider = Substitute.For<IDatabaseMaintenanceProvider>();
+        var connectionStringService = Substitute.For<IConnectionTextService>();
+        var maintenanceProvider = Substitute.For<IServerAdminService>();
 
         var vm = new UnifiedConnectionManagerViewModel(
             connectionStore,

@@ -23,7 +23,7 @@
 
   <ItemGroup>
     <ProjectReference Include="..\..\src\DbClone.Application\DbClone.Application.csproj" />
-    <ProjectReference Include="..\..\src\DbClone.PostgreSql\DbClone.PostgreSql.csproj" />
+    <ProjectReference Include="..\..\DbAdapter.PostgreSql\DbAdapter.PostgreSql.csproj" />
   </ItemGroup>
 
 </Project>

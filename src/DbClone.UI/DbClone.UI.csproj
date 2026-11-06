@@ -16,8 +16,14 @@
   </ItemGroup>
 
   <ItemGroup>
+    <ProjectReference Include="..\..\CanonicalModel\CanonicalModel.csproj" />
     <ProjectReference Include="..\DbClone.Application\DbClone.Application.csproj" />
-    <ProjectReference Include="..\DbClone.PostgreSql\DbClone.PostgreSql.csproj" />
+    <!-- The engine project is referenced only for build ordering, so a plain build produces a
+         populated plugins folder. ReferenceOutputAssembly=false keeps the engine assembly out of
+         the application output and its types out of the UI's compile surface; the PublishAdapters
+         target below publishes it into $(TargetDir)plugins\<dialect> where the catalog reads it
+         (refactors/09 P10). This is the only file under src that names an adapter project. -->
+    <ProjectReference Include="..\..\DbAdapter.PostgreSql\DbAdapter.PostgreSql.csproj" ReferenceOutputAssembly="false" />
   </ItemGroup>
 
   <ItemGroup>
@@ -40,5 +46,17 @@
       <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
     </Content>
   </ItemGroup>
+
+  <!-- Publish each engine project into the application output's plugins\<dialect> folder so the
+       catalog can discover and load it at runtime. Runs after a plain Build (dev runs find the
+       engine) and after Publish (the installer harvests the same folder). The engine is published
+       from its own project, never copied from the UI's compile output. -->
+  <Target Name="PublishAdapters" AfterTargets="Build;Publish">
+    <PropertyGroup>
+      <_PluginsOut>$(TargetDir)plugins\postgresql</_PluginsOut>
+    </PropertyGroup>
+    <Exec Command="dotnet publish &quot;$(MSBuildThisFileDirectory)..\..\DbAdapter.PostgreSql\DbAdapter.PostgreSql.csproj&quot; -c $(Configuration) -o &quot;$(_PluginsOut)&quot; --nologo -v q"
+          Condition="'$(DesignTimeBuild)' != 'true'" />
+  </Target>
 
 </Project>

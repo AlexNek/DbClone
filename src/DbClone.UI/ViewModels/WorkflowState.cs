@@ -2,10 +2,10 @@ using System.Collections.ObjectModel;
 
 using CommunityToolkit.Mvvm.ComponentModel;
 
-using DbClone.Application.Enums;
 using DbClone.UI.Models;
 
 using Wpf.Ui.Controls;
+using CanonicalModel.Enums;
 
 namespace DbClone.UI.ViewModels;
 

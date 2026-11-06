@@ -45,7 +45,7 @@ public sealed class AppInfoTests
     [Fact]
     public void FullTitle_has_expected_format()
     {
-        // "DbClone — PostgreSQL Database Copy Tool v1.2.3..."
-        AppInfo.FullTitle.Should().StartWith("DbClone — PostgreSQL Database Copy Tool v");
+        // "DbClone — Database Copy Tool v1.2.3..."
+        AppInfo.FullTitle.Should().StartWith("DbClone — Database Copy Tool v");
     }
 }

@@ -1,4 +1,5 @@
 using DbClone.Application.DTOs;
+using CanonicalModel.DTOs;
 
 namespace DbClone.Application.Interfaces;
 
@@ -12,7 +13,7 @@ public interface IConnectionImportService
     DetectionResult Detect(string text);
 
     /// <summary>Returns all registered formats (for UI display).</summary>
-    IReadOnlyList<IConnectionFormat> GetAllFormats();
+    IReadOnlyList<ConnectionFormatInfo> GetAllFormats();
 
     /// <summary>Imports a raw connection string, auto-detecting the format.</summary>
     ImportResult Import(string text);

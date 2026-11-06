@@ -1,8 +1,8 @@
-using DbClone.Application.Enums;
 using DbClone.UI.Models;
 using DbClone.UI.ViewModels;
 
 using FluentAssertions;
+using CanonicalModel.Enums;
 
 namespace UI.Tests.ViewModels;
 
@@ -220,12 +220,38 @@ public class LogPaneViewModelTests
         copy.IsLogPaneExpanded.Should().BeFalse();
     }
 
+    [Fact]
+    public void All_modes_have_independent_log_collections()
+    {
+        var copyState = new WorkflowState();
+        var compareState = new WorkflowState();
+        copyState.Log("Copy 1");
+        compareState.Log("Compare 1");
+        compareState.Log("Compare 2");
+
+        var vm = new LogPaneViewModel(new Dictionary<EWorkspaceMode, WorkflowState>
+        {
+            [EWorkspaceMode.Copy] = copyState,
+            [EWorkspaceMode.Compare] = compareState
+        });
+
+        vm.SetActiveMode(EWorkspaceMode.Copy);
+        vm.LogMessages.Should().HaveCount(1);
+
+        vm.SetActiveMode(EWorkspaceMode.Compare);
+        vm.LogMessages.Should().HaveCount(2);
+    }
+
     private static (LogPaneViewModel vm, WorkflowState copyState, WorkflowState compareState)
         CreateViewModel()
     {
         var copyState = new WorkflowState();
         var compareState = new WorkflowState();
-        var vm = new LogPaneViewModel(copyState, compareState);
+        var vm = new LogPaneViewModel(new Dictionary<EWorkspaceMode, WorkflowState>
+        {
+            [EWorkspaceMode.Copy] = copyState,
+            [EWorkspaceMode.Compare] = compareState
+        });
         return (vm, copyState, compareState);
     }
 }

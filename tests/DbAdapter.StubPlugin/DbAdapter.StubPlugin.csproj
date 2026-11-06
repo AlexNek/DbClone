@@ -1,0 +1,35 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <!--
+    The P9 proof plugin (refactors/09). A self-contained, driver-free engine adapter compiled as
+    its own assembly so the plugin catalog can discover it from a folder exactly the way it
+    discovers DbAdapter.PostgreSql — in-memory metadata, two pipeline stages, no SQL, no driver.
+    It references ONLY the shared contract projects (Definitions + CanonicalModel) plus the logging
+    abstraction, never DbClone.Application or DbClone.UI, mirroring the target dependency graph.
+    At load time the catalog binds DbAdapter.Definitions / CanonicalModel / Microsoft.Extensions.*
+    from the host's default context, so this assembly implements the host's IDatabaseAdapter — the
+    single type identity the catalog test asserts. It is built only as test infrastructure and is
+    never referenced with ReferenceOutputAssembly by any production project.
+  -->
+
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+    <IsPackable>false</IsPackable>
+    <NoWarn>CS1591</NoWarn>
+    <!-- The catalog's entry-assembly marker is a .dll that has a sibling .deps.json; a class
+         library emits one on build when the dependency file is generated. -->
+    <GenerateDependencyFile>true</GenerateDependencyFile>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\..\CanonicalModel\CanonicalModel.csproj" />
+    <ProjectReference Include="..\..\DbAdapter.Definitions\DbAdapter.Definitions.csproj" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Microsoft.Extensions.Logging.Abstractions" Version="10.0.9" />
+  </ItemGroup>
+
+</Project>

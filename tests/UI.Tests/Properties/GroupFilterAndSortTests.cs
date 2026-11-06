@@ -36,8 +36,8 @@ public class GroupFilterAndSortTests
         foreach (var group in groups)
             groupStore.Save(group);
 
-        var connectionStringService = Substitute.For<IConnectionStringService>();
-        var maintenanceProvider = Substitute.For<IDatabaseMaintenanceProvider>();
+        var connectionStringService = Substitute.For<IConnectionTextService>();
+        var maintenanceProvider = Substitute.For<IServerAdminService>();
 
         var vm = new UnifiedConnectionManagerViewModel(
             connectionStore,

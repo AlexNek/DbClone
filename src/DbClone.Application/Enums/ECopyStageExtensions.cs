@@ -1,3 +1,5 @@
+using CanonicalModel.Enums;
+
 namespace DbClone.Application.Enums;
 
 /// <summary>

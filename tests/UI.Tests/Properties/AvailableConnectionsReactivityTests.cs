@@ -102,8 +102,8 @@ public class AvailableConnectionsReactivityTests
         return new UnifiedConnectionManagerViewModel(
             connectionStore,
             groupStore ?? new InMemoryConnectionGroupStore(),
-            Substitute.For<IConnectionStringService>(),
-            Substitute.For<IDatabaseMaintenanceProvider>(),
+            Substitute.For<IConnectionTextService>(),
+            Substitute.For<IServerAdminService>(),
             Substitute.For<IConnectionImportService>(),
             Substitute.For<IConnectionExportService>(),
             Substitute.For<IBackupEncryptionService>(),

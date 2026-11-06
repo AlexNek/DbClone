@@ -7,9 +7,9 @@ using System.Windows.Data;
 using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
 
-using DbClone.Application.Enums;
 using DbClone.UI.Logging;
 using DbClone.UI.Models;
+using CanonicalModel.Enums;
 
 namespace DbClone.UI.ViewModels;
 
@@ -21,9 +21,7 @@ namespace DbClone.UI.ViewModels;
 /// </summary>
 public sealed partial class LogPaneViewModel : ObservableObject
 {
-    private readonly WorkflowState _compareState;
-
-    private readonly WorkflowState _copyState;
+    private readonly IReadOnlyDictionary<EWorkspaceMode, WorkflowState> _states;
 
     private WorkflowState _activeState;
 
@@ -62,22 +60,23 @@ public sealed partial class LogPaneViewModel : ObservableObject
     public string LogToggleSymbol => IsExpanded ? "▼" : "▶";
 
     public LogPaneViewModel(
-        WorkflowState copyState,
-        WorkflowState compareState)
+        IReadOnlyDictionary<EWorkspaceMode, WorkflowState> states)
     {
-        _copyState = copyState;
-        _compareState = compareState;
-        _activeState = copyState;
+        ArgumentNullException.ThrowIfNull(states);
+        _states = states;
+        _activeState = states[EWorkspaceMode.Copy];
         FilteredLogMessages = BuildFilteredView();
 
-        _copyState.PropertyChanged += OnWorkflowStateChanged;
-        _compareState.PropertyChanged += OnWorkflowStateChanged;
+        foreach (var state in states.Values)
+        {
+            state.PropertyChanged += OnWorkflowStateChanged;
+        }
     }
 
     /// <summary>Switches the visible log collection to the given workspace mode.</summary>
     public void SetActiveMode(EWorkspaceMode mode)
     {
-        var target = mode == EWorkspaceMode.Compare ? _compareState : _copyState;
+        var target = _states[mode];
         if (ReferenceEquals(_activeState, target)) return;
 
         _activeState = target;

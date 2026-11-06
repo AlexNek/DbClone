@@ -1,14 +1,18 @@
+using DbClone.Application.Copy;
 using DbClone.Application.DTOs;
 using DbClone.Application.Enums;
+using DbClone.Application.Interfaces;
 using DbClone.UI.ViewModels;
+using CanonicalModel.Enums;
+using CanonicalModel.DTOs;
 
 namespace DbClone.UI.Services;
 
 /// <summary>
-/// Bridges <see cref="ICopyProgressListener"/> events to CopyOperationViewModel UI state.
+/// Bridges <see cref="ICopyProgressSink"/> events to CopyOperationViewModel UI state.
 /// Translates orchestrator callbacks into observable property updates.
 /// </summary>
-public sealed class CopyProgressUIListener : ICopyProgressListener
+public sealed class CopyProgressUIListener : ICopyProgressSink
 {
     private readonly CopyOperationViewModel _copy;
 

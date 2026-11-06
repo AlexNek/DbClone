@@ -3,16 +3,17 @@ using System.Diagnostics;
 using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
 
-using DbClone.Application.Enums;
+using DbClone.Application.Catalog;
 using DbClone.Application.Interfaces;
-using DbClone.Application.Platforms;
 using DbClone.UI.Models;
 using DbClone.UI.Services;
 using DbClone.UI.Settings;
+using DbClone.UI.ViewModels.Workspaces.StoreRestore;
 
 using Microsoft.Extensions.Logging;
 
 using Wpf.Ui.Controls;
+using CanonicalModel.Enums;
 
 namespace DbClone.UI.ViewModels;
 
@@ -28,11 +29,11 @@ public sealed partial class ToolbarViewModel : ObservableObject
 
     private readonly IConnectionStore _connectionStore;
 
-    private readonly IConnectionStringService _connectionStringService;
+    private readonly IConnectionTextService _connectionStringService;
 
     private readonly OperationContext _ctx;
 
-    private readonly IDatabaseService _dbService;
+    private readonly ITableCatalogService _catalogService;
 
     private readonly IConnectionExportService _exportService;
 
@@ -40,9 +41,9 @@ public sealed partial class ToolbarViewModel : ObservableObject
 
     private readonly ILogger<ToolbarViewModel> _logger;
 
-    private readonly IDatabaseMaintenanceProvider _maintenanceProvider;
+    private readonly IServerAdminService _serverAdmin;
 
-    private readonly PlatformSchemaResolver _platformResolver;
+    private readonly IPlatformService _platformService;
 
     private readonly ISettingsService _settingsService;
 
@@ -56,6 +57,9 @@ public sealed partial class ToolbarViewModel : ObservableObject
 
     /// <summary>Copy VM reference for XAML command bindings.</summary>
     public CopyOperationViewModel Copy { get; }
+
+    /// <summary>Store/Restore VM reference for XAML command bindings.</summary>
+    public StoreRestoreViewModel StoreRestore { get; }
 
     /// <summary>Log VM reference for XAML command bindings.</summary>
     public LogPaneViewModel Log { get; }
@@ -73,37 +77,39 @@ public sealed partial class ToolbarViewModel : ObservableObject
     public ToolbarViewModel(
         CopyOperationViewModel copy,
         CompareViewModel compare,
+        StoreRestoreViewModel storeRestore,
         LogPaneViewModel log,
         UserSettings settings,
         IConnectionStore connectionStore,
         IConnectionGroupStore connectionGroupStore,
-        IConnectionStringService connectionStringService,
-        IDatabaseMaintenanceProvider maintenanceProvider,
+        IConnectionTextService connectionStringService,
+        IServerAdminService serverAdmin,
         IConnectionImportService importService,
         IConnectionExportService exportService,
         ISettingsService settingsService,
         IBackupEncryptionService backupEncryptionService,
-        IDatabaseService dbService,
+        ITableCatalogService catalogService,
         IUpdateService updateService,
-        PlatformSchemaResolver platformResolver,
+        IPlatformService platformService,
         ILogger<ToolbarViewModel> logger,
         OperationContext ctx)
     {
         Copy = copy;
         Compare = compare;
+        StoreRestore = storeRestore;
         Log = log;
         Settings = settings;
         _connectionStore = connectionStore;
         _connectionGroupStore = connectionGroupStore;
         _connectionStringService = connectionStringService;
-        _maintenanceProvider = maintenanceProvider;
+        _serverAdmin = serverAdmin;
         _importService = importService;
         _exportService = exportService;
         _settingsService = settingsService;
         _backupEncryptionService = backupEncryptionService;
-        _dbService = dbService;
+        _catalogService = catalogService;
         _updateService = updateService;
-        _platformResolver = platformResolver;
+        _platformService = platformService;
         _logger = logger;
         _ctx = ctx;
     }
@@ -126,11 +132,11 @@ public sealed partial class ToolbarViewModel : ObservableObject
             _connectionStore,
             _connectionGroupStore,
             _connectionStringService,
-            _maintenanceProvider,
+            _serverAdmin,
             _importService,
             _exportService,
             _backupEncryptionService,
-            _platformResolver,
+            _platformService,
             initialTab: 1,
             settingsService: _settingsService);
         var window = new Views.UnifiedConnectionManagerWindow(vm)
@@ -147,11 +153,11 @@ public sealed partial class ToolbarViewModel : ObservableObject
             _connectionStore,
             _connectionGroupStore,
             _connectionStringService,
-            _maintenanceProvider,
+            _serverAdmin,
             _importService,
             _exportService,
             _backupEncryptionService,
-            _platformResolver,
+            _platformService,
             initialTab: 0,
             selectConnectionId: selectConnectionId,
             settingsService: _settingsService);
@@ -191,7 +197,11 @@ public sealed partial class ToolbarViewModel : ObservableObject
 
     /// <summary>The workflow state of the currently selected mode (utility actions log here).</summary>
     private WorkflowState ActiveState =>
-        SelectedMode == EWorkspaceMode.Compare ? Compare.State : Copy.State;
+        SelectedMode switch
+        {
+            EWorkspaceMode.Compare => Compare.State,
+            _ => Copy.State
+        };
     
     [RelayCommand]
     private async Task ValidateConfigurationAsync(CancellationToken ct)
@@ -212,9 +222,10 @@ public sealed partial class ToolbarViewModel : ObservableObject
     
         try
         {
-            var srcVer = await _dbService.TestConnectionAsync(_ctx.Source, ct);
+            var srcInfo = ConnectionInfoFactory.FromViewModel(_ctx.Source);
+            var srcVer = await _catalogService.TestConnectionAsync(srcInfo, ct);
             sourceOk = srcVer != null;
-            sourceNote = sourceOk ? $"OK — {_dbService.ProviderName} {srcVer}" : "FAILED";
+            sourceNote = sourceOk ? $"OK — {_catalogService.ProviderName} {srcVer}" : "FAILED";
             state.LogDetail(
                 $"Source connection: {sourceNote}",
                 sourceOk ? ELogLevel.Info : ELogLevel.Error);
@@ -227,9 +238,10 @@ public sealed partial class ToolbarViewModel : ObservableObject
     
         try
         {
-            var dstVer = await _dbService.TestConnectionAsync(_ctx.Destination, ct);
+            var dstInfo = ConnectionInfoFactory.FromViewModel(_ctx.Destination);
+            var dstVer = await _catalogService.TestConnectionAsync(dstInfo, ct);
             destOk = dstVer != null;
-            destNote = destOk ? $"OK — {_dbService.ProviderName} {dstVer}" : "FAILED";
+            destNote = destOk ? $"OK — {_catalogService.ProviderName} {dstVer}" : "FAILED";
             state.LogDetail(
                 $"Destination connection: {destNote}",
                 destOk ? ELogLevel.Info : ELogLevel.Error);

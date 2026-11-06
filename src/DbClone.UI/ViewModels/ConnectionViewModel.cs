@@ -3,11 +3,12 @@ using System.Collections.ObjectModel;
 using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
 
-using DbClone.Application.DTOs;
 using DbClone.Application.Interfaces;
-using DbClone.Application.Platforms;
 using DbClone.UI.Models;
 using DbClone.UI.Services;
+using CanonicalModel.DTOs;
+using CanonicalModel.Enums;
+using CanonicalModel.Platforms;
 
 namespace DbClone.UI.ViewModels;
 
@@ -17,11 +18,11 @@ public sealed partial class ConnectionViewModel : ObservableObject
 
     public event EventHandler? EditConnectionRequested;
 
-    private readonly IConnectionStringService _connectionStringService;
+    private readonly IConnectionTextService _connectionStringService;
 
-    private readonly IDatabaseMaintenanceProvider _maintenanceProvider;
+    private readonly IServerAdminService _serverAdmin;
 
-    private readonly PlatformSchemaResolver _platformResolver;
+    private readonly IPlatformService _platformService;
 
     [ObservableProperty]
     private string _connectionString = string.Empty;
@@ -42,19 +43,19 @@ public sealed partial class ConnectionViewModel : ObservableObject
     private string _password = string.Empty;
 
     [ObservableProperty]
-    private string _port = "5432";
+    private string _port = string.Empty;
 
     [ObservableProperty]
     private SavedConnection? _selectedSavedConnection;
 
     [ObservableProperty]
-    private string _sslMode = "Prefer";
+    private string _sslMode = string.Empty;
 
     [ObservableProperty]
     private string _testResult = string.Empty;
 
     [ObservableProperty]
-    private string _username = "postgres";
+    private string _username = string.Empty;
 
     /// <summary>Platform entries loaded from .platform files (for the type dropdown).</summary>
     public IReadOnlyList<PlatformEntry> ConnectionTypeValues { get; }
@@ -62,7 +63,7 @@ public sealed partial class ConnectionViewModel : ObservableObject
     public int PortNumber =>
         int.TryParse(Port, out var p)
             ? p
-            : _platformResolver.GetConnectionDefaults(ConnectionType).Port;
+            : _platformService.GetConnectionDefaults(ConnectionType).Port;
 
     public ObservableCollection<SavedConnection> SavedConnections { get; } = [];
 
@@ -78,7 +79,8 @@ public sealed partial class ConnectionViewModel : ObservableObject
     /// </summary>
     public TableOverviewPanelViewModel? TableOverview { get; set; }
 
-    public static string[] SslModeValues { get; } = ["Disable", "Prefer", "Require"];
+    /// <summary>The TLS choices the active engine offers, supplied by its adapter (refactors/09 P7).</summary>
+    public IReadOnlyList<string> SslModeValues { get; }
 
     public string Summary =>
         string.IsNullOrEmpty(DatabaseName)
@@ -86,15 +88,23 @@ public sealed partial class ConnectionViewModel : ObservableObject
             : $"{Host}:{Port}/{DatabaseName}";
 
     public ConnectionViewModel(
-        IConnectionStringService connectionStringService,
-        IDatabaseMaintenanceProvider maintenanceProvider,
-        PlatformSchemaResolver platformResolver)
+        IConnectionTextService connectionStringService,
+        IServerAdminService serverAdmin,
+        IPlatformService platformService)
     {
         _connectionStringService = connectionStringService;
-        _maintenanceProvider = maintenanceProvider;
-        _platformResolver = platformResolver;
-        ConnectionTypeValues = platformResolver.GetAllPlatforms();
+        _serverAdmin = serverAdmin;
+        _platformService = platformService;
+        ConnectionTypeValues = platformService.GetAllPlatforms();
         _connectionType = ConnectionTypeValues.FirstOrDefault()?.Id;
+        SslModeValues = connectionStringService.SecurityOptions;
+
+        // A brand-new (unsaved) connection starts from the active engine's platform defaults,
+        // never from an engine value written in the UI (refactors/09 P5).
+        var defaults = platformService.GetConnectionDefaults(_connectionType);
+        _port = defaults.Port.ToString();
+        _username = defaults.Username;
+        _sslMode = defaults.SslMode;
     }
 
     public string BuildConnectionString()
@@ -105,7 +115,7 @@ public sealed partial class ConnectionViewModel : ObservableObject
             DatabaseName,
             Username,
             Password,
-            SslMode);
+            _connectionStringService.ToSslMode(SslMode));
         return _connectionStringService.BuildKeyValue(fields);
     }
 
@@ -148,7 +158,7 @@ public sealed partial class ConnectionViewModel : ObservableObject
                 DatabaseName = fields.Database;
                 Username = fields.Username;
                 Password = fields.Password;
-                SslMode = fields.SslMode;
+                SslMode = fields.SslMode.ToString();
             }
         }
         catch (Exception ex)
@@ -159,7 +169,7 @@ public sealed partial class ConnectionViewModel : ObservableObject
 
     partial void OnConnectionTypeChanged(string? value)
     {
-        var defaults = _platformResolver.GetConnectionDefaults(value);
+        var defaults = _platformService.GetConnectionDefaults(value);
         SslMode = defaults.SslMode;
         Port = defaults.Port.ToString();
     }
@@ -194,8 +204,8 @@ public sealed partial class ConnectionViewModel : ObservableObject
         try
         {
             var info = ConnectionInfoFactory.FromViewModel(this);
-            var version = await _maintenanceProvider.TestConnectionAsync(info, ct);
-            TestResult = $"OK — {_maintenanceProvider.ProviderName} {version}";
+            var version = await _serverAdmin.TestConnectionAsync(info, ct);
+            TestResult = $"OK — {_serverAdmin.GetProviderName(info)} {version}";
         }
         catch (Exception ex)
         {

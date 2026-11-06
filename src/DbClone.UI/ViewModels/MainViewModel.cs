@@ -3,12 +3,15 @@ using System.Windows.Threading;
 using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
 
+using DbClone.Application.Catalog;
+using DbClone.Application.Comparison;
+using DbClone.Application.Copy;
 using DbClone.Application.Enums;
 using DbClone.Application.Interfaces;
-using DbClone.Application.Platforms;
 using DbClone.UI.Models;
 using DbClone.UI.Services;
 using DbClone.UI.Settings;
+using DbClone.UI.ViewModels.Workspaces.StoreRestore;
 
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
@@ -29,11 +32,11 @@ public sealed partial class MainViewModel : ObservableObject
 
     private readonly IConnectionStore _connectionStore;
 
-    private readonly IDatabaseMaintenanceProvider _maintenanceProvider;
+    private readonly IServerAdminService _serverAdmin;
 
-    private readonly IDatabaseService _dbService;
+    private readonly ITableCatalogService _catalogService;
 
-    private readonly IDialogService _dialogService;
+    private readonly IConfirmationService _confirmationService;
 
     private readonly ITableFilterApplier _filterApplier;
 
@@ -49,7 +52,7 @@ public sealed partial class MainViewModel : ObservableObject
 
     private readonly ITableSelectionService _tableSelectionService;
 
-    /// <summary>The two workflow components behind their common contract.</summary>
+    /// <summary>The three workflow components behind their common contract.</summary>
     private readonly IWorkflowViewModel[] _workflows;
 
     // ── App-level state ─────────────────────────────────────────────────────────
@@ -66,9 +69,15 @@ public sealed partial class MainViewModel : ObservableObject
     /// Workflow state of the currently selected workspace mode — the single source of
     /// truth for "which workflow is displayed". XAML and the window code-behind consume
     /// this instead of resolving the mode themselves.
+    /// Store/Restore is not a mode; when it runs, its state is exposed separately via
+    /// <see cref="StoreRestoreState"/>.
     /// </summary>
     public WorkflowState ActiveState =>
-        Toolbar.SelectedMode == EWorkspaceMode.Compare ? Compare.State : Copy.State;
+        Toolbar.SelectedMode switch
+        {
+            EWorkspaceMode.Compare => Compare.State,
+            _ => Copy.State
+        };
 
     public CompareViewModel Compare { get; }
 
@@ -83,6 +92,12 @@ public sealed partial class MainViewModel : ObservableObject
 
     /// <summary>Copy workflow state for XAML bindings (banner, objects strip, status bar).</summary>
     public WorkflowState CopyState => Copy.State;
+
+    /// <summary>Store/Restore workspace for XAML bindings (commands, direction).</summary>
+    public StoreRestoreViewModel StoreRestore { get; private set; }
+
+    /// <summary>Store/Restore workflow state for XAML bindings.</summary>
+    public WorkflowState StoreRestoreState => StoreRestore.State;
 
     public LogPaneViewModel Log { get; }
 
@@ -103,31 +118,31 @@ public sealed partial class MainViewModel : ObservableObject
     public UpdateInfoBarViewModel Update { get; }
 
     public MainViewModel(
-        ICopyEngine copyEngine,
-        IDialogService dialogService,
+        IConfirmationService confirmationService,
         IConnectionStore connectionStore,
         IConnectionGroupStore connectionGroupStore,
-        IDatabaseService dbService,
-        IDatabaseComparerService comparerService,
+        ITableCatalogService catalogService,
+        IComparisonService comparisonService,
         ISettingsService settingsService,
         ReportExportService reportExportService,
-        IConnectionStringService connectionStringService,
-        IDatabaseMaintenanceProvider maintenanceProvider,
+        IConnectionTextService connectionStringService,
+        IServerAdminService serverAdmin,
         IConnectionImportService importService,
         IConnectionExportService exportService,
         IUpdateService updateService,
         IServiceProvider serviceProvider,
-        CopyOperationOrchestrator orchestrator,
+        ICopyWorkflow copyWorkflow,
         ITableSelectionService tableSelectionService,
         ITableSelectionPresetStore presetStore,
         ITableFilterApplier filterApplier,
-        ITableSelectionPresetNameValidator presetNameValidator)
+        ITableSelectionPresetNameValidator presetNameValidator,
+        Application.Interchange.IInterchangeService interchangeService)
     {
         _connectionStore = connectionStore;
-        _maintenanceProvider = maintenanceProvider;
+        _serverAdmin = serverAdmin;
         _settingsService = settingsService;
-        _dialogService = dialogService;
-        _dbService = dbService;
+        _confirmationService = confirmationService;
+        _catalogService = catalogService;
         _tableSelectionService = tableSelectionService;
         _presetStore = presetStore;
         _filterApplier = filterApplier;
@@ -142,16 +157,16 @@ public sealed partial class MainViewModel : ObservableObject
         settingsPersister.Suspend();
 
         // Resolve platform definitions (needed by connection VMs and connection manager)
-        var platformResolver = serviceProvider.GetRequiredService<PlatformSchemaResolver>();
+        var platformService = serviceProvider.GetRequiredService<IPlatformService>();
 
         // Create connection VMs
         var source =
-            new ConnectionViewModel(connectionStringService, maintenanceProvider, platformResolver)
+            new ConnectionViewModel(connectionStringService, serverAdmin, platformService)
                 {
                     Label = "Source"
                 };
         var destination =
-            new ConnectionViewModel(connectionStringService, maintenanceProvider, platformResolver)
+            new ConnectionViewModel(connectionStringService, serverAdmin, platformService)
                 {
                     Label = "Destination"
                 };
@@ -159,13 +174,13 @@ public sealed partial class MainViewModel : ObservableObject
         // Table selection panel — source panel only
         source.TableSelection = new TableSelectionPanelViewModel(
             tableSelectionService,
-            dialogService,
-            dbService,
+            confirmationService,
+            catalogService,
             source);
         source.TableSelection.EditRequested += (_, _) => OpenTableSelectionDialog();
 
         // Table overview panel — destination panel only
-        destination.TableOverview = new TableOverviewPanelViewModel(dbService, destination);
+        destination.TableOverview = new TableOverviewPanelViewModel(catalogService, destination);
         destination.TableOverview.ViewRequested += (_, _) => OpenTableOverviewDialog();
 
         // Create shared context (must exist before stateManager wiring)
@@ -177,9 +192,9 @@ public sealed partial class MainViewModel : ObservableObject
         // Create child ViewModels (Copy/Compare first — Log needs their WorkflowState)
         Compare = new CompareViewModel(
             logger: serviceProvider.GetRequiredService<ILogger<CompareViewModel>>(),
-            comparerService,
-            dbService,
-            dialogService,
+            comparisonService,
+            catalogService,
+            serviceProvider.GetRequiredService<IDialogService>(),
             reportExportService,
             settingsPersister,
             stateManager,
@@ -193,13 +208,18 @@ public sealed partial class MainViewModel : ObservableObject
 
         Copy = new CopyOperationViewModel(
             logger: serviceProvider.GetRequiredService<ILogger<CopyOperationViewModel>>(),
-            copyEngine,
-            orchestrator,
+            copyWorkflow,
             settingsPersister,
             stateManager,
             tableSelectionService,
             Settings,
             Context);
+
+        StoreRestore = new StoreRestoreViewModel(
+            interchangeService,
+            settingsPersister,
+            Settings,
+            serviceProvider.GetRequiredService<ILogger<StoreRestoreViewModel>>());
 
         _workflows = [Copy, Compare];
 
@@ -211,18 +231,29 @@ public sealed partial class MainViewModel : ObservableObject
                 running.State.ElapsedTime = elapsed;
         };
 
-        Log = new LogPaneViewModel(Copy.State, Compare.State);
+        // Store/Restore elapsed time is routed separately (not a mode-bound workflow)
+        stateManager.ElapsedTimeUpdated += elapsed =>
+        {
+            if (StoreRestore.IsRunning)
+                StoreRestore.State.ElapsedTime = elapsed;
+        };
+
+        Log = new LogPaneViewModel(new Dictionary<EWorkspaceMode, WorkflowState>
+        {
+            [EWorkspaceMode.Copy] = Copy.State,
+            [EWorkspaceMode.Compare] = Compare.State
+        });
 
         Connections = new ConnectionSectionViewModel(
             connectionGroupStore,
             connectionStore,
             connectionStringService,
-            maintenanceProvider,
+            serverAdmin,
             importService,
             exportService,
             settingsService,
             backupEncryptionService,
-            platformResolver,
+            platformService,
             settingsPersister,
             Settings,
             Context);
@@ -230,19 +261,20 @@ public sealed partial class MainViewModel : ObservableObject
         Toolbar = new ToolbarViewModel(
             Copy,
             Compare,
+            StoreRestore,
             Log,
             Settings,
             connectionStore,
             connectionGroupStore,
             connectionStringService,
-            maintenanceProvider,
+            serverAdmin,
             importService,
             exportService,
             settingsService,
             backupEncryptionService,
-            dbService,
+            catalogService,
             updateService,
-            platformResolver,
+            platformService,
             serviceProvider.GetRequiredService<ILogger<ToolbarViewModel>>(),
             Context);
 
@@ -364,6 +396,7 @@ public sealed partial class MainViewModel : ObservableObject
             {
                 Copy.State.ClearResultDisplay();
                 Compare.State.ClearResultDisplay();
+                StoreRestore.State.ClearResultDisplay();
             }
         }
     }
@@ -379,8 +412,8 @@ public sealed partial class MainViewModel : ObservableObject
         var vm = new TableSelectionViewModel(
             _tableSelectionService,
             _presetStore,
-            _dialogService,
-            _dbService,
+            _confirmationService,
+            _catalogService,
             _filterApplier,
             _presetNameValidator,
             Context.Source);
@@ -395,7 +428,7 @@ public sealed partial class MainViewModel : ObservableObject
     /// <summary>Opens the read-only table overview dialog for the current destination connection.</summary>
     private void OpenTableOverviewDialog()
     {
-        var vm = new TableOverviewViewModel(_maintenanceProvider, _dbService, Context.Destination);
+        var vm = new TableOverviewViewModel(_serverAdmin, _catalogService, Context.Destination);
 
         var dialog = new Views.TableOverviewDialog(vm)
         {

@@ -6,6 +6,7 @@ using DbClone.Application.Models;
 using DbClone.UI.Models;
 
 using Serilog;
+using CanonicalModel.Models;
 
 namespace DbClone.UI.Services;
 

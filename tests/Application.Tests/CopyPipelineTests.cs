@@ -1,10 +1,13 @@
 using DbClone.Application.DTOs;
-using DbClone.Application.Enums;
 using DbClone.Application.Copy;
+using DbAdapter.Definitions;
 
 using FluentAssertions;
 
 using Microsoft.Extensions.Logging.Abstractions;
+using CanonicalModel.Enums;
+using CanonicalModel.DTOs;
+using CanonicalModel.Models;
 
 namespace Application.Tests;
 
@@ -109,8 +112,29 @@ public class CopyPipelineTests
     private static CopyContext CreateContext()
     {
         var request = new CopyRequest(
-            new ConnectionInfo("localhost", 5432, "source", "user", "pass", ESslMode.Prefer),
-            new ConnectionInfo("localhost", 5432, "dest", "user", "pass", ESslMode.Prefer),
+            new DatabaseTarget(
+                "postgresql",
+                "Host=localhost;Port=5432;Database=source;Username=user;Password=pass"),
+            new DatabaseTarget(
+                "postgresql",
+                "Host=localhost;Port=5432;Database=dest;Username=user;Password=pass"),
+            new DatabaseModel(
+                DatabaseName: "source",
+                ServerVersion: "PostgreSQL 16.0",
+                Schemas: [],
+                Tables: [],
+                Views: [],
+                MaterializedViews: [],
+                Sequences: [],
+                Enums: [],
+                Domains: [],
+                CompositeTypes: [],
+                Functions: [],
+                Triggers: [],
+                Policies: [],
+                Publications: [],
+                Subscriptions: [],
+                Extensions: []),
             new CopyOptions());
         return new CopyContext { Request = request };
     }

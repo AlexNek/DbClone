@@ -3,14 +3,15 @@ using System.Collections.ObjectModel;
 using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
 
+using DbClone.Application.Catalog;
 using DbClone.Application.DTOs;
-using DbClone.Application.Enums;
 using DbClone.Application.Interfaces;
-using DbClone.Application.Models;
 using DbClone.UI.Models;
 using DbClone.UI.Services;
 
 using Serilog;
+using CanonicalModel.Models;
+using CanonicalModel.Enums;
 
 namespace DbClone.UI.ViewModels;
 
@@ -21,9 +22,9 @@ namespace DbClone.UI.ViewModels;
 /// </summary>
 public sealed partial class TableOverviewViewModel : ObservableObject
 {
-    private readonly IDatabaseMaintenanceProvider _maintenanceProvider;
+    private readonly IServerAdminService _serverAdmin;
 
-    private readonly IDatabaseService _dbService;
+    private readonly ITableCatalogService _catalogService;
 
     private readonly ConnectionViewModel _connection;
 
@@ -64,12 +65,12 @@ public sealed partial class TableOverviewViewModel : ObservableObject
 
     /// <summary>Initializes a new instance. Call <see cref="LoadAsync"/> before showing.</summary>
     public TableOverviewViewModel(
-        IDatabaseMaintenanceProvider maintenanceProvider,
-        IDatabaseService dbService,
+        IServerAdminService serverAdmin,
+        ITableCatalogService catalogService,
         ConnectionViewModel connection)
     {
-        _maintenanceProvider = maintenanceProvider;
-        _dbService = dbService;
+        _serverAdmin = serverAdmin;
+        _catalogService = catalogService;
         _connection = connection;
     }
 
@@ -162,22 +163,15 @@ public sealed partial class TableOverviewViewModel : ObservableObject
 
         try
         {
-            var sslMode = _connection.SslMode switch
-            {
-                "Require" => ESslMode.Require,
-                "Disable" => ESslMode.Disable,
-                _ => ESslMode.Prefer
-            };
-
             var info = new ConnectionInfo(
                 _connection.Host,
                 _connection.PortNumber,
                 string.Empty,
                 _connection.Username,
                 _connection.Password,
-                sslMode);
+                _connection.SslMode);
 
-            var databases = await _maintenanceProvider.ListDatabasesAsync(info, ct);
+            var databases = await _serverAdmin.ListDatabasesAsync(info, ct);
 
             AvailableDatabases.Clear();
             foreach (var db in databases)
@@ -213,7 +207,8 @@ public sealed partial class TableOverviewViewModel : ObservableObject
 
         try
         {
-            var model = await _dbService.ReadSourceModelAsync(_connection, ct);
+            var model = await _catalogService.ReadSourceModelAsync(
+                ConnectionInfoFactory.FromViewModel(_connection), ct);
 
             BuildItems(model);
             BuildSchemaNodes(model);
@@ -272,7 +267,8 @@ public sealed partial class TableOverviewViewModel : ObservableObject
     {
         try
         {
-            var sizes = await _dbService.GetTableSizesAsync(_connection, ct);
+            var sizes = await _catalogService.GetTableSizesAsync(
+                ConnectionInfoFactory.FromViewModel(_connection), ct);
 
             if (ct.IsCancellationRequested)
                 return;

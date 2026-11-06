@@ -4,23 +4,27 @@ using DbClone.Application.Exceptions;
 using DbClone.Application.Interfaces;
 using DbClone.Application.Models;
 
+using DbAdapter.Definitions;
+
 using Microsoft.Extensions.Logging;
+using CanonicalModel.Enums;
+using CanonicalModel.DTOs;
 
 namespace DbClone.Application.Services;
 
 /// <summary>
 /// Provider-agnostic import orchestration.
-/// Iterates all registered <see cref="IConnectionFormat"/> instances by priority;
+/// Iterates all registered <see cref="IConnectionTextFormat"/> instances by priority;
 /// the first format whose CanImport returns true wins.
 /// </summary>
 public sealed class ConnectionImportService : IConnectionImportService
 {
-    private readonly IReadOnlyList<IConnectionFormat> _formats;
+    private readonly IReadOnlyList<IConnectionTextFormat> _formats;
 
     private readonly ILogger<ConnectionImportService> _logger;
 
     public ConnectionImportService(
-        IEnumerable<IConnectionFormat> formats,
+        IEnumerable<IConnectionTextFormat> formats,
         ILogger<ConnectionImportService> logger)
     {
         _formats = formats.OrderBy(f => f.DetectionPriority).ToList();
@@ -51,7 +55,8 @@ public sealed class ConnectionImportService : IConnectionImportService
         return DetectionResult.None;
     }
 
-    public IReadOnlyList<IConnectionFormat> GetAllFormats() => _formats;
+    public IReadOnlyList<ConnectionFormatInfo> GetAllFormats() =>
+        [.._formats.Select(f => new ConnectionFormatInfo(f.Id, f.DisplayName, f.TypicalSource))];
 
     public ImportResult Import(string text)
     {
@@ -72,7 +77,7 @@ public sealed class ConnectionImportService : IConnectionImportService
 
             try
             {
-                var connection = format.Parse(trimmed);
+                var connection = ToConnection(format.Parse(trimmed));
                 var warnings = CollectWarnings(connection);
 
                 return new ImportResult
@@ -81,7 +86,7 @@ public sealed class ConnectionImportService : IConnectionImportService
                                Connection = connection,
                                Warnings = warnings,
                                DetectedFormatName = format.DisplayName,
-                               DetectedProvider = format.Provider.ToString(),
+                               DetectedProvider = format.Provider,
                                Confidence = 1.0,
                                TypicalSource = format.TypicalSource
                            };
@@ -98,6 +103,31 @@ public sealed class ConnectionImportService : IConnectionImportService
         }
 
         throw new UnsupportedConnectionFormatException();
+    }
+
+    /// <summary>
+    /// Maps the engine's connection fields onto the application's connection model.
+    /// </summary>
+    private static DatabaseConnection ToConnection(ConnectionStringFields fields)
+    {
+        var connection = new DatabaseConnection
+                             {
+                                 Provider = fields.Provider,
+                                 Host = fields.Host,
+                                 Port = fields.Port,
+                                 Database = fields.Database,
+                                 Username = fields.Username,
+                                 Password = fields.Password,
+                                 SslMode = fields.SslMode
+                             };
+
+        if (fields.Options is null)
+            return connection;
+
+        foreach (var (key, value) in fields.Options)
+            connection.Options[key] = value;
+
+        return connection;
     }
 
     private static List<ImportWarning> CollectWarnings(DatabaseConnection connection)

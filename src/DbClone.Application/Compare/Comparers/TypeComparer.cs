@@ -1,6 +1,7 @@
 using DbClone.Application.Enums;
-using DbClone.Application.Compare;
-using DbClone.Application.Models;
+using DbAdapter.Definitions;
+using CanonicalModel.Models;
+using CanonicalModel.Enums;
 
 namespace DbClone.Application.Compare.Comparers;
 

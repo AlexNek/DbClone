@@ -45,8 +45,8 @@ public class GroupDeleteTests
                 var groupStore = new InMemoryConnectionGroupStore();
                 groupStore.Save(group);
 
-                var connectionStringService = Substitute.For<IConnectionStringService>();
-                var maintenanceProvider = Substitute.For<IDatabaseMaintenanceProvider>();
+                var connectionStringService = Substitute.For<IConnectionTextService>();
+                var maintenanceProvider = Substitute.For<IServerAdminService>();
 
                 // Create VM on groups tab — the group will appear in FilteredGroups
                 var vm = new UnifiedConnectionManagerViewModel(

@@ -3,6 +3,7 @@ using System.Collections.ObjectModel;
 using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
 
+using DbClone.Application.Catalog;
 using DbClone.Application.Interfaces;
 using DbClone.Application.Models;
 using DbClone.Application.TableFilter;
@@ -10,6 +11,7 @@ using DbClone.UI.Models;
 using DbClone.UI.Services;
 
 using Serilog;
+using CanonicalModel.Models;
 
 namespace DbClone.UI.ViewModels;
 
@@ -20,9 +22,9 @@ namespace DbClone.UI.ViewModels;
 /// </summary>
 public sealed partial class TableSelectionViewModel : ObservableObject
 {
-    private readonly IDatabaseService _dbService;
+    private readonly ITableCatalogService _catalogService;
 
-    private readonly IDialogService _dialogService;
+    private readonly IConfirmationService _confirmationService;
 
     private readonly ITableFilterApplier _filterApplier;
 
@@ -88,16 +90,16 @@ public sealed partial class TableSelectionViewModel : ObservableObject
     public TableSelectionViewModel(
         ITableSelectionService selectionService,
         ITableSelectionPresetStore presetStore,
-        IDialogService dialogService,
-        IDatabaseService dbService,
+        IConfirmationService confirmationService,
+        ITableCatalogService catalogService,
         ITableFilterApplier filterApplier,
         ITableSelectionPresetNameValidator presetNameValidator,
         ConnectionViewModel sourceConnection)
     {
         _selectionService = selectionService;
         _presetStore = presetStore;
-        _dialogService = dialogService;
-        _dbService = dbService;
+        _confirmationService = confirmationService;
+        _catalogService = catalogService;
         _filterApplier = filterApplier;
         _presetNameValidator = presetNameValidator;
         _sourceConnection = sourceConnection;
@@ -135,7 +137,8 @@ public sealed partial class TableSelectionViewModel : ObservableObject
 
         try
         {
-            _model = await _dbService.ReadSourceModelAsync(_sourceConnection, ct);
+            _model = await _catalogService.ReadSourceModelAsync(
+                ConnectionInfoFactory.FromViewModel(_sourceConnection), ct);
 
             BuildItems();
             BuildSchemaNodes();
@@ -329,7 +332,7 @@ public sealed partial class TableSelectionViewModel : ObservableObject
             message += "\n\nThe dialog also has unsaved modifications — they will be discarded.";
         }
 
-        if (!await _dialogService.ConfirmAsync("Delete Preset", message)) return;
+        if (!await _confirmationService.ConfirmAsync("Delete Preset", message)) return;
 
         await _presetStore.DeletePresetAsync(database, _loadedPresetId);
         await _selectionService.ReloadPresetsAsync();
@@ -477,7 +480,8 @@ public sealed partial class TableSelectionViewModel : ObservableObject
     {
         try
         {
-            var sizes = await _dbService.GetTableSizesAsync(_sourceConnection, CancellationToken.None);
+            var sizes = await _catalogService.GetTableSizesAsync(
+                ConnectionInfoFactory.FromViewModel(_sourceConnection), CancellationToken.None);
 
             foreach (var size in sizes)
             {
@@ -529,7 +533,7 @@ public sealed partial class TableSelectionViewModel : ObservableObject
         {
             if (IsDialogDirty)
             {
-                var discard = await _dialogService.ConfirmAsync(
+                var discard = await _confirmationService.ConfirmAsync(
                     "Unsaved Changes",
                     "Switching presets discards the current unsaved modifications. Continue?");
 
@@ -780,7 +784,7 @@ public sealed partial class TableSelectionViewModel : ObservableObject
             var message = $"The following tables depend on {Display(uncheckedItem.Id)} " +
                 $"and will also be deselected:\n\n{tableList}\n\nProceed?";
 
-            var confirmed = await _dialogService.ConfirmAsync("Deselect Dependent Tables", message);
+            var confirmed = await _confirmationService.ConfirmAsync("Deselect Dependent Tables", message);
 
             if (!confirmed)
             {

@@ -4,6 +4,7 @@ using CommunityToolkit.Mvvm.ComponentModel;
 
 using DbClone.Application.Enums;
 using DbClone.UI.Models;
+using CanonicalModel.Enums;
 
 namespace DbClone.UI.Settings;
 
@@ -47,6 +48,10 @@ public sealed partial class UserSettings : ObservableObject
     [ObservableProperty]
     private EWorkspaceMode _selectedWorkspaceMode = EWorkspaceMode.Copy;
 
+    /// <summary>Store / Restore workspace options (persisted as a nested JSON object).</summary>
+    [ObservableProperty]
+    private StoreRestoreOptions _storeRestore = new();
+
     [ObservableProperty]
     private EVerifyMode _selectedVerifyMode = EVerifyMode.RowCount;
 
@@ -70,8 +75,10 @@ public sealed partial class UserSettings : ObservableObject
         }
     }
 
-    /// <summary>Gets or sets the default format Id for quick clipboard export (e.g. "pg-npgsql").</summary>
-    public string DefaultClipboardFormatId { get; set; } = "pg-npgsql";
+    /// <summary>Gets or sets the default format Id for quick clipboard export. Empty means "use the
+    /// active engine's default", resolved from <see cref="DbClone.Application.Interfaces.IConnectionTextService"/>
+    /// — no engine format id is written here (refactors/09 P5).</summary>
+    public string DefaultClipboardFormatId { get; set; } = string.Empty;
 
     /// <summary>Gets or sets the saved destination connection.</summary>
     public ConnectionSettings? Destination { get; set; }
@@ -169,9 +176,9 @@ public sealed class ConnectionSettings
     /// <summary>Gets or sets the stable connection ID (matches <see cref="Models.SavedConnection.Id"/>).</summary>
     public string? Id { get; set; }
 
-    /// <summary>Gets or sets the port number.</summary>
-    public string Port { get; set; } = "5432";
+    /// <summary>Gets or sets the port number. Empty until set; defaults come from the platform.</summary>
+    public string Port { get; set; } = string.Empty;
 
-    /// <summary>Gets or sets the username.</summary>
-    public string Username { get; set; } = "postgres";
+    /// <summary>Gets or sets the username. Empty until set; defaults come from the platform.</summary>
+    public string Username { get; set; } = string.Empty;
 }

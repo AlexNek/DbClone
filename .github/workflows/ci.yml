@@ -30,7 +30,7 @@ jobs:
       - name: Test
         run: |
           dotnet test tests/Application.Tests --no-restore -c Release --verbosity normal
-          dotnet test tests/PostgreSql.Tests --no-restore -c Release --verbosity normal
+          dotnet test tests/DbAdapter.PostgreSql.Tests --no-restore -c Release --verbosity normal
 
       - name: Build and verify installer
         uses: ./.github/actions/build-installer

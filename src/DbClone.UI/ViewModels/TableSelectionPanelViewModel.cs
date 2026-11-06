@@ -3,11 +3,13 @@ using System.Collections.ObjectModel;
 using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
 
-using DbClone.Application.Models;
+using DbClone.Application.Catalog;
+using DbClone.Application.Interfaces;
 using DbClone.UI.Models;
 using DbClone.UI.Services;
 
 using Serilog;
+using CanonicalModel.Models;
 
 namespace DbClone.UI.ViewModels;
 
@@ -18,9 +20,9 @@ namespace DbClone.UI.ViewModels;
 /// </summary>
 public sealed partial class TableSelectionPanelViewModel : ObservableObject
 {
-    private readonly IDialogService _dialogService;
+    private readonly IConfirmationService _confirmationService;
 
-    private readonly IDatabaseService _dbService;
+    private readonly ITableCatalogService _catalogService;
 
     private readonly ITableSelectionService _selectionService;
 
@@ -52,13 +54,13 @@ public sealed partial class TableSelectionPanelViewModel : ObservableObject
     /// <summary>Initializes a new instance.</summary>
     public TableSelectionPanelViewModel(
         ITableSelectionService selectionService,
-        IDialogService dialogService,
-        IDatabaseService dbService,
+        IConfirmationService confirmationService,
+        ITableCatalogService catalogService,
         ConnectionViewModel sourceConnection)
     {
         _selectionService = selectionService;
-        _dialogService = dialogService;
-        _dbService = dbService;
+        _confirmationService = confirmationService;
+        _catalogService = catalogService;
         _sourceConnection = sourceConnection;
         _selectionService.Changed += RefreshFromService;
         RefreshFromService();
@@ -93,7 +95,8 @@ public sealed partial class TableSelectionPanelViewModel : ObservableObject
     {
         try
         {
-            var tables = await _dbService.GetTablesAsync(_sourceConnection, CancellationToken.None);
+            var info = ConnectionInfoFactory.FromViewModel(_sourceConnection);
+            var tables = await _catalogService.GetTablesAsync(info, CancellationToken.None);
             var existing = new HashSet<TableId>(tables.Select(t => new TableId(t.Schema, t.Name)));
             var excluded = _selectionService.ActiveSpec.ExcludedTables.Count(id => existing.Contains(id));
 
@@ -133,7 +136,7 @@ public sealed partial class TableSelectionPanelViewModel : ObservableObject
 
     private async Task PromptAndSwitchAsync(PresetOption requested)
     {
-        var discard = await _dialogService.ConfirmAsync(
+        var discard = await _confirmationService.ConfirmAsync(
             "Unsaved Table Selection",
             "The current table selection has unsaved modifications. "
             + "Discard them and switch presets?");

@@ -1,0 +1,10 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <!--
+    TargetFramework, Nullable, ImplicitUsings, GenerateDocumentationFile and the build-time
+    GitVersion.MsBuild package all come from the repository-root Directory.Build.props.
+    This project is the shared language of the boundary: it references no project and declares
+    no package of its own (refactors/08/adapterConceptDesign.md, D10).
+  -->
+
+</Project>

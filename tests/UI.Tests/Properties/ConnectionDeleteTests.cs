@@ -35,8 +35,8 @@ public class ConnectionDeleteTests
                 connectionStore.Save(connection);
 
                 var groupStore = new InMemoryConnectionGroupStore();
-                var connectionStringService = Substitute.For<IConnectionStringService>();
-                var maintenanceProvider = Substitute.For<IDatabaseMaintenanceProvider>();
+                var connectionStringService = Substitute.For<IConnectionTextService>();
+                var maintenanceProvider = Substitute.For<IServerAdminService>();
 
                 // Create VM — the connection will be auto-selected since it's the only one
                 var vm = new UnifiedConnectionManagerViewModel(
