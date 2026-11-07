@@ -1,3 +1,9 @@
+using CanonicalModel.Interchange;
+
+using DatabaseInterchange.Transform;
+
+using DbAdapter.Definitions;
+
 using DbClone.Application.DTOs;
 using DbClone.Application.Interchange;
 using DbClone.Application.TableFilter;
@@ -9,11 +15,14 @@ using NSubstitute;
 
 using Microsoft.Extensions.Logging;
 
+using ImportResult = DatabaseInterchange.Transform.ImportResult;
+
 namespace Application.Tests.Interchange;
 
 /// <summary>
 /// Unit tests for <see cref="InterchangeService"/> — validates request handling
 /// and the stub behaviour while the interchange product is not yet available.
+/// The last group covers how a finished import is turned into the result the application reports.
 /// </summary>
 public class InterchangeServiceTests
 {
@@ -151,5 +160,151 @@ public class InterchangeServiceTests
 
         // Assert
         act.Should().ThrowAsync<ArgumentNullException>();
+    }
+
+    [Fact]
+    public void BuildRestoreResult_ImportSucceededWithoutValidation_ReportsSuccess()
+    {
+        // Arrange
+        var result = new ImportResult { Success = true, ObjectsApplied = 12 };
+
+        // Act
+        var view = InterchangeService.BuildRestoreResult(result, TimeSpan.FromSeconds(3));
+
+        // Assert
+        view.Outcome.Should().Be(ERestoreOutcome.Success);
+        view.ObjectsApplied.Should().Be(12);
+        view.RowCountMismatches.Should().Be(0);
+        view.Issues.Should().BeEmpty();
+        view.Validation.Should().BeNull();
+        view.Elapsed.Should().Be(TimeSpan.FromSeconds(3));
+    }
+
+    [Fact]
+    public void BuildRestoreResult_ValidationPassed_ReportsSuccessAndKeepsTheReport()
+    {
+        // Arrange
+        var result = new ImportResult
+        {
+            Success = true,
+            ObjectsApplied = 12,
+            ValidationReport = new ImportValidationReport { Passed = true },
+        };
+
+        // Act
+        var view = InterchangeService.BuildRestoreResult(result, TimeSpan.FromSeconds(3));
+
+        // Assert
+        view.Outcome.Should().Be(ERestoreOutcome.Success);
+        view.Validation!.Passed.Should().BeTrue();
+        view.Validation.Issues.Should().BeEmpty();
+    }
+
+    [Fact]
+    public void BuildRestoreResult_RowCountMismatches_AreReportedToTheUser()
+    {
+        // Arrange
+        var result = new ImportResult
+        {
+            Success = true,
+            ObjectsApplied = 12,
+            ValidationReport = new ImportValidationReport
+            {
+                Passed = false,
+                Issues =
+                [
+                    new InterchangeIssue("RowCountMismatch", EIssueSeverity.Error,
+                        "The catalog records 5 row(s) for public.customers, but the target holds 3."),
+                    new InterchangeIssue("RowCountMismatch", EIssueSeverity.Error,
+                        "The catalog records 2 row(s) for sales.orders, but the target holds 0."),
+                ],
+            },
+        };
+
+        // Act
+        var view = InterchangeService.BuildRestoreResult(result, TimeSpan.FromSeconds(3));
+
+        // Assert — a restore that did not carry the rows is never reported as a plain success, and
+        // each mismatch reaches the log: the UI reads the issues list, not the Validation summary.
+        view.Outcome.Should().Be(ERestoreOutcome.CompletedWithIssues);
+        view.RowCountMismatches.Should().Be(2);
+        view.Issues.Should().HaveCount(2);
+        view.Issues.Select(i => i.Sentence).Should().Contain(
+            "The catalog records 5 row(s) for public.customers, but the target holds 3.");
+        view.Issues.Should().OnlyContain(i => i.Severity == EInterchangeSeverity.Error);
+    }
+
+    [Fact]
+    public void BuildRestoreResult_ValidationWarning_IsReportedWithoutACountMismatch()
+    {
+        // Arrange
+        var result = new ImportResult
+        {
+            Success = true,
+            ValidationReport = new ImportValidationReport
+            {
+                Passed = true,
+                Issues =
+                [
+                    new InterchangeIssue("ValidationKindNotChecked", EIssueSeverity.Warning,
+                        "The catalog records 1 object(s) of kind Collation, so the target was not checked for it."),
+                ],
+            },
+        };
+
+        // Act
+        var view = InterchangeService.BuildRestoreResult(result, TimeSpan.FromSeconds(3));
+
+        // Assert
+        view.Outcome.Should().Be(ERestoreOutcome.CompletedWithIssues);
+        view.RowCountMismatches.Should().Be(0);
+        view.Issues.Should().ContainSingle()
+            .Which.Severity.Should().Be(EInterchangeSeverity.Warning);
+    }
+
+    [Fact]
+    public void BuildRestoreResult_ImportFailed_ReportsFailedEvenWhenValidationPassed()
+    {
+        // Arrange
+        var result = new ImportResult
+        {
+            Success = false,
+            ObjectsApplied = 4,
+            Issues = [new InterchangeIssue("ImportFailed", EIssueSeverity.Error, "The write stopped.")],
+            ValidationReport = new ImportValidationReport { Passed = true },
+        };
+
+        // Act
+        var view = InterchangeService.BuildRestoreResult(result, TimeSpan.FromSeconds(3));
+
+        // Assert
+        view.Outcome.Should().Be(ERestoreOutcome.Failed);
+        view.Issues.Should().ContainSingle().Which.Code.Should().Be("ImportFailed");
+    }
+
+    [Fact]
+    public void BuildRestoreResult_ImportAndValidationIssues_AreBothReported()
+    {
+        // Arrange
+        var result = new ImportResult
+        {
+            Success = true,
+            Issues = [new InterchangeIssue("SequenceOwnershipNotCaptured", EIssueSeverity.Warning,
+                "The sequence lost its ownership link.")],
+            ValidationReport = new ImportValidationReport
+            {
+                Passed = false,
+                Issues = [new InterchangeIssue("ObjectCountMismatch", EIssueSeverity.Error,
+                    "The catalog records 3 object(s) of kind Table, but the target holds 2.")],
+            },
+        };
+
+        // Act
+        var view = InterchangeService.BuildRestoreResult(result, TimeSpan.FromSeconds(3));
+
+        // Assert — the import's own notes come first, then what the target was found to hold
+        view.Outcome.Should().Be(ERestoreOutcome.CompletedWithIssues);
+        view.Issues.Select(i => i.Code).Should().Equal(
+            "SequenceOwnershipNotCaptured", "ObjectCountMismatch");
     }
 }

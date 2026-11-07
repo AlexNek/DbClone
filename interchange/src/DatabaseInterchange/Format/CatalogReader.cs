@@ -252,6 +252,34 @@ public sealed class CatalogReader : IAsyncDisposable
     }
 
     /// <summary>
+    /// Reads the row count the catalog recorded for a table.
+    /// </summary>
+    /// <param name="tableId">The table's interchange Id.</param>
+    /// <param name="ct">Cancellation token.</param>
+    /// <returns>The count the table's manifest states, or <see langword="null"/> when the catalog holds
+    /// no data folder for the table — which is what an export run without data writes.</returns>
+    public async Task<long?> ReadTableRowCountAsync(string tableId, CancellationToken ct = default)
+    {
+        ObjectDisposedException.ThrowIf(_disposed, this);
+        ArgumentException.ThrowIfNullOrWhiteSpace(tableId);
+
+        var tableManifestPath = Path.Combine(
+            _catalogPath,
+            InterchangeFormat.DataDirectory,
+            tableId,
+            "table.json");
+        if (!File.Exists(tableManifestPath))
+        {
+            return null;
+        }
+
+        var tableJson = await File.ReadAllTextAsync(tableManifestPath, Encoding.UTF8, ct);
+        var tableManifest = JsonSerializer.Deserialize<TableManifest>(tableJson, CatalogJson.ReaderOptions);
+
+        return tableManifest?.RowCount;
+    }
+
+    /// <summary>
     /// Verifies the integrity of the catalog by checking file hashes.
     /// </summary>
     /// <param name="ct">Cancellation token.</param>

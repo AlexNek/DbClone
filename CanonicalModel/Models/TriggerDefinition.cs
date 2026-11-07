@@ -14,4 +14,6 @@ public sealed record TriggerDefinition(
     bool IsRowLevel,
     bool IsEnabled,
     string? Condition,
-    string? Comment);
+    string? Comment,
+    string? Definition = null,
+    string? EnabledState = null);

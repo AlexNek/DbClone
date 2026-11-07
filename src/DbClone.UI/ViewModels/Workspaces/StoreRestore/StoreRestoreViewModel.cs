@@ -428,11 +428,12 @@ public sealed partial class StoreRestoreViewModel : ObservableObject, IWorkflowV
             case ERestoreOutcome.Success:
             case ERestoreOutcome.CompletedWithIssues:
                 State.StatusBarSummary =
-                    $"Restore succeeded — {result.ObjectsApplied} object(s) applied "
-                    + $"in {result.Elapsed.TotalSeconds:F1}s";
+                    $"Restore succeeded — {result.ObjectsApplied} object(s), {result.RowsRestored:N0} row(s) "
+                    + $"applied in {result.Elapsed.TotalSeconds:F1}s";
                 State.ShowBanner(
                     "Restore Complete",
-                    $"{result.ObjectsApplied} object(s) applied in {result.Elapsed.TotalSeconds:F1}s",
+                    $"{result.ObjectsApplied} object(s), {result.RowsRestored:N0} row(s) applied "
+                    + $"in {result.Elapsed.TotalSeconds:F1}s",
                     result.Outcome == ERestoreOutcome.CompletedWithIssues
                         ? InfoBarSeverity.Warning
                         : InfoBarSeverity.Success);

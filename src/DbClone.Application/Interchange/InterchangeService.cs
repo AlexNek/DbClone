@@ -241,33 +241,7 @@ public sealed class InterchangeService : IInterchangeService
 
             sw.Stop();
 
-            var outcome = result.Success
-                ? (result.Issues.Count > 0 ? ERestoreOutcome.CompletedWithIssues : ERestoreOutcome.Success)
-                : ERestoreOutcome.Failed;
-
-            VerificationSummary? validation = null;
-            if (result.ValidationReport is not null)
-            {
-                validation = new VerificationSummary(
-                    Passed: result.ValidationReport.Passed,
-                    Issues: result.ValidationReport.Issues.Select(i =>
-                        new InterchangeIssueView(
-                            MapSeverity(i.Severity),
-                            i.Code,
-                            i.Message,
-                            string.Empty,
-                            string.Empty)).ToList());
-            }
-
-            return new InterchangeRestoreResult(
-                Outcome: outcome,
-                ObjectsApplied: result.ObjectsApplied,
-                ObjectsSkipped: result.ObjectsSkipped,
-                RowCountMismatches: 0, // TODO: Track when validation provides this
-                Issues: result.Issues.Select(MapIssue).ToList(),
-                Validation: validation,
-                LastCompletedChunk: null, // TODO: Track when importer provides this
-                Elapsed: sw.Elapsed);
+            return BuildRestoreResult(result, sw.Elapsed);
         }
         catch (OperationCanceledException)
         {
@@ -277,6 +251,7 @@ public sealed class InterchangeService : IInterchangeService
                 Outcome: ERestoreOutcome.Cancelled,
                 ObjectsApplied: 0,
                 ObjectsSkipped: 0,
+                RowsRestored: 0,
                 RowCountMismatches: 0,
                 Issues: [new InterchangeIssueView(EInterchangeSeverity.Warning, "Cancelled", "The operation was cancelled.", string.Empty, string.Empty)],
                 Validation: null,
@@ -291,6 +266,7 @@ public sealed class InterchangeService : IInterchangeService
                 Outcome: ERestoreOutcome.Failed,
                 ObjectsApplied: 0,
                 ObjectsSkipped: 0,
+                RowsRestored: 0,
                 RowCountMismatches: 0,
                 Issues: [new InterchangeIssueView(EInterchangeSeverity.Error, "ImportFailed", ex.Message, string.Empty, string.Empty)],
                 Validation: null,
@@ -406,6 +382,51 @@ public sealed class InterchangeService : IInterchangeService
 
         _logger.LogWarning("Archive support not yet implemented.");
         return null;
+    }
+
+    /// <summary>
+    /// Issue code an adapter raises for one table whose recorded row count differs from the count the
+    /// target holds after the restore. The validation report carries it per table, so the summary count
+    /// the application reports is read from it rather than counted twice.
+    /// </summary>
+    private const string RowCountMismatchCode = "RowCountMismatch";
+
+    /// <summary>
+    /// Turns the product's import outcome into the result the application reports. The validation report
+    /// is part of the answer rather than a footnote: its findings join the issues the import raised, so a
+    /// restore never hides what it checked and did not carry, and a validation that did not pass keeps the
+    /// result out of the plain-success branch even when every stage reported no problem.
+    /// </summary>
+    internal static InterchangeRestoreResult BuildRestoreResult(
+        DatabaseInterchange.Transform.ImportResult result,
+        TimeSpan elapsed)
+    {
+        var report = result.ValidationReport;
+        var issues = result.Issues.Select(MapIssue).ToList();
+        if (report is not null)
+            issues.AddRange(report.Issues.Select(MapIssue));
+
+        var outcome = result.Success switch
+        {
+            false => ERestoreOutcome.Failed,
+            true when issues.Count > 0 || report is { Passed: false } => ERestoreOutcome.CompletedWithIssues,
+            _ => ERestoreOutcome.Success,
+        };
+
+        return new InterchangeRestoreResult(
+            Outcome: outcome,
+            ObjectsApplied: result.ObjectsApplied,
+            ObjectsSkipped: result.ObjectsSkipped,
+            RowsRestored: result.RowsImported,
+            RowCountMismatches: report is null
+                ? 0
+                : report.Issues.Count(i => i.Code == RowCountMismatchCode),
+            Issues: issues,
+            Validation: report is null
+                ? null
+                : new VerificationSummary(Passed: report.Passed, Issues: report.Issues.Select(MapIssue).ToList()),
+            LastCompletedChunk: null, // TODO: Track when importer provides this
+            Elapsed: elapsed);
     }
 
     private static InterchangeIssueView MapIssue(InterchangeIssue issue) =>

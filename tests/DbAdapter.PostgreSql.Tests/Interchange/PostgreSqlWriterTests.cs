@@ -1,6 +1,7 @@
 using CanonicalModel.Interchange;
 
 using DbAdapter.Definitions;
+using DbAdapter.Definitions.Interchange;
 using DbAdapter.PostgreSql.Interchange;
 
 using FluentAssertions;
@@ -152,6 +153,125 @@ public class PostgreSqlWriterTests
     }
 
     [Fact]
+    public async Task BuildStatements_Types_RunsEachRecordedStatementAndOrdersByKind()
+    {
+        await using var writer = CreateWriter();
+        var objects = new ISchemaObject[]
+        {
+            // Handed in the order a name-sorted file would list them, which is not the order they can
+            // be created in: the domain rests on the composite, which holds the enum.
+            Type(EObjectKind.Domain, "sales", "a_amount", "CREATE DOMAIN sales.a_amount AS numeric;"),
+            Type(EObjectKind.CompositeType, "sales", "address", "CREATE TYPE sales.address AS (mood sales.mood)"),
+            Type(EObjectKind.Enum, "sales", "mood", "CREATE TYPE sales.mood AS ENUM ('sad', 'happy')"),
+        };
+
+        var statements = writer.BuildStatements(SchemaStage.Types, objects, ObjectNameMap.Empty);
+
+        // The semicolon the capture left on the first statement is not doubled.
+        statements.Should().Equal(
+            "CREATE TYPE sales.mood AS ENUM ('sad', 'happy');",
+            "CREATE TYPE sales.address AS (mood sales.mood);",
+            "CREATE DOMAIN sales.a_amount AS numeric;");
+    }
+
+    [Theory]
+    [InlineData(EObjectKind.Publication)]
+    [InlineData(EObjectKind.Subscription)]
+    public async Task BuildStatements_Types_GivenAnObjectTheRoutingPlacesElsewhere_IsACallerError(
+        EObjectKind kind)
+    {
+        await using var writer = CreateWriter();
+        var objects = new ISchemaObject[]
+        {
+            Type(kind, string.Empty, "pub_all", "CREATE PUBLICATION pub_all FOR ALL TABLES"),
+        };
+
+        var act = () => writer.BuildStatements(SchemaStage.Types, objects, ObjectNameMap.Empty);
+
+        // Whether a kind is created at all is the adapter's declared capability, answered before the
+        // import writes anything, and which stage creates it is the routing table's answer. An object of
+        // another kind reaching this stage is therefore a caller that misread those two — a programming
+        // error, and reported as one rather than as a fact about the catalog.
+        act.Should().Throw<ArgumentException>().Which.Message
+            .Should().Contain(kind.ToString());
+    }
+
+    [Fact]
+    public async Task BuildStatements_Types_GivenAnotherKindOfObject_IsRefused()
+    {
+        await using var writer = CreateWriter();
+
+        var act = () => writer.BuildStatements(
+            SchemaStage.Types,
+            [new SchemaDefinition { Name = "sales" }],
+            ObjectNameMap.Empty);
+
+        act.Should().Throw<ArgumentException>().Which.Message
+            .Should().Contain(nameof(NativeObjectDefinition));
+    }
+
+    [Fact]
+    public async Task BuildStatements_TypeWithoutRecordedStatement_IsRefused()
+    {
+        await using var writer = CreateWriter();
+        var objects = new ISchemaObject[]
+        {
+            new NativeObjectDefinition { Kind = EObjectKind.Enum, SchemaName = "sales", Name = "mood" },
+        };
+
+        var act = () => writer.BuildStatements(SchemaStage.Types, objects, ObjectNameMap.Empty);
+
+        // The format keeps no field for an enum's labels, so there is nothing here to write a statement
+        // from — and inventing labels would create a type the source never had.
+        act.Should().Throw<InvalidOperationException>().Which.Message
+            .Should().Contain("no recorded statement");
+    }
+
+    [Fact]
+    public async Task BuildStatements_TypeRecordedAsAFragment_IsRefused()
+    {
+        await using var writer = CreateWriter();
+        var objects = new ISchemaObject[]
+        {
+            new NativeObjectDefinition
+            {
+                Kind = EObjectKind.Enum,
+                SchemaName = "sales",
+                Name = "mood",
+                NativeDefinition = new NativeDefinition(
+                    "postgresql", "CREATE TYPE sales.mood AS", Complete: false),
+            },
+        };
+
+        var act = () => writer.BuildStatements(SchemaStage.Types, objects, ObjectNameMap.Empty);
+
+        act.Should().Throw<InvalidOperationException>().Which.Message
+            .Should().Contain("fragment");
+    }
+
+    [Fact]
+    public async Task BuildStatements_TypeFromAnotherDialect_IsRefused()
+    {
+        await using var writer = CreateWriter();
+        var objects = new ISchemaObject[]
+        {
+            new NativeObjectDefinition
+            {
+                Kind = EObjectKind.Enum,
+                SchemaName = "sales",
+                Name = "mood",
+                NativeDefinition = new NativeDefinition(
+                    "mysql", "CREATE TYPE sales.mood AS ENUM ('sad')"),
+            },
+        };
+
+        var act = () => writer.BuildStatements(SchemaStage.Types, objects, ObjectNameMap.Empty);
+
+        act.Should().Throw<InvalidOperationException>().Which.Message
+            .Should().Contain("mysql").And.Contain("postgresql");
+    }
+
+    [Fact]
     public async Task BuildStatements_Sequences_PlacesEachSequenceInTheSchemaTheCatalogNames()
     {
         await using var writer = CreateWriter();
@@ -267,13 +387,681 @@ public class PostgreSqlWriterTests
             .Should().Contain("carries no captured body");
     }
 
+    [Fact]
+    public async Task BuildStatements_Tables_WritesEveryFactTheCatalogKeepsIntoOneStatement()
+    {
+        await using var writer = CreateWriter();
+        var objects = new ISchemaObject[]
+        {
+            new TableDefinition
+            {
+                Name = "orders",
+                SchemaId = SalesId,
+                Columns =
+                [
+                    Column("id", "integer", nullable: false) with { Identity = "yes" },
+                    Column("note", "text") with
+                    {
+                        Collation = "C",
+                        DefaultValue = new DatabaseExpression("postgresql", "'n/a'::text"),
+                    },
+                    Column("total", "numeric(10,2)") with
+                    {
+                        Generated = new DatabaseExpression("postgresql", "price * 2"),
+                    },
+                ],
+                PrimaryKey = new PrimaryKeyDefinition
+                {
+                    Name = "orders_pkey",
+                    Columns = ["id"],
+                },
+                UniqueConstraints =
+                [
+                    new UniqueConstraintDefinition { Name = "orders_note_key", Columns = ["note"] },
+                ],
+                CheckConstraints =
+                [
+                    new CheckConstraintDefinition
+                    {
+                        Name = "orders_total_check",
+                        Expression = new DatabaseExpression(
+                            "postgresql",
+                            "CHECK ((total > (0)::numeric)) NOT VALID"),
+                    },
+                ],
+            },
+        };
+
+        writer.BuildStatements(SchemaStage.Tables, objects, NamesSalesTables())
+            .Should()
+            .Equal(
+                // The identity column keeps its NOT NULL, the collation and the generated expression
+                // are written, and the recorded NOT VALID clause is dropped because CREATE TABLE
+                // rejects it. The layout is the copy pipeline generator's: the first declaration
+                // stays on the opening line.
+                "CREATE TABLE sales.orders (id integer GENERATED BY DEFAULT AS IDENTITY NOT NULL,"
+                + $"{Environment.NewLine}    note text COLLATE \"C\" DEFAULT 'n/a'::text,"
+                + $"{Environment.NewLine}    total numeric(10,2) GENERATED ALWAYS AS (price * 2) STORED,"
+                + $"{Environment.NewLine}    CONSTRAINT orders_pkey PRIMARY KEY (id),"
+                + $"{Environment.NewLine}    CONSTRAINT orders_note_key UNIQUE (note),"
+                + $"{Environment.NewLine}    CONSTRAINT orders_total_check CHECK ((total > (0)::numeric)));");
+    }
+
+    [Fact]
+    public async Task BuildStatements_Tables_EmitsEachPartitionOfItsParentAndNotItsColumns()
+    {
+        await using var writer = CreateWriter();
+
+        // The child is listed first on purpose: PARTITION OF needs the parent to exist, so the stage
+        // reorders by the parent link instead of trusting the catalog's order.
+        var objects = new ISchemaObject[]
+        {
+            new TableDefinition
+            {
+                Name = "orders_2026",
+                SchemaId = SalesId,
+                ParentId = OrdersId,
+                PartitionBound = "FOR VALUES FROM (1) TO (100)",
+                Columns = [Column("id", "integer")],
+            },
+            new TableDefinition
+            {
+                Id = OrdersId,
+                Name = "orders",
+                SchemaId = SalesId,
+                TableKind = ETableKind.Partitioned,
+                PartitionStrategy = "RANGE (id)",
+                Columns = [Column("id", "integer")],
+            },
+        };
+
+        writer.BuildStatements(SchemaStage.Tables, objects, NamesSalesTables())
+            .Should()
+            .Equal(
+                "CREATE TABLE sales.orders (id integer) PARTITION BY RANGE (id);",
+                "CREATE TABLE sales.orders_2026 PARTITION OF sales.orders "
+                + "FOR VALUES FROM (1) TO (100);");
+    }
+
+    [Fact]
+    public async Task BuildStatements_Tables_KeepsThePartitionClauseOfAPartitionThatIsAParent()
+    {
+        await using var writer = CreateWriter();
+        var objects = new ISchemaObject[]
+        {
+            new TableDefinition
+            {
+                Id = OrdersId,
+                Name = "orders",
+                SchemaId = SalesId,
+                TableKind = ETableKind.Partitioned,
+                PartitionStrategy = "RANGE (id)",
+                Columns = [Column("id", "integer")],
+            },
+            new TableDefinition
+            {
+                Name = "orders_2026",
+                SchemaId = SalesId,
+                ParentId = OrdersId,
+                TableKind = ETableKind.Partitioned,
+                PartitionStrategy = "HASH (id)",
+                PartitionBound = "FOR VALUES FROM (1) TO (100)",
+                Columns = [Column("id", "integer")],
+            },
+        };
+
+        writer.BuildStatements(SchemaStage.Tables, objects, NamesSalesTables())
+            .Should()
+            .Equal(
+                "CREATE TABLE sales.orders (id integer) PARTITION BY RANGE (id);",
+                "CREATE TABLE sales.orders_2026 PARTITION OF sales.orders "
+                + "FOR VALUES FROM (1) TO (100) PARTITION BY HASH (id);");
+    }
+
+    [Fact]
+    public async Task BuildStatements_TablePointingAtAParentTheCatalogDoesNotName_IsRefused()
+    {
+        await using var writer = CreateWriter();
+        var objects = new ISchemaObject[]
+        {
+            new TableDefinition
+            {
+                Name = "orders_2026",
+                SchemaId = SalesId,
+                ParentId = OutsideId,
+                PartitionBound = "FOR VALUES FROM (1) TO (100)",
+                Columns = [Column("id", "integer")],
+            },
+        };
+
+        var act = () => writer.BuildStatements(SchemaStage.Tables, objects, NamesSalesTables());
+
+        act.Should().Throw<InvalidOperationException>().Which.Message
+            .Should().Contain("orders_2026");
+    }
+
+    [Fact]
+    public async Task BuildStatements_TableWhoseParentIsNotInTheStage_IsRefused()
+    {
+        await using var writer = CreateWriter();
+
+        // The map names sales.orders, so its name is known — but the caller handed the stage only the
+        // child, and no order of these statements can create a partition before its parent.
+        var objects = new ISchemaObject[]
+        {
+            new TableDefinition
+            {
+                Name = "orders_2026",
+                SchemaId = SalesId,
+                ParentId = OrdersId,
+                PartitionBound = "FOR VALUES FROM (1) TO (100)",
+                Columns = [Column("id", "integer")],
+            },
+        };
+
+        var act = () => writer.BuildStatements(SchemaStage.Tables, objects, NamesSalesTables());
+
+        act.Should().Throw<InvalidOperationException>().Which.Message
+            .Should().Contain("parent is not among the tables");
+    }
+
+    [Fact]
+    public async Task BuildStatements_InheritsChild_IsRefusedBecauseItsOwnColumnsAreUnknown()
+    {
+        await using var writer = CreateWriter();
+        var objects = new ISchemaObject[]
+        {
+            new TableDefinition
+            {
+                Id = OrdersId,
+                Name = "orders",
+                SchemaId = SalesId,
+                Columns = [Column("id", "integer")],
+            },
+            new TableDefinition
+            {
+                Name = "orders_archive",
+                SchemaId = SalesId,
+                ParentId = OrdersId,
+                Columns = [Column("id", "integer"), Column("archived_at", "date")],
+            },
+        };
+
+        var act = () => writer.BuildStatements(SchemaStage.Tables, objects, NamesSalesTables());
+
+        // A child with a parent and no bound inherits rather than partitions, and PostgreSQL builds
+        // one from the columns the child declares for itself — which the catalog does not record.
+        act.Should().Throw<InvalidOperationException>().Which.Message
+            .Should().Contain("orders_archive").And.Contain("inherited");
+    }
+
     [Theory]
-    [InlineData(SchemaStage.Types)]
-    [InlineData(SchemaStage.Tables)]
-    [InlineData(SchemaStage.Constraints)]
-    [InlineData(SchemaStage.Indexes)]
-    [InlineData(SchemaStage.Triggers)]
+    [InlineData(ETableKind.Foreign)]
+    [InlineData(ETableKind.Temporary)]
+    public async Task BuildStatements_TableKindTheCatalogRecordsNoDetailsFor_IsRefused(
+        ETableKind kind)
+    {
+        await using var writer = CreateWriter();
+        var objects = new ISchemaObject[]
+        {
+            new TableDefinition
+            {
+                Name = "orders",
+                SchemaId = SalesId,
+                TableKind = kind,
+                Columns = [Column("id", "integer")],
+            },
+        };
+
+        var act = () => writer.BuildStatements(SchemaStage.Tables, objects, NamesSalesTables());
+
+        act.Should().Throw<InvalidOperationException>().Which.Message
+            .Should().Contain(kind.ToString());
+    }
+
+    [Fact]
+    public async Task BuildStatements_TableCarryingExclusionConstraints_IsRefused()
+    {
+        await using var writer = CreateWriter();
+        var objects = new ISchemaObject[]
+        {
+            new TableDefinition
+            {
+                Name = "slots",
+                SchemaId = SalesId,
+                Columns = [Column("during", "tsrange")],
+                ExclusionConstraints =
+                [
+                    new ExclusionConstraintDefinition { Name = "slots_no_overlap" },
+                ],
+            },
+        };
+
+        var act = () => writer.BuildStatements(SchemaStage.Tables, objects, NamesSalesTables());
+
+        // The format keeps the constraint's name and nothing of its operator or predicate, so the
+        // table would come back accepting rows the source refused.
+        act.Should().Throw<InvalidOperationException>().Which.Message
+            .Should().Contain("slots_no_overlap");
+    }
+
+    [Fact]
+    public async Task BuildStatements_Constraints_AddsEachForeignKeyOfEveryTable()
+    {
+        await using var writer = CreateWriter();
+        var objects = new ISchemaObject[]
+        {
+            new TableDefinition
+            {
+                Name = "orders",
+                SchemaId = SalesId,
+                ForeignKeys =
+                [
+                    new ForeignKeyDefinition
+                    {
+                        Name = "orders_customer_id_fkey",
+                        Columns = ["customer_id"],
+                        ReferencedTableId = CustomersId,
+                        ReferencedColumns = ["id"],
+                        OnUpdate = "NO ACTION",
+                        OnDelete = "CASCADE",
+                        IsDeferrable = true,
+                        IsInitiallyDeferred = true,
+                    },
+                    new ForeignKeyDefinition
+                    {
+                        Name = "orders_parent_id_fkey",
+                        Columns = ["parent_id"],
+                        ReferencedTableId = OrdersId,
+                        ReferencedColumns = ["id"],
+                    },
+                ],
+            },
+        };
+
+        writer.BuildStatements(SchemaStage.Constraints, objects, NamesSalesTables())
+            .Should()
+            .Equal(
+                "ALTER TABLE sales.orders ADD CONSTRAINT orders_customer_id_fkey "
+                + "FOREIGN KEY (customer_id) REFERENCES sales.customers (id) "
+                + "ON UPDATE NO ACTION ON DELETE CASCADE DEFERRABLE INITIALLY DEFERRED;",
+                "ALTER TABLE sales.orders ADD CONSTRAINT orders_parent_id_fkey "
+                + "FOREIGN KEY (parent_id) REFERENCES sales.orders (id);");
+    }
+
+    [Fact]
+    public async Task BuildStatements_ForeignKeyPointingAtAnUnnamedTable_IsRefused()
+    {
+        await using var writer = CreateWriter();
+        var objects = new ISchemaObject[]
+        {
+            new TableDefinition
+            {
+                Name = "orders",
+                SchemaId = SalesId,
+                ForeignKeys =
+                [
+                    new ForeignKeyDefinition
+                    {
+                        Name = "orders_customer_id_fkey",
+                        Columns = ["customer_id"],
+                        ReferencedTableId = OutsideId,
+                        ReferencedColumns = ["id"],
+                    },
+                ],
+            },
+        };
+
+        var act = () => writer.BuildStatements(SchemaStage.Constraints, objects, NamesSalesTables());
+
+        act.Should().Throw<InvalidOperationException>().Which.Message
+            .Should().Contain("orders_customer_id_fkey");
+    }
+
+    [Fact]
+    public async Task BuildStatements_Indexes_RunsTheCapturedTextOfEachIndexTheSourceMade()
+    {
+        await using var writer = CreateWriter();
+        var objects = new ISchemaObject[]
+        {
+            new TableDefinition
+            {
+                Name = "orders",
+                SchemaId = SalesId,
+                Indexes =
+                [
+                    Index(
+                        "orders_created_at_idx",
+                        "CREATE INDEX orders_created_at_idx ON sales.orders USING btree "
+                        + "(created_at DESC NULLS FIRST) WHERE status IS NOT NULL"),
+                    Index(
+                        "orders_total_idx",
+                        "CREATE INDEX orders_total_idx ON sales.orders USING btree (total);"),
+                ],
+            },
+        };
+
+        // Sort order, operator class and the predicate survive only in this text, which is why the
+        // stage runs it instead of rebuilding the statement from what the format structures.
+        writer.BuildStatements(SchemaStage.Indexes, objects, NamesSalesTables())
+            .Should()
+            .Equal(
+                "CREATE INDEX orders_created_at_idx ON sales.orders USING btree "
+                + "(created_at DESC NULLS FIRST) WHERE status IS NOT NULL;",
+                "CREATE INDEX orders_total_idx ON sales.orders USING btree (total);");
+    }
+
+    [Fact]
+    public async Task BuildStatements_Indexes_LeavesTheIndexesAConstraintAlreadyCreated()
+    {
+        await using var writer = CreateWriter();
+        var objects = new ISchemaObject[]
+        {
+            new TableDefinition
+            {
+                Name = "orders",
+                SchemaId = SalesId,
+                PrimaryKey = new PrimaryKeyDefinition { Name = "orders_pkey", Columns = ["id"] },
+                UniqueConstraints =
+                [
+                    new UniqueConstraintDefinition
+                    {
+                        Name = "orders_customer_id_key",
+                        Columns = ["customer_id"],
+                    },
+                ],
+                Indexes =
+                [
+                    Index("orders_pkey", "CREATE UNIQUE INDEX orders_pkey ON sales.orders (id)"),
+                    Index(
+                        "orders_customer_id_key",
+                        "CREATE UNIQUE INDEX orders_customer_id_key ON sales.orders (customer_id)"),
+                    Index(
+                        "orders_created_at_idx",
+                        "CREATE INDEX orders_created_at_idx ON sales.orders (created_at)"),
+                ],
+            },
+        };
+
+        // The table statement creates both constraints inline, and PostgreSQL names the enforcing index
+        // after the constraint, so the two captured indexes are already there: creating them again
+        // fails with "relation already exists" and rolls the whole stage back.
+        writer.BuildStatements(SchemaStage.Indexes, objects, NamesSalesTables())
+            .Should()
+            .Equal("CREATE INDEX orders_created_at_idx ON sales.orders (created_at);");
+    }
+
+    [Fact]
+    public async Task BuildStatements_Indexes_GivenAnotherKindOfObject_IsRefused()
+    {
+        await using var writer = CreateWriter();
+
+        var act = () => writer.BuildStatements(
+            SchemaStage.Indexes,
+            [new IndexDefinition { Name = "orders_created_at_idx", TableId = OrdersId }],
+            NamesSalesTables());
+
+        act.Should().Throw<ArgumentException>().Which.Message
+            .Should().Contain("TableDefinition");
+    }
+
+    [Fact]
+    public async Task BuildStatements_IndexWithoutCapturedDefinition_IsRefused()
+    {
+        await using var writer = CreateWriter();
+        var objects = new ISchemaObject[]
+        {
+            new TableDefinition
+            {
+                Name = "orders",
+                SchemaId = SalesId,
+                Indexes = [new IndexDefinition { Name = "orders_created_at_idx", TableId = OrdersId }],
+            },
+        };
+
+        var act = () => writer.BuildStatements(SchemaStage.Indexes, objects, NamesSalesTables());
+
+        // The format gives an index a name, a table and whether it is unique: no columns to write a
+        // statement from, so an index without its captured text cannot be restored.
+        act.Should().Throw<InvalidOperationException>().Which.Message
+            .Should().Contain("orders_created_at_idx");
+    }
+
+    [Fact]
+    public async Task BuildStatements_IndexRecordedAsAFragment_IsRefused()
+    {
+        await using var writer = CreateWriter();
+        var objects = new ISchemaObject[]
+        {
+            new TableDefinition
+            {
+                Name = "orders",
+                SchemaId = SalesId,
+                Indexes =
+                [
+                    new IndexDefinition
+                    {
+                        Name = "orders_created_at_idx",
+                        TableId = OrdersId,
+                        NativeDefinition = new NativeDefinition(
+                            "postgresql",
+                            "CREATE INDEX orders_created_at_idx ON sales.orders",
+                            Complete: false),
+                    },
+                ],
+            },
+        };
+
+        var act = () => writer.BuildStatements(SchemaStage.Indexes, objects, NamesSalesTables());
+
+        act.Should().Throw<InvalidOperationException>().Which.Message
+            .Should().Contain("fragment");
+    }
+
+    [Fact]
+    public async Task BuildStatements_IndexTextFromAnotherDialect_IsRefused()
+    {
+        await using var writer = CreateWriter();
+        var objects = new ISchemaObject[]
+        {
+            new TableDefinition
+            {
+                Name = "orders",
+                SchemaId = SalesId,
+                Indexes =
+                [
+                    new IndexDefinition
+                    {
+                        Name = "orders_created_at_idx",
+                        TableId = OrdersId,
+                        NativeDefinition = new NativeDefinition(
+                            "mysql",
+                            "CREATE INDEX orders_created_at_idx ON orders (created_at)"),
+                    },
+                ],
+            },
+        };
+
+        var act = () => writer.BuildStatements(SchemaStage.Indexes, objects, NamesSalesTables());
+
+        act.Should().Throw<InvalidOperationException>().Which.Message
+            .Should().Contain("mysql").And.Contain("postgresql");
+    }
+
+    [Fact]
+    public async Task BuildStatements_Triggers_RunsTheCapturedTextOfEachTriggerTheSourceMade()
+    {
+        await using var writer = CreateWriter();
+        var objects = new ISchemaObject[]
+        {
+            Trigger(
+                "tr_audit",
+                "CREATE TRIGGER tr_audit BEFORE UPDATE OF total OR INSERT ON sales.orders "
+                + "FOR EACH ROW WHEN (new.status IS NOT NULL) EXECUTE FUNCTION sales.audit()"),
+            Trigger(
+                "tr_notify",
+                "CREATE TRIGGER tr_notify AFTER DELETE ON sales.orders FOR EACH STATEMENT "
+                + "EXECUTE FUNCTION public.notify();"),
+        };
+
+        // The columns an UPDATE OF event names, the order its events were declared in, the WHEN clause
+        // and the function's arguments exist in no field of the record, so the stage runs the text the
+        // engine reported instead of writing a statement from what the format structures.
+        writer.BuildStatements(SchemaStage.Triggers, objects, NamesSalesTables())
+            .Should()
+            .Equal(
+                "CREATE TRIGGER tr_audit BEFORE UPDATE OF total OR INSERT ON sales.orders "
+                + "FOR EACH ROW WHEN (new.status IS NOT NULL) EXECUTE FUNCTION sales.audit();",
+                "CREATE TRIGGER tr_notify AFTER DELETE ON sales.orders FOR EACH STATEMENT "
+                + "EXECUTE FUNCTION public.notify();");
+    }
+
+    [Fact]
+    public async Task BuildStatements_Triggers_DisablesATriggerTheSourceHadDisabled()
+    {
+        await using var writer = CreateWriter();
+        var objects = new ISchemaObject[]
+        {
+            Trigger(
+                "tr_audit",
+                "CREATE TRIGGER tr_audit AFTER INSERT ON sales.orders FOR EACH ROW "
+                + "EXECUTE FUNCTION sales.audit()",
+                enabledState: "D"),
+        };
+
+        // pg_get_triggerdef describes the trigger, never its enabled flag, and the statement it yields
+        // always creates one that fires. The recorded state therefore needs the extra statement.
+        writer.BuildStatements(SchemaStage.Triggers, objects, NamesSalesTables())
+            .Should()
+            .Equal(
+                "CREATE TRIGGER tr_audit AFTER INSERT ON sales.orders FOR EACH ROW "
+                + "EXECUTE FUNCTION sales.audit();",
+                "ALTER TABLE sales.orders DISABLE TRIGGER tr_audit;");
+    }
+
+    [Fact]
+    public async Task BuildStatements_Triggers_GivenAnotherKindOfObject_IsRefused()
+    {
+        await using var writer = CreateWriter();
+
+        var act = () => writer.BuildStatements(
+            SchemaStage.Triggers,
+            [new TableDefinition { Name = "orders", SchemaId = SalesId }],
+            NamesSalesTables());
+
+        act.Should().Throw<ArgumentException>().Which.Message
+            .Should().Contain("TriggerDefinition");
+    }
+
+    [Fact]
+    public async Task BuildStatements_TriggerWithoutCapturedDefinition_IsRefused()
+    {
+        await using var writer = CreateWriter();
+        var objects = new ISchemaObject[]
+        {
+            new TriggerDefinition { Name = "tr_audit", TableId = OrdersId },
+        };
+
+        var act = () => writer.BuildStatements(SchemaStage.Triggers, objects, NamesSalesTables());
+
+        // The record names no function, so a trigger that arrived without its text cannot be written.
+        act.Should().Throw<InvalidOperationException>().Which.Message
+            .Should().Contain("tr_audit");
+    }
+
+    [Fact]
+    public async Task BuildStatements_TriggerRecordedAsAFragment_IsRefused()
+    {
+        await using var writer = CreateWriter();
+        var objects = new ISchemaObject[]
+        {
+            new TriggerDefinition
+            {
+                Name = "tr_audit",
+                TableId = OrdersId,
+                NativeDefinition = new NativeDefinition(
+                    "postgresql",
+                    "CREATE TRIGGER tr_audit BEFORE UPDATE ON sales.orders",
+                    Complete: false),
+            },
+        };
+
+        var act = () => writer.BuildStatements(SchemaStage.Triggers, objects, NamesSalesTables());
+
+        act.Should().Throw<InvalidOperationException>().Which.Message
+            .Should().Contain("fragment");
+    }
+
+    [Fact]
+    public async Task BuildStatements_TriggerTextFromAnotherDialect_IsRefused()
+    {
+        await using var writer = CreateWriter();
+        var objects = new ISchemaObject[]
+        {
+            new TriggerDefinition
+            {
+                Name = "tr_audit",
+                TableId = OrdersId,
+                NativeDefinition = new NativeDefinition(
+                    "mysql",
+                    "CREATE TRIGGER tr_audit AFTER INSERT ON orders FOR EACH ROW EXECUTE FUNCTION audit()"),
+            },
+        };
+
+        var act = () => writer.BuildStatements(SchemaStage.Triggers, objects, NamesSalesTables());
+
+        act.Should().Throw<InvalidOperationException>().Which.Message
+            .Should().Contain("mysql").And.Contain("postgresql");
+    }
+
+    [Fact]
+    public async Task BuildStatements_TriggerWithAStateThatMeansNeitherEnabledNorDisabled_IsRefused()
+    {
+        await using var writer = CreateWriter();
+        var objects = new ISchemaObject[]
+        {
+            Trigger(
+                "tr_audit",
+                "CREATE TRIGGER tr_audit AFTER INSERT ON sales.orders FOR EACH ROW "
+                + "EXECUTE FUNCTION sales.audit()",
+                enabledState: "R"),
+        };
+
+        var act = () => writer.BuildStatements(SchemaStage.Triggers, objects, NamesSalesTables());
+
+        // Creating the trigger would leave it firing when the source kept it from firing in some of the
+        // states this flag can hold, and the format gives the restore no statement for those.
+        act.Should().Throw<InvalidOperationException>().Which.Message
+            .Should().Contain("enabled state");
+    }
+
+    [Fact]
+    public async Task BuildStatements_TriggerOnATableTheCatalogDoesNotName_IsRefused()
+    {
+        await using var writer = CreateWriter();
+        var objects = new ISchemaObject[]
+        {
+            new TriggerDefinition
+            {
+                Name = "tr_audit",
+                TableId = OutsideId,
+                NativeDefinition = new NativeDefinition(
+                    "postgresql",
+                    "CREATE TRIGGER tr_audit AFTER INSERT ON sales.outside FOR EACH ROW "
+                    + "EXECUTE FUNCTION sales.audit()"),
+            },
+        };
+
+        var act = () => writer.BuildStatements(SchemaStage.Triggers, objects, NamesSalesTables());
+
+        act.Should().Throw<InvalidOperationException>().Which.Message
+            .Should().Contain("table");
+    }
+
+    [Theory]
     [InlineData(SchemaStage.PostData)]
+    [InlineData(SchemaStage.Publications)]
+    [InlineData(SchemaStage.Subscriptions)]
     public async Task BuildStatements_AStageThisAdapterCannotServe_Refuses(SchemaStage stage)
     {
         await using var writer = CreateWriter();
@@ -302,20 +1090,158 @@ public class PostgreSqlWriterTests
     }
 
     [Fact]
-    public async Task WriteTableRowsAsync_DoesNotReadTheBatchItCannotApply()
+    public void BuildRowTargets_PlainColumns_AnswerEveryOneOfThemInCatalogOrder()
+    {
+        var targets = PostgreSqlWriter.BuildRowTargets(
+        [
+            StoredColumn("id", "integer", ordinal: 1),
+            StoredColumn("total", "numeric(10,2)", ordinal: 2),
+        ]);
+
+        targets.Should().Equal(
+            new PostgreSqlWriter.RowTarget("id", "integer", 0),
+            new PostgreSqlWriter.RowTarget("total", "numeric(10,2)", 1));
+    }
+
+    [Fact]
+    public void BuildRowTargets_ColumnListOutOfOrder_FollowsTheOrdinalBecauseThatIsTheExportOrder()
+    {
+        // A chunk stores a row as positional text, and the export selected the columns by ordinal, so
+        // the slot a value answers is the ordinal's position — not the place the section happened to
+        // list the column in.
+        var targets = PostgreSqlWriter.BuildRowTargets(
+        [
+            StoredColumn("note", "text", ordinal: 3),
+            StoredColumn("id", "integer", ordinal: 1),
+            StoredColumn("total", "numeric(10,2)", ordinal: 2),
+        ]);
+
+        targets.Select(t => t.Column).Should().Equal("id", "total", "note");
+        targets.Select(t => t.RowIndex).Should().Equal(0, 1, 2);
+    }
+
+    [Fact]
+    public void BuildRowTargets_GeneratedColumn_LeavesTheStatementAndKeepsItsSlot()
+    {
+        // PostgreSQL refuses an INSERT that names a generated column, so the token the catalog holds
+        // for it is dropped — but the columns behind it still answer the same positions they did in
+        // the stored row.
+        var targets = PostgreSqlWriter.BuildRowTargets(
+        [
+            StoredColumn("id", "integer", ordinal: 1),
+            StoredGeneratedColumn("display", "text", ordinal: 2),
+            StoredColumn("note", "text", ordinal: 3),
+        ]);
+
+        targets.Should().Equal(
+            new PostgreSqlWriter.RowTarget("id", "integer", 0),
+            new PostgreSqlWriter.RowTarget("note", "text", 2));
+    }
+
+    [Fact]
+    public void BuildRowTargets_TypeRecordedAsEmpty_RefusesInsteadOfCastingToNothing()
+    {
+        var act = () => PostgreSqlWriter.BuildRowTargets([StoredColumn("payload", "", ordinal: 1)]);
+
+        act.Should().Throw<InvalidOperationException>().Which.Message
+            .Should().Contain("payload");
+    }
+
+    [Fact]
+    public void BuildRowValues_PlainText_WritesEachTokenAsALiteralOfItsOwnType()
+    {
+        var targets = PostgreSqlWriter.BuildRowTargets(
+        [
+            StoredColumn("note", "text", ordinal: 1),
+            StoredColumn("total", "numeric(10,2)", ordinal: 2),
+            StoredColumn("count", "integer", ordinal: 3),
+        ]);
+        var row = new[]
+        {
+            DataValue.FromText(ELogicalType.String, "O'Reilly"),
+            DataValue.Null(ELogicalType.Decimal),
+            DataValue.FromText(ELogicalType.Integer32, "42"),
+        };
+
+        PostgreSqlWriter.BuildRowValues(targets, row)
+            .Should().Be("'O''Reilly'::text, NULL, '42'::integer");
+    }
+
+    [Fact]
+    public void BuildRowValues_SkipsTheGeneratedColumnItCannotWrite()
+    {
+        var targets = PostgreSqlWriter.BuildRowTargets(
+        [
+            StoredColumn("id", "integer", ordinal: 1),
+            StoredGeneratedColumn("display", "text", ordinal: 2),
+        ]);
+        var row = new[]
+        {
+            DataValue.FromText(ELogicalType.Integer32, "7"),
+            DataValue.FromText(ELogicalType.String, "seven"),
+        };
+
+        PostgreSqlWriter.BuildRowValues(targets, row).Should().Be("'7'::integer");
+    }
+
+    [Fact]
+    public void BuildRowValues_RowShorterThanTheRecordedColumns_StopsRatherThanGuessingThePlace()
+    {
+        var targets = PostgreSqlWriter.BuildRowTargets(
+        [
+            StoredColumn("id", "integer", ordinal: 1),
+            StoredColumn("note", "text", ordinal: 2),
+        ]);
+        var row = new[] { DataValue.FromText(ELogicalType.Integer32, "7") };
+
+        var act = () => PostgreSqlWriter.BuildRowValues(targets, row);
+
+        act.Should().Throw<InvalidOperationException>().Which.Message
+            .Should().Contain("note").And.Contain("1 value");
+    }
+
+    [Fact]
+    public void BuildInsertStatement_AssemblesOneValuesListPerStoredRow() =>
+        PostgreSqlWriter.BuildInsertStatement(
+                "\"sales\".\"orders\"",
+                "\"id\", \"note\"",
+                [
+                    new PostgreSqlWriter.RowTarget("id", "integer", 0),
+                    new PostgreSqlWriter.RowTarget("note", "text", 1),
+                ],
+                [
+                    new[]
+                    {
+                        DataValue.FromText(ELogicalType.Integer32, "7"),
+                        DataValue.FromText(ELogicalType.String, "a b"),
+                    },
+                    new[]
+                    {
+                        DataValue.FromText(ELogicalType.Integer32, "8"),
+                        DataValue.Null(ELogicalType.String),
+                    },
+                ])
+            .Should()
+            .Be(
+                "INSERT INTO \"sales\".\"orders\" (\"id\", \"note\") VALUES "
+                + "('7'::integer, 'a b'::text), ('8'::integer, NULL);");
+
+    [Fact]
+    public async Task WriteTableRowsAsync_CatalogRecordingNoWritableColumn_Refuses()
     {
         await using var writer = CreateWriter();
 
         var act = () => writer.WriteTableRowsAsync(
-            new TableRef("public", "orders"),
+            new TableRef("sales", "orders"),
+            [StoredGeneratedColumn("display", "text", ordinal: 1)],
             ReadRowBatch(),
             CancellationToken.None);
 
         var error = await Assert.ThrowsAsync<NotSupportedException>(act);
 
-        error.Message.Should().Contain("orders");
+        error.Message.Should().Contain("sales.orders");
         _rowBatchPulled.Should().BeFalse(
-            "reading rows the writer cannot place would leave the target short and the report green");
+            "a table nothing can be written into has no reason to have its rows read");
     }
 
     [Fact]
@@ -351,13 +1277,107 @@ public class PostgreSqlWriterTests
     }
 
     [Fact]
-    public async Task ValidateAsync_DoesNotReportPassWithoutLooking()
+    public void CountTargetObjects_ModelHoldingRoutines_SeparatesFunctionsFromProcedures()
     {
+        // The live model keeps both in one collection while the interchange model names them apart, so
+        // a restore that created one of each has to be checked against one of each.
+        var counted = PostgreSqlWriter.CountTargetObjects(
+            InterchangeTestModel.Empty() with
+            {
+                Functions =
+                [
+                    new Models.FunctionDefinition(
+                        "public", "fn_notify", "plpgsql", "trigger", "CREATE FUNCTION ...", [],
+                        CanonicalModel.Enums.EFunctionVolatility.Volatile, false, false, null, false),
+                    new Models.FunctionDefinition(
+                        "public", "add_customer", "plpgsql", "integer", "CREATE FUNCTION ...", [],
+                        CanonicalModel.Enums.EFunctionVolatility.Volatile, false, false, null, false),
+                    new Models.FunctionDefinition(
+                        "public", "run_cleanup", "plpgsql", "void", "CREATE PROCEDURE ...", [],
+                        CanonicalModel.Enums.EFunctionVolatility.Volatile, false, false, null, true),
+                ],
+            });
+
+        counted[EObjectKind.Function].Should().Be(2);
+        counted[EObjectKind.Procedure].Should().Be(1);
+    }
+
+    [Fact]
+    public void CountTargetObjects_KindTheLiveModelHasNoCollectionFor_IsLeftOut()
+    {
+        var counted = PostgreSqlWriter.CountTargetObjects(InterchangeTestModel.Empty());
+
+        counted.ContainsKey(EObjectKind.Grant).Should().BeFalse(
+            "a zero would be reported as a target holding nothing, where the truth is that this "
+            + "writer cannot count the kind at all");
+    }
+
+    [Fact]
+    public async Task ValidateAsync_TargetHoldingWhatTheCatalogRecords_PassesWithItsCounts()
+    {
+        Given(InterchangeTestModel.Empty() with { Tables = [Table("orders"), Table("customers")] });
         await using var writer = CreateWriter();
 
-        var act = () => writer.ValidateAsync(new TargetExpectation(), CancellationToken.None);
+        var report = await writer.ValidateAsync(
+            new TargetExpectation
+            {
+                ObjectCounts = new Dictionary<EObjectKind, int> { [EObjectKind.Table] = 2 },
+            },
+            CancellationToken.None);
 
-        await act.Should().ThrowAsync<NotSupportedException>();
+        report.Passed.Should().BeTrue();
+        report.Issues.Should().BeEmpty();
+        report.FoundRowCounts.Should().BeEmpty();
+        report.FoundObjectCounts[EObjectKind.Table].Should().Be(2);
+    }
+
+    [Fact]
+    public async Task ValidateAsync_TargetShortOfTheCatalog_ReportsTheMismatchAsAnError()
+    {
+        Given(InterchangeTestModel.Empty() with { Tables = [Table("orders")] });
+        await using var writer = CreateWriter();
+
+        var report = await writer.ValidateAsync(
+            new TargetExpectation
+            {
+                ObjectCounts = new Dictionary<EObjectKind, int> { [EObjectKind.Table] = 3 },
+            },
+            CancellationToken.None);
+
+        report.Passed.Should().BeFalse();
+        report.Issues.Should().ContainSingle()
+            .Which.Message.Should().Contain("3").And.Contain("1").And.Contain("Table");
+    }
+
+    [Fact]
+    public async Task ValidateAsync_KindThisWriterCannotCount_IsReportedAsUnchecked()
+    {
+        Given(InterchangeTestModel.Empty());
+        await using var writer = CreateWriter();
+
+        var report = await writer.ValidateAsync(
+            new TargetExpectation
+            {
+                ObjectCounts = new Dictionary<EObjectKind, int> { [EObjectKind.Grant] = 4 },
+            },
+            CancellationToken.None);
+
+        report.Passed.Should().BeTrue("nothing was found to be wrong, but neither was anything checked");
+        report.Issues.Should().ContainSingle()
+            .Which.Severity.Should().Be(EIssueSeverity.Warning);
+        report.FoundObjectCounts.Should().BeEmpty();
+    }
+
+    [Fact]
+    public async Task ValidateAsync_ExpectationNamingNothing_AskedForNoRowCountAndTookNoConnection()
+    {
+        Given(InterchangeTestModel.Empty());
+        await using var writer = CreateWriter();
+
+        var report = await writer.ValidateAsync(new TargetExpectation(), CancellationToken.None);
+
+        report.Passed.Should().BeTrue();
+        report.Issues.Should().BeEmpty();
     }
 
     [Fact]
@@ -390,10 +1410,107 @@ public class PostgreSqlWriterTests
     private static readonly InterchangeId OtherSchemaId =
         InterchangeId.Compute("schema", string.Empty, "unnamed");
 
+    private static readonly InterchangeId OrdersId =
+        InterchangeId.Compute("table", "sales", "orders");
+
+    private static readonly InterchangeId CustomersId =
+        InterchangeId.Compute("table", "sales", "customers");
+
+    private static readonly InterchangeId OutsideId =
+        InterchangeId.Compute("table", "sales", "outside");
+
     private static ObjectNameMap NamesOneSchema() =>
         new(
             new Dictionary<InterchangeId, string> { [SalesId] = "sales" },
             new Dictionary<InterchangeId, TableRef>());
+
+    /// <summary>
+    /// The map a catalog holding <c>sales.orders</c> and <c>sales.customers</c> would hand the writer.
+    /// </summary>
+    private static ObjectNameMap NamesSalesTables() =>
+        new(
+            new Dictionary<InterchangeId, string> { [SalesId] = "sales" },
+            new Dictionary<InterchangeId, TableRef>
+            {
+                [OrdersId] = new TableRef("sales", "orders"),
+                [CustomersId] = new TableRef("sales", "customers"),
+            });
+
+    private static ColumnDefinition Column(
+        string name,
+        string type,
+        bool nullable = true) =>
+        new()
+        {
+            Name = name,
+            NativeType = new NativeType(type),
+            Nullable = nullable,
+        };
+
+    /// <summary>
+    /// A column as the catalog records one for a table whose rows are being written: its position in
+    /// the stored row is the ordinal the export selected by.
+    /// </summary>
+    private static ColumnDefinition StoredColumn(string name, string type, int ordinal) =>
+        new()
+        {
+            Name = name,
+            NativeType = new NativeType(type),
+            Ordinal = ordinal,
+            Nullable = true,
+        };
+
+    /// <summary>A column the server computes for itself, which no INSERT may name.</summary>
+    private static ColumnDefinition StoredGeneratedColumn(string name, string type, int ordinal) =>
+        StoredColumn(name, type, ordinal) with
+        {
+            Generated = new DatabaseExpression("postgresql", $"concat('{name}')"),
+        };
+
+    /// <summary>
+    /// A type as the catalog's native file records one: which kind of type it is, where it lives, and the
+    /// complete statement the capture assembled for it.
+    /// </summary>
+    private static NativeObjectDefinition Type(
+        EObjectKind kind,
+        string schemaName,
+        string name,
+        string statement) =>
+        new()
+        {
+            Kind = kind,
+            SchemaName = schemaName,
+            Name = name,
+            NativeDefinition = new NativeDefinition("postgresql", statement),
+        };
+
+    /// <summary>
+    /// An index as the catalog records one: its name, the table it belongs to, and the complete
+    /// statement the engine reported for it.
+    /// </summary>
+    private static IndexDefinition Index(string name, string definition) =>
+        new()
+        {
+            Name = name,
+            TableId = OrdersId,
+            NativeDefinition = new NativeDefinition("postgresql", definition),
+        };
+
+    /// <summary>
+    /// A trigger as the catalog records one: its name, the table it fires on, and the complete statement
+    /// the engine reported for it.
+    /// </summary>
+    private static TriggerDefinition Trigger(
+        string name,
+        string definition,
+        string enabledState = "O") =>
+        new()
+        {
+            Name = name,
+            TableId = OrdersId,
+            EnabledState = enabledState,
+            NativeDefinition = new NativeDefinition("postgresql", definition),
+        };
 
     private static Models.SequenceDefinition Sequence(string name) =>
         new("public", name, 1, 1, null, null, 1, false, "bigint", null);

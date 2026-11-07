@@ -132,7 +132,11 @@ internal static class InterchangeTestModel
                     true,
                     true,
                     "NEW.id IS NOT NULL",
-                    null),
+                    null,
+                    // What pg_get_triggerdef reports for this trigger: the only record of its WHEN
+                    // clause and of the order its events were declared in.
+                    Definition: "CREATE TRIGGER tr_audit BEFORE INSERT OR UPDATE ON public.customers "
+                        + "FOR EACH ROW WHEN (NEW.id IS NOT NULL) EXECUTE FUNCTION public.fn_notify()"),
                 new TriggerDefinition(
                     "public",
                     "tr_disabled",
@@ -191,12 +195,14 @@ internal static class InterchangeTestModel
             ],
             Domains =
             [
+                // pg_get_constraintdef reports a domain's check as the whole CHECK clause, which is the
+                // shape the capture writes into the statement it assembles.
                 new DomainDefinition(
                     "public",
                     "positive_amount",
                     "numeric",
                     null,
-                    "VALUE > 0",
+                    "CHECK ((VALUE > 0))",
                     false,
                     null),
             ],

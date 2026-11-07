@@ -32,6 +32,12 @@ public enum SchemaStage
     /// <summary>Triggers and event triggers.</summary>
     Triggers = 90,
 
+    /// <summary>Publications, created after the tables they enumerate.</summary>
+    Publications = 95,
+
+    /// <summary>Subscriptions, created after the publications they read.</summary>
+    Subscriptions = 96,
+
     /// <summary>Sequence state, deferred foreign keys, post-import state.</summary>
     PostData = 100,
 }

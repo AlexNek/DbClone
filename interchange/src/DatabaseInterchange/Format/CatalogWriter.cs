@@ -355,7 +355,7 @@ public sealed class CatalogWriter : IAsyncDisposable
             chunkRows.Add(row);
             rowCount++;
 
-            var rowJson = JsonSerializer.Serialize(row.Select(r => r.IsNull ? null : r.Value), CatalogJson.WriterOptions);
+            var rowJson = JsonSerializer.Serialize(row.Select(r => r.IsNull ? null : r.Value), CatalogJson.RowWriterOptions);
             chunkBytes += Encoding.UTF8.GetByteCount(rowJson) + 1; // +1 for newline
 
             if (chunkBytes >= maxChunkBytes || chunkRows.Count >= maxRowsPerChunk)
@@ -422,7 +422,7 @@ public sealed class CatalogWriter : IAsyncDisposable
 
         foreach (var row in rows)
         {
-            var json = JsonSerializer.Serialize(row.Select(r => r.IsNull ? null : r.Value), CatalogJson.WriterOptions);
+            var json = JsonSerializer.Serialize(row.Select(r => r.IsNull ? null : r.Value), CatalogJson.RowWriterOptions);
             sb.AppendLine(json);
         }
 

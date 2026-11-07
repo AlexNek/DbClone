@@ -205,6 +205,30 @@ public class DatabaseModelMapperTests
     }
 
     [Fact]
+    public void Map_TriggerHandsTheEngineStatementTextAndTheStateItWasReportedIn()
+    {
+        var model = InterchangeTestModel.Full();
+        var triggers = model.Triggers.Select(
+            t => t.Name == "tr_audit" ? t with { EnabledState = "R" } : t).ToList();
+
+        var snapshot = Mapper.Map(model with { Triggers = triggers });
+        var audit = snapshot.Tables.Single(t => t.Name == "customers").Triggers.Single();
+
+        // The statement text is what the trigger stage runs, because the structured fields name no
+        // function to call. The enabled flag travels as the engine reported it rather than being
+        // flattened to enabled-or-disabled: a state the restore has no statement for has to reach it as
+        // itself, so the stage refuses it instead of creating a trigger that fires when the source's did
+        // not. The other trigger in the same model reports no flag, and its state stays derived.
+        audit.NativeDefinition!.Dialect.Should().Be(Dialect);
+        audit.NativeDefinition.CapturedBy.Should().Be("pg_get_triggerdef");
+        audit.NativeDefinition.Complete.Should().BeTrue();
+        audit.NativeDefinition.Text.Should().StartWith("CREATE TRIGGER tr_audit BEFORE INSERT OR UPDATE");
+        audit.EnabledState.Should().Be("R");
+        snapshot.Tables.Single(t => t.Name == "orders").Triggers.Single()
+            .EnabledState.Should().Be("D");
+    }
+
+    [Fact]
     public void Map_ViewsIncludeMaterializedViewsAndMarkTheirTextAsAFragment()
     {
         var snapshot = MapFull();
@@ -344,36 +368,143 @@ public class DatabaseModelMapperTests
     {
         var natives = Mapper.MapNativeObjects(InterchangeTestModel.Full());
 
-        natives.Select(n => $"{n.ObjectKind}/{n.Name}").Should()
+        natives.Select(n => $"{n.Kind}/{n.SchemaName}/{n.Name}").Should()
             .Equal(
-                "customType/address",
-                "customType/mood",
-                "domain/positive_amount",
-                "publication/pub_all",
-                "subscription/sub_1");
+                "CompositeType/public/address",
+                "Domain/public/positive_amount",
+                "Enum/public/mood",
+                "Publication//pub_all",
+                "Subscription//sub_1");
 
         // Views, functions, triggers, sequences, extensions and policies are mapped structurally
         // and carry their own native text — repeating them here would give the import two sources
         // of truth for one object.
-        var structuredKinds = new HashSet<string>(StringComparer.OrdinalIgnoreCase)
+        var structuredKinds = new HashSet<EObjectKind>
         {
-            "view", "materializedView", "function", "procedure", "trigger", "sequence",
-            "extension", "policy",
+            EObjectKind.View, EObjectKind.MaterializedView, EObjectKind.Function, EObjectKind.Procedure,
+            EObjectKind.Trigger, EObjectKind.Sequence, EObjectKind.Extension, EObjectKind.Policy,
         };
 
-        natives.Should().NotContain(n => structuredKinds.Contains(n.ObjectKind));
+        natives.Should().NotContain(n => structuredKinds.Contains(n.Kind));
     }
 
     [Fact]
-    public void MapNativeObjects_PreservesTheTypeStatementAndTheSourceDialect()
+    public void MapNativeObjects_IdentifyTheirObjectsFromTheSameGraphTheSectionsUse()
+    {
+        var model = InterchangeTestModel.Full();
+        var natives = Mapper.MapNativeObjects(model);
+        var graph = InterchangeIdGraph.Create(model, Dialect);
+
+        var mood = natives.Single(n => n.Name == "mood");
+        mood.Id.Should().Be(graph.Type("public", "mood"));
+        mood.SourceObjectId.Should().Be("public.mood");
+
+        // A publication belongs to the database rather than to a schema, so it is identified the way
+        // an extension is: by its name alone.
+        var publication = natives.Single(n => n.Name == "pub_all");
+        publication.Id.Should().Be(graph.Publication("pub_all"));
+        publication.SourceObjectId.Should().Be("pub_all");
+
+        natives.Single(n => n.Name == "sub_1").Id.Should().Be(graph.Subscription("sub_1"));
+
+        // One pg_type namespace per schema is what lets an enum, a composite and a domain share the
+        // "type" token, so no two of these objects may land on one id.
+        natives.Select(n => n.Id).Should().OnlyHaveUniqueItems();
+    }
+
+    [Fact]
+    public void MapNativeObjects_CarriesTheStatementAndTheDialectItIsWrittenIn()
     {
         var natives = Mapper.MapNativeObjects(InterchangeTestModel.Full());
 
         var mood = natives.Single(n => n.Name == "mood");
-        mood.NativeSql.Should().Be("CREATE TYPE public.mood AS ENUM ('sad', 'happy')");
-        mood.SourceDialect.Should().Be(Dialect);
+        mood.NativeDefinition!.Text.Should().Be("CREATE TYPE public.mood AS ENUM ('sad', 'happy')");
+        mood.NativeDefinition.Dialect.Should().Be(Dialect);
+        mood.NativeDefinition.Complete.Should().BeTrue();
+
+        natives.Single(n => n.Name == "address").NativeDefinition!.Text.Should()
+            .Be("CREATE TYPE public.address AS (city text)");
+
+        var domain = natives.Single(n => n.Name == "positive_amount");
+        domain.NativeDefinition!.Text.Should()
+            .Be("CREATE DOMAIN public.positive_amount AS numeric NOT NULL CHECK ((VALUE > 0))");
+
+        // The text is whole for what the metadata model reports about the domain; a collation declared
+        // on the base type is not among what it reports, and the note says so.
+        domain.Notes.Should().ContainSingle().Which.Code.Should().Be("DomainCollationNotCaptured");
 
         natives.Single(n => n.Name == "pub_all").Dependencies.Should().BeEmpty();
+    }
+
+    [Fact]
+    public void MapNativeObjects_QuotesNamesAndEscapesLabelsSoTheTextRestatesTheDeclaration()
+    {
+        var model = InterchangeTestModel.Empty() with
+        {
+            Enums = [new Models.EnumDefinition("Sales", "Mood", ["ok", "it's fine"], null)],
+            CompositeTypes =
+            [
+                new Models.CompositeTypeDefinition(
+                    "Sales",
+                    "Address",
+                    [new Models.ColumnDefinition("City", "text", 1, false, null, false, false, null, null)],
+                    null),
+            ],
+            Domains =
+            [
+                new Models.DomainDefinition(
+                    "Sales", "Amount", "numeric", "1", "CHECK ((VALUE > 0))", false, null),
+            ],
+        };
+
+        var natives = Mapper.MapNativeObjects(model);
+
+        // A name the source stored in mixed case comes back quoted, or the server would fold it to
+        // lower case and create a different type; an apostrophe in a label is doubled, which is
+        // escaping for a literal rather than quoting for a name.
+        natives.Single(n => n.Kind == EObjectKind.Enum).NativeDefinition!.Text.Should()
+            .Be("""CREATE TYPE "Sales"."Mood" AS ENUM ('ok', 'it''s fine')""");
+        natives.Single(n => n.Kind == EObjectKind.CompositeType).NativeDefinition!.Text.Should()
+            .Be("""CREATE TYPE "Sales"."Address" AS ("City" text NOT NULL)""");
+        natives.Single(n => n.Kind == EObjectKind.Domain).NativeDefinition!.Text.Should()
+            .Be("""CREATE DOMAIN "Sales"."Amount" AS numeric DEFAULT 1 NOT NULL CHECK ((VALUE > 0))""");
+    }
+
+    [Fact]
+    public void MapNativeObjects_PublicationOfNothingSaysSoBecauseLeavingItOutMeansEverything()
+    {
+        var model = InterchangeTestModel.Empty() with
+        {
+            Publications = [new Models.PublicationDefinition("pub_none", false, [], null)],
+        };
+
+        var publication = Mapper.MapNativeObjects(model).Single();
+
+        publication.NativeDefinition!.Text.Should().Be("CREATE PUBLICATION pub_none FOR NOTHING");
+
+        // Which operations it publishes, and whether it publishes through a partitioned table's root,
+        // are in no field of the metadata model.
+        publication.NativeDefinition.Complete.Should().BeFalse();
+        publication.Notes.Should().ContainSingle().Which.Code.Should().Be("PublicationSettingsNotCaptured");
+    }
+
+    [Fact]
+    public void MapNativeObjects_SubscriptionKeepsNoStatementBecauseItsTextHoldsACredential()
+    {
+        var natives = Mapper.MapNativeObjects(InterchangeTestModel.Full());
+
+        var subscription = natives.Single(n => n.Kind == EObjectKind.Subscription);
+
+        subscription.NativeDefinition.Should().BeNull();
+        subscription.Dependencies.Should().Equal("pub_all");
+        subscription.Notes.Should().ContainSingle().Which.Code.Should().Be("CredentialOmitted");
+
+        // A catalog is a file that gets copied, so no captured statement of any object may carry the
+        // publisher's password.
+        natives.Where(n => n.NativeDefinition is not null)
+            .Select(n => n.NativeDefinition!.Text)
+            .Should()
+            .NotContain(text => text.Contains("fake_pw_123", StringComparison.Ordinal));
     }
 
     [Fact]

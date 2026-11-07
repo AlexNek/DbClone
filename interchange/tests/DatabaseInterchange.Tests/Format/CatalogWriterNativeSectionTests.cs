@@ -1,3 +1,5 @@
+using CanonicalModel.Interchange;
+
 using DbAdapter.Definitions.Interchange;
 
 using DatabaseInterchange.Format;
@@ -38,8 +40,22 @@ public sealed class CatalogWriterNativeSectionTests : IDisposable
         // Arrange
         var objects = new List<NativeObjectDefinition>
         {
-            new("customType", "public", "mood", "CREATE TYPE public.mood AS ENUM ('sad');", "postgresql"),
-            new("domain", "public", "positive_amount", "CREATE DOMAIN ...", "postgresql", ["numeric"]),
+            new()
+            {
+                Kind = EObjectKind.Enum,
+                SchemaName = "public",
+                Name = "mood",
+                NativeDefinition = new NativeDefinition(
+                    "postgresql", "CREATE TYPE public.mood AS ENUM ('sad');"),
+            },
+            new()
+            {
+                Kind = EObjectKind.Domain,
+                SchemaName = "public",
+                Name = "positive_amount",
+                NativeDefinition = new NativeDefinition("postgresql", "CREATE DOMAIN ..."),
+                Dependencies = ["numeric"],
+            },
         };
 
         // Act
@@ -66,7 +82,15 @@ public sealed class CatalogWriterNativeSectionTests : IDisposable
         // Arrange
         var objects = new List<NativeObjectDefinition>
         {
-            new("customType", "public", "mood", "CREATE TYPE public.mood AS ENUM ('sad', 'happy');", "postgresql"),
+            new()
+            {
+                Kind = EObjectKind.Enum,
+                SchemaName = "public",
+                Name = "mood",
+                NativeDefinition = new NativeDefinition(
+                    "postgresql", "CREATE TYPE public.mood AS ENUM ('sad', 'happy');"),
+                Dependencies = ["numeric"],
+            },
         };
 
         await using (var writer = await CatalogWriter.CreateInterchangeAsync(
@@ -81,11 +105,13 @@ public sealed class CatalogWriterNativeSectionTests : IDisposable
 
         // Assert
         var native = read.Should().ContainSingle().Which;
-        native.ObjectKind.Should().Be("customType");
+        native.Kind.Should().Be(EObjectKind.Enum);
         native.SchemaName.Should().Be("public");
         native.Name.Should().Be("mood");
-        native.NativeSql.Should().Be("CREATE TYPE public.mood AS ENUM ('sad', 'happy');");
-        native.SourceDialect.Should().Be("postgresql");
+        native.NativeDefinition!.Text.Should().Be("CREATE TYPE public.mood AS ENUM ('sad', 'happy');");
+        native.NativeDefinition.Dialect.Should().Be("postgresql");
+        native.NativeDefinition.Complete.Should().BeTrue();
+        native.Dependencies.Should().Equal("numeric");
     }
 
     [Fact]

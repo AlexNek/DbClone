@@ -91,6 +91,7 @@ Settings include:
 - Verification mode
 - Object toggles (data, indexes, functions, views, triggers)
 - Platform schemas toggle
+- [Store & Restore](store-restore.md) options (`StoreRestore`: catalog location, subfolder pattern, chunk and row limits, data inclusion, packing, policies)
 - Window position and size
 - Theme preference (light/dark/system)
 - Last used source and destination connections

@@ -232,6 +232,26 @@ internal sealed class InterchangeIdGraph
     public InterchangeId Extension(string extensionName) =>
         InterchangeId.Compute("extension", string.Empty, extensionName);
 
+    /// <summary>
+    /// Gets the id of a type — an enum, a composite type or a domain, the kinds the neutral model has
+    /// no structured home for and that travel as native text.
+    /// </summary>
+    /// <remarks>
+    /// One token covers all three because PostgreSQL stores all three in <c>pg_type</c>, where a name
+    /// is unique per schema: an enum and a domain cannot both be called <c>mood</c> in one schema, so
+    /// the kind adds nothing to the identity that the schema and the name do not already settle.
+    /// </remarks>
+    public InterchangeId Type(string schemaName, string typeName) =>
+        InterchangeId.Compute("type", schemaName, typeName, Schema(schemaName));
+
+    /// <summary>Gets the id of a publication, which is database-wide and not schema-scoped.</summary>
+    public InterchangeId Publication(string publicationName) =>
+        InterchangeId.Compute("publication", string.Empty, publicationName);
+
+    /// <summary>Gets the id of a subscription, which is database-wide and not schema-scoped.</summary>
+    public InterchangeId Subscription(string subscriptionName) =>
+        InterchangeId.Compute("subscription", string.Empty, subscriptionName);
+
     /// <summary>Gets the id of an RLS policy.</summary>
     public InterchangeId Policy(string schemaName, string policyName) =>
         InterchangeId.Compute("policy", schemaName, policyName, Schema(schemaName));

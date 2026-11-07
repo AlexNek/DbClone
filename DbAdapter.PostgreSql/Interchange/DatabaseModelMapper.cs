@@ -35,10 +35,14 @@ internal sealed class DatabaseModelMapper
     /// the native section only. Every other kind is mapped structurally and carries its own native
     /// text, so listing it here too would give the importer two sources of truth for one object.
     /// </summary>
-    private static readonly IReadOnlySet<string> NativeSectionOnlyKinds =
-        new HashSet<string>(StringComparer.OrdinalIgnoreCase)
+    private static readonly IReadOnlySet<EObjectKind> NativeSectionOnlyKinds =
+        new HashSet<EObjectKind>
         {
-            "customType", "domain", "publication", "subscription",
+            EObjectKind.Enum,
+            EObjectKind.CompositeType,
+            EObjectKind.Domain,
+            EObjectKind.Publication,
+            EObjectKind.Subscription,
         };
 
     private readonly string _dialect;
@@ -88,17 +92,37 @@ internal sealed class DatabaseModelMapper
     {
         ArgumentNullException.ThrowIfNull(model);
 
+        // The same graph the structured sections are given ids from, so one row of pg_type cannot end up
+        // with two identities depending on which pass asked about it.
+        var ids = InterchangeIdGraph.Create(model, _dialect);
         var extracted = new NativeObjectExtractor(_dialect).Extract(model);
 
         // Deterministic order: the catalog is diffable, so one database state is one byte stream.
         return [
             .. extracted
-                .Where(o => NativeSectionOnlyKinds.Contains(o.ObjectKind))
-                .OrderBy(o => o.ObjectKind, StringComparer.Ordinal)
+                .Where(o => NativeSectionOnlyKinds.Contains(o.Kind))
+                .OrderBy(o => o.Kind.ToString(), StringComparer.Ordinal)
                 .ThenBy(o => o.SchemaName, StringComparer.Ordinal)
-                .ThenBy(o => o.Name, StringComparer.Ordinal),
+                .ThenBy(o => o.Name, StringComparer.Ordinal)
+                .Select(o => o with { Id = NativeId(ids, o) }),
         ];
     }
+
+    /// <summary>
+    /// Gives a native-section object the identity its kind answers to.
+    /// </summary>
+    /// <remarks>
+    /// A publication and a subscription are named by the database rather than by a schema, so they take
+    /// their own tokens; the rest are the three type kinds, whose single token
+    /// <see cref="InterchangeIdGraph.Type"/> explains.
+    /// </remarks>
+    private static InterchangeId NativeId(InterchangeIdGraph ids, NativeObjectDefinition native) =>
+        native.Kind switch
+        {
+            EObjectKind.Publication => ids.Publication(native.Name),
+            EObjectKind.Subscription => ids.Subscription(native.Name),
+            _ => ids.Type(native.SchemaName, native.Name),
+        };
 
     /// <summary>
     /// Builds the signature used as a routine's identity component, so the mapper and the id graph
@@ -372,7 +396,7 @@ internal sealed class DatabaseModelMapper
             IsInitiallyDeferred = foreignKey.IsInitiallyDeferred,
         };
 
-    private static IReadOnlyList<TriggerDefinition> MapTriggers(
+    private IReadOnlyList<TriggerDefinition> MapTriggers(
         List<Models.TriggerDefinition> triggers,
         Models.TableDefinition table,
         InterchangeId tableId,
@@ -390,7 +414,11 @@ internal sealed class DatabaseModelMapper
                     Orientation = t.IsRowLevel
                                      ? ETriggerOrientation.Row
                                      : ETriggerOrientation.Statement,
-                    EnabledState = t.IsEnabled ? "O" : "D",
+                    // The engine's own flag when the read reported one. The boolean is the two-state
+                    // reading of it, kept as the fallback for a live model that was built without the
+                    // finer value — and a state the restore cannot express then reaches it as itself and
+                    // is refused there, rather than being quietly reported as enabled.
+                    EnabledState = t.EnabledState ?? (t.IsEnabled ? "O" : "D"),
                     // The metadata model names the trigger's function but not its argument types,
                     // so the reference resolves by name; the graph picks the single overload, or
                     // the first of several in sorted order, to keep the id reproducible.
@@ -398,6 +426,11 @@ internal sealed class DatabaseModelMapper
                     When = t.Condition is null
                                ? null
                                : new DatabaseExpression("postgresql", t.Condition),
+
+                    // The engine's own statement text, and the only complete record of what the
+                    // trigger is: the columns named by an UPDATE OF event, the WHEN clause and the
+                    // function's arguments appear nowhere in the structured fields above.
+                    NativeDefinition = Native(t.Definition, "pg_get_triggerdef", complete: true),
                 }),
         ];
 

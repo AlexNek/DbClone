@@ -25,8 +25,14 @@ public interface IDatabaseWriter : IAsyncDisposable
     /// <summary>
     /// Applies schema objects in the specified stage.
     /// </summary>
-    /// <param name="stage">The schema stage.</param>
-    /// <param name="objects">The objects to apply.</param>
+    /// <param name="stage">The schema stage. Each stage is handed only the objects the format routes to
+    /// it — for the objects that arrive through the catalog's native file, see <see
+    /// cref="Interchange.NativeObjectRouting"/> — so a stage creates its own kinds and never has to
+    /// decide what to do with an object that belongs to another.</param>
+    /// <param name="objects">The objects to apply. A child the format stores inside its parent — a
+    /// foreign key, an index — may arrive as the parent that owns it instead of as a list of the
+    /// children, because what to do with one is decided against the siblings recorded in the same
+    /// object; an adapter walks the objects it is handed and creates what each of them holds.</param>
     /// <param name="names">The names the object ids stand for, resolved by whoever read the catalog.
     /// A canonical object names its parent by id alone, and the adapter cannot open a catalog to look
     /// one up, so the caller supplies the names a statement has to be qualified with.</param>
@@ -44,9 +50,18 @@ public interface IDatabaseWriter : IAsyncDisposable
     /// Writes rows to a table.
     /// </summary>
     /// <param name="table">The table to write to.</param>
+    /// <param name="columns">The columns the catalog recorded for the table. A stored row is a list of
+    /// text tokens with no type attached to any of them — the tokens answer the column order the
+    /// catalog holds — so the writer cannot place a value without being told which column each one
+    /// belongs to and what type to read it as.</param>
     /// <param name="rows">The rows to write.</param>
     /// <param name="ct">Cancellation token.</param>
-    Task WriteTableRowsAsync(TableRef table, IAsyncEnumerable<DataValue[]> rows, CancellationToken ct);
+    /// <returns>The number of rows applied.</returns>
+    Task<long> WriteTableRowsAsync(
+        TableRef table,
+        IReadOnlyList<ColumnDefinition> columns,
+        IAsyncEnumerable<DataValue[]> rows,
+        CancellationToken ct);
 
     /// <summary>
     /// Applies security objects in the specified stage.

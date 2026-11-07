@@ -1137,7 +1137,8 @@ public sealed class PgMetadataReader : IMetadataReader
                 pg_get_triggerdef(t.oid) AS trigger_def,
                 pn.nspname AS func_schema,
                 pf.proname AS func_name,
-                obj_description(t.oid) AS comment
+                obj_description(t.oid) AS comment,
+                t.tgenabled AS enabled_state
             FROM pg_trigger t
             JOIN pg_class c ON c.oid = t.tgrelid
             JOIN pg_namespace n ON n.oid = c.relnamespace
@@ -1167,7 +1168,17 @@ public sealed class PgMetadataReader : IMetadataReader
                                IsRowLevel: r.GetBoolean(7),
                                IsEnabled: r.GetBoolean(8),
                                Condition: null,
-                               Comment: r.IsDBNull(12) ? null : r.GetString(12));
+                               Comment: r.IsDBNull(12) ? null : r.GetString(12),
+                               // The engine's own statement text is kept because the structured
+                               // fields above cannot carry everything a trigger is: the columns of an
+                               // UPDATE OF event, the WHEN clause, and the function's arguments are
+                               // only ever reported inside this text.
+                               Definition: r.IsDBNull(9) ? null : r.GetString(9),
+                               // Read beside is_enabled, not instead of it: the engine's flag has four
+                               // states and the boolean collapses them to two, which is enough for
+                               // compare and not enough for a restore that has to put the trigger back
+                               // in the state the source kept it in.
+                               EnabledState: r.IsDBNull(13) ? null : r.GetChar(13).ToString());
                        },
                    ct);
     }

@@ -10,12 +10,6 @@ namespace DatabaseInterchange.Format;
 /// </summary>
 public sealed class NativeObjectWriter
 {
-    private static readonly JsonSerializerOptions SerializerOptions = new()
-    {
-        WriteIndented = true,
-        PropertyNamingPolicy = JsonNamingPolicy.CamelCase,
-    };
-
     /// <summary>
     /// Writes native objects to the catalog.
     /// </summary>
@@ -38,7 +32,7 @@ public sealed class NativeObjectWriter
         Directory.CreateDirectory(nativeDir);
 
         var filePath = Path.Combine(nativeDir, $"{dialect}.json");
-        var json = JsonSerializer.Serialize(objects, SerializerOptions);
+        var json = JsonSerializer.Serialize(objects, CatalogJson.WriterOptions);
         await File.WriteAllTextAsync(filePath, json, System.Text.Encoding.UTF8, ct);
 
         return filePath;

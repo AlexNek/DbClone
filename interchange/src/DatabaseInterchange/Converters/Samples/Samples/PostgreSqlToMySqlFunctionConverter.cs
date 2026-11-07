@@ -1,5 +1,7 @@
 using System.Text.RegularExpressions;
 
+using CanonicalModel.Interchange;
+
 namespace DbAdapter.Definitions.Interchange.Converters.Samples;
 
 /// <summary>
@@ -47,10 +49,12 @@ public sealed partial class PostgreSqlToMySqlFunctionConverter : IObjectConverte
         ArgumentNullException.ThrowIfNull(source);
         ArgumentNullException.ThrowIfNull(context);
 
-        if (source.SourceDialect != SourceDialect)
+        // The dialect travels with the captured text rather than with the object, and an object whose
+        // statement was never recorded has no text here to convert.
+        if (source.NativeDefinition is not { } sourceText || sourceText.Dialect != SourceDialect)
         {
             throw new ArgumentException(
-                $"Expected source dialect '{SourceDialect}', got '{source.SourceDialect}'",
+                $"Expected source dialect '{SourceDialect}', got '{source.NativeDefinition?.Dialect}'.",
                 nameof(source));
         }
 
@@ -58,23 +62,40 @@ public sealed partial class PostgreSqlToMySqlFunctionConverter : IObjectConverte
 
         try
         {
-            var convertedSql = ConvertFunction(source.NativeSql, context);
+            var convertedSql = ConvertFunction(sourceText.Text, context);
 
-            var result = new NativeObjectDefinition(
-                ObjectKind: source.ObjectKind,
-                SchemaName: string.Empty, // MySQL doesn't have schemas in the same way
-                Name: source.Name,
-                NativeSql: convertedSql,
-                SourceDialect: TargetDialect,
-                Dependencies: source.Dependencies);
+            // The rewrite is a pattern substitution over the source statement, so the result is
+            // recorded as a fragment: nothing here has checked that it parses on the target engine.
+            var result = new NativeObjectDefinition
+            {
+                Id = source.Id,
+                Kind = source.Kind,
+                SchemaName = string.Empty, // MySQL doesn't have schemas in the same way
+                Name = source.Name,
+                SourceObjectId = source.SourceObjectId,
+                Dependencies = source.Dependencies,
+                NativeDefinition = new NativeDefinition(
+                    TargetDialect,
+                    convertedSql,
+                    Complete: false,
+                    CapturedBy: "converted"),
+                Notes = [
+                    new InterchangeIssue(
+                        "ConvertedByRegex",
+                        EIssueSeverity.Info,
+                        $"The {TargetDialect} statement of {source.Name} was rewritten from the "
+                        + "source statement by pattern substitution and was not checked against the "
+                        + "target engine."),
+                ],
+            };
 
             return Task.FromResult<NativeObjectDefinition?>(result);
         }
         catch (Exception ex) when (ex is not OperationCanceledException)
         {
             throw new ConversionFailedException(
-                $"Failed to convert {source.ObjectKind} '{source.SchemaName}.{source.Name}': {ex.Message}",
-                source.ObjectKind,
+                $"Failed to convert {source.Kind} '{source.SchemaName}.{source.Name}': {ex.Message}",
+                source.Kind.ToString(),
                 SourceDialect,
                 TargetDialect,
                 $"{source.SchemaName}.{source.Name}",

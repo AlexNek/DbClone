@@ -12,6 +12,7 @@ From left to right:
 - **Run controls** (depend on the mode):
     - Copy mode: ▶ Start Copy (++ctrl+s++), Pause/Resume (++ctrl+p++), Stop (++esc++), and **Copy Options** — a popup with object toggles, Platform Schemas, copy mode, and verify mode
     - Compare mode: ▶ Run Compare (++ctrl+shift+c++), Pause/Resume, Stop, **Compare Options** (verify mode, Platform Schemas), and **Report** — opens the last comparison report
+    - Always visible: Pause/Resume (++ctrl+p++) and Stop (++esc++) for a running catalog operation, and **Store Options** — catalog folder, naming pattern, and data inclusion — see [Store & Restore](../store-restore.md)
 - **Connections** — opens the [Connection Manager](../connections/managing-connections.md)
 - **Test Connections** — tests the current source and destination connections
 - **Logs** — opens the application log folder
@@ -47,6 +48,7 @@ The dropdown above the two panels selects a [connection group](../connections/ma
 | **Tables** dropdown | The active [table selection](../connections/table-selection.md): **All Tables** or a named preset; `*` marks unsaved modifications |
 | **Edit…** (next to Tables) | Opens the table selection dialog |
 | Summary line | Host and database of the selected connection |
+| **Store** button (below the panel) | Writes this database into a catalog folder — see [Store & Restore](../store-restore.md) |
 
 ## Destination Panel
 
@@ -55,6 +57,7 @@ The dropdown above the two panels selects a [connection group](../connections/ma
 | **Connection** dropdown | Picks the saved destination connection |
 | **New... / Edit...** | Opens the Connection Manager |
 | **Tables** row | Shows `All Tables`, a table count, and **View…** — opens the read-only [Table Overview](../connections/table-overview.md) of the output database |
+| **Restore** button (below the panel) | Applies a catalog folder to this database — see [Store & Restore](../store-restore.md) |
 
 If the destination connection has no database name, the row shows `(no database)` — you can pick one from the Table Overview dialog.
 

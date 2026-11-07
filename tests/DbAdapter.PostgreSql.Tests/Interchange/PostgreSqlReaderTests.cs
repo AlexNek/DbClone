@@ -1,3 +1,5 @@
+using CanonicalModel.Interchange;
+
 using DbAdapter.Definitions;
 using DbAdapter.PostgreSql.Interchange;
 
@@ -52,8 +54,13 @@ public class PostgreSqlReaderTests
         var natives = await reader.ReadNativeObjectsAsync(CancellationToken.None);
 
         natives.Should().HaveCount(5);
-        natives.Select(n => n.ObjectKind).Should()
-            .ContainInOrder("customType", "customType", "domain", "publication", "subscription");
+        natives.Select(n => n.Kind).Should()
+            .ContainInOrder(
+                EObjectKind.CompositeType,
+                EObjectKind.Domain,
+                EObjectKind.Enum,
+                EObjectKind.Publication,
+                EObjectKind.Subscription);
     }
 
     [Fact]

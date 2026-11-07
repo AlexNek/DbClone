@@ -18,6 +18,16 @@ internal static class CatalogJson
     /// </summary>
     public static JsonSerializerOptions ReaderOptions { get; } = CreateReaderOptions();
 
+    /// <summary>
+    /// Gets the JSON serializer options for the <c>.ndjson</c> row files.
+    /// </summary>
+    /// <remarks>
+    /// A chunk holds one JSON array per line and the reader takes a line as a row, so a row is written
+    /// without indentation: the document <see cref="WriterOptions"/> produces spans several lines, and
+    /// the first of them is an array that never closes.
+    /// </remarks>
+    public static JsonSerializerOptions RowWriterOptions { get; } = new();
+
     private static JsonSerializerOptions CreateWriterOptions()
     {
         var options = new JsonSerializerOptions

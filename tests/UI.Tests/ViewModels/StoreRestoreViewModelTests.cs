@@ -214,7 +214,7 @@ public class StoreRestoreViewModelTests : IDisposable
             .Returns(new InterchangePlanView(6, 42, 0, [], []));
         _interchangeService
             .RestoreAsync(Arg.Any<InterchangeRestoreRequest>(), Arg.Any<IProgress<InterchangeProgressView>>(), Arg.Any<CancellationToken>())
-            .Returns(new InterchangeRestoreResult(ERestoreOutcome.Success, 42, 0, 0, [], null, null, TimeSpan.FromSeconds(2)));
+            .Returns(new InterchangeRestoreResult(ERestoreOutcome.Success, 42, 0, 128L, 0, [], null, null, TimeSpan.FromSeconds(2)));
 
         // Act
         await _sut.StartRestoreCommand.ExecuteAsync(null);
@@ -227,6 +227,8 @@ public class StoreRestoreViewModelTests : IDisposable
             Arg.Any<IProgress<InterchangeProgressView>>(),
             Arg.Any<CancellationToken>());
         _sut.State.StatusBarSummary.Should().Contain("Restore succeeded");
+        _sut.State.StatusBarSummary.Should().Contain("42 object(s)");
+        _sut.State.StatusBarSummary.Should().Contain("128 row(s)");
     }
 
     [Fact]
