@@ -145,6 +145,15 @@ internal sealed class DatabaseModelMapper
             .GroupBy(t => $"{t.SchemaName}\u0000{t.TableName}")
             .ToDictionary(g => g.Key, g => g.ToList(), StringComparer.Ordinal);
 
+        // The metadata reader reports a partition's parent as one "schema.table" key, so parents are
+        // resolved by matching that key whole instead of splitting it: a quoted schema name can
+        // itself contain a dot, and the reader built the key from the parent's own two names, so an
+        // equal key is the same table.
+        var parentIds = model.Tables.ToLookup(
+            t => $"{t.SchemaName}.{t.Name}",
+            t => ids.Table(t.SchemaName, t.Name),
+            StringComparer.Ordinal);
+
         return [
             .. model.Tables
                 .OrderBy(t => t.SchemaName, StringComparer.Ordinal)
@@ -153,7 +162,8 @@ internal sealed class DatabaseModelMapper
                     t,
                     ids,
                     enumTypeNames,
-                    triggersByTable)),
+                    triggersByTable,
+                    parentIds)),
         ];
     }
 
@@ -161,9 +171,11 @@ internal sealed class DatabaseModelMapper
         Models.TableDefinition table,
         InterchangeIdGraph ids,
         IReadOnlySet<string> enumTypeNames,
-        Dictionary<string, List<Models.TriggerDefinition>> triggersByTable)
+        Dictionary<string, List<Models.TriggerDefinition>> triggersByTable,
+        ILookup<string, InterchangeId> parentIds)
     {
         var tableId = ids.Table(table.SchemaName, table.Name);
+        var parentId = ResolveParentId(table.ParentTable, parentIds);
         var columns = table.Columns
             .OrderBy(c => c.OrdinalPosition)
             .Select(c => MapColumn(table, c, tableId, ids, enumTypeNames))
@@ -186,6 +198,9 @@ internal sealed class DatabaseModelMapper
             SchemaId = ids.Schema(table.SchemaName),
             SourceObjectId = $"{table.SchemaName}.{table.Name}",
             TableKind = table.IsPartitioned ? ETableKind.Partitioned : ETableKind.Table,
+            ParentId = parentId,
+            PartitionStrategy = table.PartitionStrategy,
+            PartitionBound = table.PartitionBound,
             Columns = columns,
             PrimaryKey = MapPrimaryKey(table, primaryKey, tableId, ids),
             ForeignKeys = [
@@ -228,7 +243,40 @@ internal sealed class DatabaseModelMapper
                            ? []
                            : MapTriggers(triggers, table, tableId, ids),
             RowOrder = hasKey ? ERowOrder.PrimaryKey : ERowOrder.SourceOrder,
+
+            // A child whose parent was not captured keeps no link: naming an id for an object the
+            // catalog does not hold would hand the restore a statement that cannot run.
+            Notes = table.ParentTable is { Length: > 0 } && parentId is null
+                        ?
+                        [
+                            new InterchangeIssue(
+                                "PartitionParentNotCaptured",
+                                EIssueSeverity.Warning,
+                                $"Table {table.SchemaName}.{table.Name} is a partition of "
+                                + $"{table.ParentTable}, which is not part of the captured set, so "
+                                + "the link between them is not recorded.",
+                                tableId),
+                        ]
+                        : [],
         };
+    }
+
+    /// <summary>
+    /// Resolves the "schema.table" key a child table reports for its parent into that parent's
+    /// catalog id. Nothing is named when the key matches no captured table, or more than one.
+    /// </summary>
+    private static InterchangeId? ResolveParentId(
+        string? parentKey,
+        ILookup<string, InterchangeId> parentIds)
+    {
+        if (string.IsNullOrEmpty(parentKey))
+        {
+            return null;
+        }
+
+        var matches = parentIds[parentKey].ToList();
+
+        return matches.Count == 1 ? matches[0] : null;
     }
 
     private ColumnDefinition MapColumn(
@@ -470,22 +518,46 @@ internal sealed class DatabaseModelMapper
                         MaxValue = s.MaxValue,
                         Cache = s.CacheSize,
                         Cycle = s.IsCycled,
-
-                        // The current value is live server state the metadata model does not
-                        // carry. Recording the omission names a loss; inventing a value hides one.
-                        Notes =
-                        [
-                            new InterchangeIssue(
-                                "SequenceStateNotCaptured",
-                                EIssueSeverity.Info,
-                                $"Sequence {s.SchemaName}.{s.Name} was captured with its "
-                                + "declaration only; its current value is not part of the "
-                                + "metadata model.",
-                                id),
-                        ],
+                        Notes = SequenceNotes(s, id),
                     };
                 }),
         ];
+
+    /// <summary>
+    /// Records what a captured sequence declaration cannot say about the sequence it came from.
+    /// </summary>
+    private static IReadOnlyList<InterchangeIssue> SequenceNotes(
+        Models.SequenceDefinition sequence,
+        InterchangeId id)
+    {
+        var notes = new List<InterchangeIssue>
+        {
+            // The current value is live server state the metadata model does not carry. Recording the
+            // omission names a loss; inventing a value hides one.
+            new(
+                "SequenceStateNotCaptured",
+                EIssueSeverity.Info,
+                $"Sequence {sequence.SchemaName}.{sequence.Name} was captured with its "
+                + "declaration only; its current value is not part of the metadata model.",
+                id),
+        };
+
+        if (sequence.IsOwned)
+        {
+            // The format has no field for the owning column, so a restore recreates this sequence
+            // standalone — it exists, but no column draws from it and nothing marks it as the
+            // sequence behind an identity. Naming the loss keeps the catalog honest about that.
+            notes.Add(new InterchangeIssue(
+                "SequenceOwnershipNotCaptured",
+                EIssueSeverity.Warning,
+                $"Sequence {sequence.SchemaName}.{sequence.Name} is owned by "
+                + $"{sequence.OwnerTable}.{sequence.OwnerColumn}, which the interchange format "
+                + "records no field for, so a restore cannot recreate the link.",
+                id));
+        }
+
+        return notes;
+    }
 
     private IReadOnlyList<ExtensionDefinition> MapExtensions(
         Models.DatabaseModel model,

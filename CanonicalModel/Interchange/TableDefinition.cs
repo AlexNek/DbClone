@@ -53,6 +53,25 @@ public sealed record TableDefinition : ISchemaObject
     /// <summary>Gets or sets the table kind.</summary>
     public ETableKind TableKind { get; init; } = ETableKind.Table;
 
+    /// <summary>
+    /// Gets or sets the table this one is a partition of, or an <c>INHERITS</c> child of; null for
+    /// a table that stands on its own. The bound says which of the two it is.
+    /// </summary>
+    public InterchangeId? ParentId { get; init; }
+
+    /// <summary>
+    /// Gets or sets the partition strategy of a partitioned table (<c>RANGE</c>, <c>LIST</c> or
+    /// <c>HASH</c>), as the source declared it. Set on a partitioned table whether or not it is
+    /// itself a partition, because a partition can be partitioned again.
+    /// </summary>
+    public string? PartitionStrategy { get; init; }
+
+    /// <summary>
+    /// Gets or sets the verbatim <c>FOR VALUES …</c> clause that binds a partition to its parent.
+    /// Null on an <c>INHERITS</c> child, which has a parent but no bound, and on a plain table.
+    /// </summary>
+    public string? PartitionBound { get; init; }
+
     /// <summary>Gets or sets the columns.</summary>
     public IReadOnlyList<ColumnDefinition> Columns { get; init; } = [];
 

@@ -118,12 +118,18 @@ public sealed class PostgreSqlAdapter : IDatabaseAdapter
     }
 
     /// <inheritdoc />
-    public IDatabaseWriter OpenWriter(DatabaseTarget target, ImportOptions options) =>
-        new PostgreSqlWriter(
+    public IDatabaseWriter OpenWriter(DatabaseTarget target, ImportOptions options)
+    {
+        // The writer answers its "is the target empty?" question from the same metadata role the
+        // reader uses, so the two halves of an import describe the database the same way.
+        var metadataSource = CreateMetadataSource(target);
+        return new PostgreSqlWriter(
             this,
             target,
             options,
-            _loggerFactory.CreateLogger<PostgreSqlWriter>());
+            _loggerFactory.CreateLogger<PostgreSqlWriter>(),
+            metadataSource);
+    }
 
     /// <summary>The internal roles a composed adapter hands to its boundary.</summary>
     private sealed record EngineGraph(

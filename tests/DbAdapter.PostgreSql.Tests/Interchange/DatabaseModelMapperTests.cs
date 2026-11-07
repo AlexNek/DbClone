@@ -394,24 +394,98 @@ public class DatabaseModelMapperTests
     {
         var model = InterchangeTestModel.Empty() with
         {
+            Tables = [PartitionedTable("events", "RANGE")],
+        };
+
+        var events = Mapper.Map(model).Tables.Single();
+
+        events.TableKind.Should().Be(ETableKind.Partitioned);
+        events.PartitionStrategy.Should().Be("RANGE");
+        events.ParentId.Should().BeNull();
+        events.PartitionBound.Should().BeNull();
+    }
+
+    [Fact]
+    public void Map_PartitionCarriesItsParentIdAndBound()
+    {
+        var model = InterchangeTestModel.Empty() with
+        {
             Tables =
             [
-                new Models.TableDefinition(
-                    "public",
-                    "events",
-                    [],
-                    [],
-                    [],
-                    [],
-                    [],
-                    null,
-                    IsPartitioned: true,
-                    PartitionStrategy: "RANGE",
-                    ParentTable: null),
+                PartitionedTable("measurements", "RANGE"),
+                Partition(
+                    "measurements_2026",
+                    "public.measurements",
+                    "FOR VALUES FROM ('2026-01-01') TO ('2027-01-01')"),
+
+                // An INHERITS child has a parent and no bound, and the format tells the two apart by
+                // exactly that, so the bound has to stay absent rather than be read as DEFAULT.
+                Partition("measurements_legacy", "public.measurements", null),
             ],
         };
 
-        Mapper.Map(model).Tables.Single().TableKind.Should().Be(ETableKind.Partitioned);
+        var snapshot = Mapper.Map(model);
+        var parent = snapshot.Tables.Single(t => t.Name == "measurements");
+
+        var partition = snapshot.Tables.Single(t => t.Name == "measurements_2026");
+        partition.ParentId.Should().Be(parent.Id);
+        partition.PartitionBound.Should().Be("FOR VALUES FROM ('2026-01-01') TO ('2027-01-01')");
+        partition.Notes.Should().BeEmpty();
+
+        var inherited = snapshot.Tables.Single(t => t.Name == "measurements_legacy");
+        inherited.ParentId.Should().Be(parent.Id);
+        inherited.PartitionBound.Should().BeNull();
+    }
+
+    [Fact]
+    public void Map_PartitionOfAnUncapturedParent_NamesNoIdAndRecordsTheLoss()
+    {
+        var model = InterchangeTestModel.Empty() with
+        {
+            Tables = [Partition("orders_2026", "public.orders", "FOR VALUES FROM ('2026') TO ('2027')")],
+        };
+
+        var child = Mapper.Map(model).Tables.Single();
+
+        // An id standing for a table the catalog does not hold would hand the restore a statement it
+        // cannot run, so the link is left out and the omission is written down.
+        child.ParentId.Should().BeNull();
+
+        var note = child.Notes.Single();
+        note.Code.Should().Be("PartitionParentNotCaptured");
+        note.Severity.Should().Be(EIssueSeverity.Warning);
+    }
+
+    [Fact]
+    public void Map_OwnedSequence_RecordsThatTheFormatCannotCarryTheOwnershipLink()
+    {
+        var model = InterchangeTestModel.Empty() with
+        {
+            Sequences =
+            [
+                new Models.SequenceDefinition(
+                    "public",
+                    "orders_id_seq",
+                    1,
+                    1,
+                    null,
+                    null,
+                    1,
+                    false,
+                    "bigint",
+                    null,
+                    OwnerTable: "public.orders",
+                    OwnerColumn: "id",
+                    IsIdentity: true),
+            ],
+        };
+
+        var sequence = Mapper.Map(model).Sequences.Single();
+
+        // The restore recreates this sequence standalone, so the catalog has to say that the link it
+        // is losing was there — otherwise the import looks faithful and is not.
+        sequence.Notes.Should().Contain(n => n.Code == "SequenceOwnershipNotCaptured");
+        sequence.Notes.Should().Contain(n => n.Code == "SequenceStateNotCaptured");
     }
 
     [Fact]
@@ -420,4 +494,38 @@ public class DatabaseModelMapperTests
             .RoutineSignature(InterchangeTestModel.Full().Functions.Single(f => f.Name == "add_customer"))
             .Should()
             .Be("character varying");
+
+    /// <summary>A partitioned table standing on its own, with the given strategy.</summary>
+    private static Models.TableDefinition PartitionedTable(string name, string strategy) =>
+        new(
+            "public",
+            name,
+            [],
+            [],
+            [],
+            [],
+            [],
+            null,
+            IsPartitioned: true,
+            PartitionStrategy: strategy,
+            ParentTable: null);
+
+    /// <summary>
+    /// A child table: the metadata reader reports its parent as one "schema.table" key, and a null
+    /// bound is what separates an <c>INHERITS</c> child from a partition.
+    /// </summary>
+    private static Models.TableDefinition Partition(string name, string parentKey, string? bound) =>
+        new(
+            "public",
+            name,
+            [],
+            [],
+            [],
+            [],
+            [],
+            null,
+            IsPartitioned: false,
+            PartitionStrategy: null,
+            ParentTable: parentKey,
+            PartitionBound: bound);
 }

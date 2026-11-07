@@ -192,26 +192,34 @@ public sealed class SnapshotImporter
         progress?.Report(new InterchangeProgress { Stage = "Checking target", Percentage = 10 });
         await writer.EnsureEmptyTargetAsync(ct);
 
-        // Read and apply schema sections
-        progress?.Report(new InterchangeProgress { Stage = "Applying schemas", Percentage = 20 });
+        // Every section is read before any of them is applied. A catalog object names its parent by
+        // id and by nothing else, and an adapter may not open a catalog to look an id up, so the
+        // names behind the ids are resolved here, where the catalog is open.
+        progress?.Report(new InterchangeProgress { Stage = "Reading catalog", Percentage = 15 });
         var schemas = await catalogReader.ReadSectionAsync<SchemaDefinition>("schemas", ct);
-        await writer.ApplySchemaAsync(SchemaStage.Schemas, schemas.Cast<ISchemaObject>().ToList(), ct);
+        var sequences = await catalogReader.ReadSectionAsync<SequenceDefinition>("sequences", ct);
+        var tables = await catalogReader.ReadSectionAsync<TableDefinition>("tables", ct);
+        var routines = await catalogReader.ReadSectionAsync<RoutineDefinition>("routines", ct);
+        var views = await catalogReader.ReadSectionAsync<ViewDefinition>("views", ct);
+        var names = BuildNameMap(schemas, tables);
+
+        // The stages run in the order SchemaStage declares, which is a dependency order: an object is
+        // applied once everything it names has been applied. Routines come before views because a
+        // view may call a function.
+        progress?.Report(new InterchangeProgress { Stage = "Applying schemas", Percentage = 20 });
+        await writer.ApplySchemaAsync(SchemaStage.Schemas, AsObjects(schemas), names, ct);
 
         progress?.Report(new InterchangeProgress { Stage = "Applying sequences", Percentage = 30 });
-        var sequences = await catalogReader.ReadSectionAsync<SequenceDefinition>("sequences", ct);
-        await writer.ApplySchemaAsync(SchemaStage.Sequences, sequences.Cast<ISchemaObject>().ToList(), ct);
+        await writer.ApplySchemaAsync(SchemaStage.Sequences, AsObjects(sequences), names, ct);
 
         progress?.Report(new InterchangeProgress { Stage = "Applying tables", Percentage = 40 });
-        var tables = await catalogReader.ReadSectionAsync<TableDefinition>("tables", ct);
-        await writer.ApplySchemaAsync(SchemaStage.Tables, tables.Cast<ISchemaObject>().ToList(), ct);
+        await writer.ApplySchemaAsync(SchemaStage.Tables, AsObjects(tables), names, ct);
 
-        progress?.Report(new InterchangeProgress { Stage = "Applying views", Percentage = 50 });
-        var views = await catalogReader.ReadSectionAsync<ViewDefinition>("views", ct);
-        await writer.ApplySchemaAsync(SchemaStage.Views, views.Cast<ISchemaObject>().ToList(), ct);
+        progress?.Report(new InterchangeProgress { Stage = "Applying routines", Percentage = 50 });
+        await writer.ApplySchemaAsync(SchemaStage.Routines, AsObjects(routines), names, ct);
 
-        progress?.Report(new InterchangeProgress { Stage = "Applying routines", Percentage = 60 });
-        var routines = await catalogReader.ReadSectionAsync<RoutineDefinition>("routines", ct);
-        await writer.ApplySchemaAsync(SchemaStage.Routines, routines.Cast<ISchemaObject>().ToList(), ct);
+        progress?.Report(new InterchangeProgress { Stage = "Applying views", Percentage = 60 });
+        await writer.ApplySchemaAsync(SchemaStage.Views, AsObjects(views), names, ct);
 
         // Import data
         long totalRows = 0;
@@ -224,7 +232,13 @@ public sealed class SnapshotImporter
 
             _logger.LogInformation("Importing data for table {Table}", table.Name);
 
-            var tableRef = new TableRef(string.Empty, table.Name);
+            // A table the map cannot name would be addressed by bare name and land in whichever
+            // schema the connection happens to search first, so its rows are not read at all.
+            var tableRef = names.Table(table.Id)
+                ?? throw new InvalidOperationException(
+                    $"The catalog does not name the schema the table \"{table.Name}\" lives in, so "
+                    + "its rows cannot be addressed.");
+
             var rows = catalogReader.ReadRowsAsync(table.Id.ToString()!, ct);
             await writer.WriteTableRowsAsync(tableRef, rows, ct);
 
@@ -270,4 +284,45 @@ public sealed class SnapshotImporter
             ValidationReport = validationReport,
         };
     }
+
+    /// <summary>
+    /// Resolves the names the ids inside this catalog stand for.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// A table whose schema id no schema answers is left out of the map on purpose. The alternative —
+    /// reading the name as empty — addresses the object to the connection's search path, which puts
+    /// the object in a schema the source never named it in. Leaving it out makes the adapter refuse
+    /// it, which is the honest outcome for a catalog that cannot describe its own contents.
+    /// </para>
+    /// <para>
+    /// An id is derived from the object's kind, schema, name and parent, so a repeated id repeats the
+    /// same name and last-one-wins cannot hide a conflict.
+    /// </para>
+    /// </remarks>
+    private static ObjectNameMap BuildNameMap(
+        IReadOnlyList<SchemaDefinition> schemas,
+        IReadOnlyList<TableDefinition> tables)
+    {
+        var schemaNames = new Dictionary<InterchangeId, string>();
+        foreach (var schema in schemas)
+        {
+            schemaNames[schema.Id] = schema.Name;
+        }
+
+        var tableRefs = new Dictionary<InterchangeId, TableRef>();
+        foreach (var table in tables)
+        {
+            if (schemaNames.TryGetValue(table.SchemaId, out var schemaName))
+            {
+                tableRefs[table.Id] = new TableRef(schemaName, table.Name);
+            }
+        }
+
+        return new ObjectNameMap(schemaNames, tableRefs);
+    }
+
+    private static IReadOnlyList<ISchemaObject> AsObjects<T>(IReadOnlyList<T> objects)
+        where T : ISchemaObject =>
+        [.. objects];
 }

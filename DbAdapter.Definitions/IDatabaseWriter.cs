@@ -27,8 +27,18 @@ public interface IDatabaseWriter : IAsyncDisposable
     /// </summary>
     /// <param name="stage">The schema stage.</param>
     /// <param name="objects">The objects to apply.</param>
+    /// <param name="names">The names the object ids stand for, resolved by whoever read the catalog.
+    /// A canonical object names its parent by id alone, and the adapter cannot open a catalog to look
+    /// one up, so the caller supplies the names a statement has to be qualified with.</param>
     /// <param name="ct">Cancellation token.</param>
-    Task ApplySchemaAsync(SchemaStage stage, IReadOnlyList<ISchemaObject> objects, CancellationToken ct);
+    /// <exception cref="InvalidOperationException">Thrown when an object's parent is not named in
+    /// <paramref name="names"/>, because creating it in a guessed schema is not a failure this
+    /// product is allowed to risk.</exception>
+    Task ApplySchemaAsync(
+        SchemaStage stage,
+        IReadOnlyList<ISchemaObject> objects,
+        ObjectNameMap names,
+        CancellationToken ct);
 
     /// <summary>
     /// Writes rows to a table.

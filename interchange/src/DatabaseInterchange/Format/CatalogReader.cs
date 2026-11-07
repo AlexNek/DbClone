@@ -116,6 +116,34 @@ public sealed class CatalogReader : IAsyncDisposable
     }
 
     /// <summary>
+    /// Reads the security section from the catalog.
+    /// </summary>
+    /// <param name="ct">Cancellation token.</param>
+    /// <returns>
+    /// The captured security section, or <c>null</c> when the catalog carries no security file.
+    /// The two states are different and neither may be collapsed into the other: <c>null</c> means
+    /// the producer captured no security at all, while a section holding empty lists means it
+    /// captured the kinds it could and found nothing of a kind it did look for.
+    /// </returns>
+    public async Task<SecuritySection?> ReadSecurityAsync(CancellationToken ct = default)
+    {
+        ObjectDisposedException.ThrowIf(_disposed, this);
+
+        var filePath = Path.Combine(
+            _catalogPath,
+            InterchangeFormat.SchemaDirectory,
+            "security.json");
+        if (!File.Exists(filePath))
+        {
+            return null;
+        }
+
+        var json = await File.ReadAllTextAsync(filePath, Encoding.UTF8, ct);
+        var section = JsonSerializer.Deserialize<SecuritySectionFile>(json, CatalogJson.ReaderOptions);
+        return section?.Object;
+    }
+
+    /// <summary>
     /// Reads a <see cref="CanonicalModel.Models.DatabaseModel"/> directly from the catalog.
     /// Used for same-type transfers where no conversion is needed.
     /// </summary>

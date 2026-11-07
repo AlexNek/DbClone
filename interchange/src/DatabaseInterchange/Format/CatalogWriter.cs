@@ -105,10 +105,6 @@ public sealed class CatalogWriter : IAsyncDisposable
         ObjectDisposedException.ThrowIf(_disposed, this);
         ArgumentException.ThrowIfNullOrWhiteSpace(sectionName);
 
-        var fileName = $"{sectionName}.json";
-        var filePath = Path.Combine(_catalogPath, InterchangeFormat.SchemaDirectory, fileName);
-        var relativePath = $"{InterchangeFormat.SchemaDirectory}/{fileName}";
-
         var section = new SectionFile<T>
         {
             Section = sectionName,
@@ -116,6 +112,115 @@ public sealed class CatalogWriter : IAsyncDisposable
             Count = objects.Count,
             Objects = objects.OrderBy(o => o.Id.ToString()).ToList(),
         };
+
+        await WriteSectionFileAsync(sectionName, section, ct);
+
+        if (sectionName == "tables")
+        {
+            _totalTables = objects.Count;
+        }
+        else if (sectionName == "columns")
+        {
+            _totalColumns = objects.Count;
+        }
+    }
+
+    /// <summary>
+    /// Writes the relationship section — the dependency edges the source reports.
+    /// </summary>
+    /// <param name="relationships">The edges captured from the source.</param>
+    /// <param name="ct">Cancellation token.</param>
+    /// <returns>The number of edges written.</returns>
+    /// <remarks>
+    /// An edge is not an object: a relationship has no identity of its own, it is a pair of ids, so
+    /// it is not an <see cref="ISchemaObject"/> and cannot go through
+    /// <see cref="WriteSectionAsync{T}"/>. It keeps the same header-and-array file shape as every
+    /// list section though, which is why <see cref="CatalogReader.ReadSectionAsync{T}"/> reads it
+    /// back with no new reader API.
+    /// Order is the writer's choice, so the triple is sorted — a catalog whose edges came out in
+    /// source order would not be byte-stable across two runs of the same database state.
+    /// </remarks>
+    public async Task<int> WriteRelationshipsAsync(
+        IReadOnlyList<Relationship> relationships,
+        CancellationToken ct = default)
+    {
+        ObjectDisposedException.ThrowIf(_disposed, this);
+        ArgumentNullException.ThrowIfNull(relationships);
+
+        const string sectionName = "relationships";
+
+        var ordered = relationships
+            .OrderBy(r => r.Type, StringComparer.Ordinal)
+            .ThenBy(r => r.DependencyId)
+            .ThenBy(r => r.DependentId)
+            .ToList();
+
+        var section = new SectionFile<Relationship>
+        {
+            Section = sectionName,
+            FormatVersion = InterchangeFormat.Version,
+            Count = ordered.Count,
+            Objects = ordered,
+        };
+
+        await WriteSectionFileAsync(sectionName, section, ct);
+        return ordered.Count;
+    }
+
+    /// <summary>
+    /// Writes the security section — principals, grants and row-level security policies.
+    /// </summary>
+    /// <param name="security">The section captured from the source, if any.</param>
+    /// <param name="ct">Cancellation token.</param>
+    /// <returns><c>true</c> when a file was written; an empty section writes nothing.</returns>
+    /// <remarks>
+    /// Security is one compound object rather than a list of same-kind objects, so its file carries
+    /// the section header with a single <c>object</c> member instead of an <c>objects</c> array
+    /// (refactors/04/interchangeFormatDesign.md). <see cref="CatalogReader.ReadSecurityAsync"/> is
+    /// its counterpart.
+    /// Skipping an empty section is deliberate. Roles and grants are not part of the metadata this
+    /// block can read, so a file of three empty lists would state that the source has no roles — a
+    /// claim nobody checked. An absent section says the true thing: nothing was captured.
+    /// </remarks>
+    public async Task<bool> WriteSecurityAsync(
+        SecuritySection? security,
+        CancellationToken ct = default)
+    {
+        ObjectDisposedException.ThrowIf(_disposed, this);
+
+        if (security is null
+            || (security.Roles.Count == 0
+                && security.Grants.Count == 0
+                && security.Policies.Count == 0))
+        {
+            return false;
+        }
+
+        const string sectionName = "security";
+
+        var section = new SecuritySectionFile
+        {
+            Section = sectionName,
+            FormatVersion = InterchangeFormat.Version,
+            Object = security,
+        };
+
+        await WriteSectionFileAsync(sectionName, section, ct);
+        return true;
+    }
+
+    /// <summary>
+    /// Writes one section file under <c>schema/</c>, records its size and hash in the manifest, and
+    /// declares the section in the index.
+    /// </summary>
+    private async Task WriteSectionFileAsync(
+        string sectionName,
+        object section,
+        CancellationToken ct)
+    {
+        var fileName = $"{sectionName}.json";
+        var filePath = Path.Combine(_catalogPath, InterchangeFormat.SchemaDirectory, fileName);
+        var relativePath = $"{InterchangeFormat.SchemaDirectory}/{fileName}";
 
         var json = JsonSerializer.Serialize(section, CatalogJson.WriterOptions);
         await File.WriteAllTextAsync(filePath, json, Encoding.UTF8, ct);
@@ -133,15 +238,6 @@ public sealed class CatalogWriter : IAsyncDisposable
         if (!_sections.Contains(sectionName))
         {
             _sections.Add(sectionName);
-        }
-
-        if (sectionName == "tables")
-        {
-            _totalTables = objects.Count;
-        }
-        else if (sectionName == "columns")
-        {
-            _totalColumns = objects.Count;
         }
     }
 
@@ -439,6 +535,16 @@ internal sealed record SectionFile<T>
     public int FormatVersion { get; init; }
     public int Count { get; init; }
     public IReadOnlyList<T> Objects { get; init; } = [];
+}
+
+/// <summary>
+/// The security section file: the same header as a list section, holding one compound object.
+/// </summary>
+internal sealed record SecuritySectionFile
+{
+    public string Section { get; init; } = string.Empty;
+    public int FormatVersion { get; init; }
+    public SecuritySection? Object { get; init; }
 }
 
 /// <summary>

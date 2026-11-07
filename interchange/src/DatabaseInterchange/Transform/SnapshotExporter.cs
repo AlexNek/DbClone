@@ -160,10 +160,21 @@ public sealed class SnapshotExporter
         progress?.Report(new InterchangeProgress { Stage = "Writing extensions", Percentage = 70 });
         await writer.WriteSectionAsync("extensions", snapshot.Extensions, ct);
 
+        // The edges carry the structure the object sections cannot: which table depends on which,
+        // which view reads what. Without them a restore would re-create objects in arrival order and
+        // lose the ordering constraints the source stated.
+        progress?.Report(new InterchangeProgress { Stage = "Writing relationships", Percentage = 71 });
+        await writer.WriteRelationshipsAsync(snapshot.Relationships, ct);
+
+        // Writes nothing when the source produced no security content: an empty section would claim
+        // the database has no roles or grants, which is not something the capture checked.
+        progress?.Report(new InterchangeProgress { Stage = "Writing security", Percentage = 72 });
+        await writer.WriteSecurityAsync(snapshot.Security, ct);
+
         // Objects the neutral model has no home for travel as verbatim native SQL, so that a
         // same-dialect restore can reproduce them exactly and a cross-dialect one can refuse them
         // knowingly instead of silently dropping them.
-        progress?.Report(new InterchangeProgress { Stage = "Writing native objects", Percentage = 71 });
+        progress?.Report(new InterchangeProgress { Stage = "Writing native objects", Percentage = 73 });
         await writer.WriteNativeObjectsAsync(await reader.ReadNativeObjectsAsync(ct), ct);
 
         // Write table data
