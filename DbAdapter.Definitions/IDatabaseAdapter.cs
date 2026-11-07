@@ -18,6 +18,9 @@ public interface IDatabaseAdapter
     /// <summary>Platform role. Stateless, one per engine.</summary>
     IPlatformResolver Platform { get; }
 
+    /// <summary>Adapter-level capabilities. Stateless, one per engine.</summary>
+    IDatabaseCapabilities Capabilities { get; }
+
     /// <summary>Metadata role for <paramref name="target"/>.</summary>
     IMetadataSource CreateMetadataSource(DatabaseTarget target);
 
@@ -39,4 +42,22 @@ public interface IDatabaseAdapter
 
     /// <summary>Copy role. Both targets travel in the request.</summary>
     ICopySession CreateCopySession();
+
+    /// <summary>
+    /// Opens a reader for export operations against the specified target.
+    /// The reader owns its connection and transaction; dispose after use.
+    /// </summary>
+    /// <param name="target">The database target to read from.</param>
+    /// <param name="options">Export options.</param>
+    /// <returns>A new reader instance.</returns>
+    IDatabaseReader OpenReader(DatabaseTarget target, ExportOptions options);
+
+    /// <summary>
+    /// Opens a writer for import operations against the specified target.
+    /// The writer owns its connection and transaction; dispose after use.
+    /// </summary>
+    /// <param name="target">The database target to write to.</param>
+    /// <param name="options">Import options.</param>
+    /// <returns>A new writer instance.</returns>
+    IDatabaseWriter OpenWriter(DatabaseTarget target, ImportOptions options);
 }

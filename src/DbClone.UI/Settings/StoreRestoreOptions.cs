@@ -1,3 +1,5 @@
+using System.IO;
+
 namespace DbClone.UI.Settings;
 
 /// <summary>
@@ -12,6 +14,26 @@ public sealed class StoreRestoreOptions
         System.IO.Path.Combine(
             Environment.GetFolderPath(Environment.SpecialFolder.MyDocuments),
             "DbClone Catalogs");
+
+    /// <summary>
+    /// Ensures the default catalog directory exists on disk.
+    /// Called during startup to provide a better user experience.
+    /// </summary>
+    public void EnsureDefaultDirectoryExists()
+    {
+        if (!string.IsNullOrWhiteSpace(DefaultCatalogDirectory) && !Directory.Exists(DefaultCatalogDirectory))
+        {
+            try
+            {
+                Directory.CreateDirectory(DefaultCatalogDirectory);
+            }
+            catch (Exception ex)
+            {
+                // Log but don't fail - directory will be created on first use if needed
+                System.Diagnostics.Debug.WriteLine($"Failed to create default catalog directory: {ex.Message}");
+            }
+        }
+    }
 
     /// <summary>
     /// Subfolder naming pattern under <see cref="DefaultCatalogDirectory"/>.

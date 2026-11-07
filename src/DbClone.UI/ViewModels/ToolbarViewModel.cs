@@ -49,6 +49,8 @@ public sealed partial class ToolbarViewModel : ObservableObject
 
     private readonly IUpdateService _updateService;
 
+    private readonly IDialogService _dialogService;
+
     /// <summary>Compare VM reference for XAML command bindings.</summary>
     public CompareViewModel Compare { get; }
 
@@ -91,6 +93,7 @@ public sealed partial class ToolbarViewModel : ObservableObject
         ITableCatalogService catalogService,
         IUpdateService updateService,
         IPlatformService platformService,
+        IDialogService dialogService,
         ILogger<ToolbarViewModel> logger,
         OperationContext ctx)
     {
@@ -110,6 +113,7 @@ public sealed partial class ToolbarViewModel : ObservableObject
         _catalogService = catalogService;
         _updateService = updateService;
         _platformService = platformService;
+        _dialogService = dialogService;
         _logger = logger;
         _ctx = ctx;
     }
@@ -123,6 +127,20 @@ public sealed partial class ToolbarViewModel : ObservableObject
     private void CheckForUpdates()
     {
         _updateService.CheckForUpdates(reportErrors: true);
+    }
+
+    /// <summary>Shows a folder browser dialog to select the default catalog directory.</summary>
+    [RelayCommand]
+    private void BrowseCatalogDirectory()
+    {
+        var selectedDirectory = _dialogService.BrowseFolder(
+            "Select Default Catalog Directory",
+            Settings.StoreRestore.DefaultCatalogDirectory);
+
+        if (!string.IsNullOrWhiteSpace(selectedDirectory))
+        {
+            Settings.StoreRestore.DefaultCatalogDirectory = selectedDirectory;
+        }
     }
 
     [RelayCommand]

@@ -50,4 +50,21 @@ public sealed class WpfDialogService : IDialogService, IConfirmationService
 
         return dialog.ShowDialog() == true ? dialog.FileName : null;
     }
+
+    /// <inheritdoc />
+    public string? BrowseFolder(string description, string? initialDirectory = null)
+    {
+        var dialog = new OpenFolderDialog
+                         {
+                             Title = description,
+                             Multiselect = false,
+                         };
+
+        if (!string.IsNullOrWhiteSpace(initialDirectory) && System.IO.Directory.Exists(initialDirectory))
+        {
+            dialog.InitialDirectory = initialDirectory;
+        }
+
+        return dialog.ShowDialog() == true ? dialog.FolderName : null;
+    }
 }

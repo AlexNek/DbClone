@@ -1,11 +1,13 @@
 using System.IO;
 
 using DbAdapter.Definitions;
+using DbAdapter.PostgreSql.Capabilities;
 using DbAdapter.PostgreSql.Compare;
 using DbAdapter.PostgreSql.Ddl;
 using DbAdapter.PostgreSql.DependencyAnalysis;
 using DbAdapter.PostgreSql.Execution;
 using DbAdapter.PostgreSql.Formats;
+using DbAdapter.PostgreSql.Interchange;
 using DbAdapter.PostgreSql.Pipeline;
 using DbAdapter.PostgreSql.Platforms;
 using DbAdapter.PostgreSql.Providers;
@@ -46,6 +48,9 @@ public sealed class PostgreSqlAdapter : IDatabaseAdapter
     /// <inheritdoc />
     public IPlatformResolver Platform { get; }
 
+    /// <inheritdoc />
+    public IDatabaseCapabilities Capabilities { get; }
+
     /// <summary>
     /// Composition entry point used by the plugin catalog. Builds the whole engine object
     /// graph from <paramref name="pluginDirectory"/>, so the host never names a block type.
@@ -70,6 +75,7 @@ public sealed class PostgreSqlAdapter : IDatabaseAdapter
                             ?? "0.0.0");
         Syntax = new ConnectionStringSyntaxAdapter(graph.ConnectionStringService, graph.Formats);
         Platform = new PlatformResolverAdapter(graph.PlatformResolver);
+        Capabilities = new PostgreSqlCapabilities();
     }
 
     /// <inheritdoc />
@@ -98,6 +104,26 @@ public sealed class PostgreSqlAdapter : IDatabaseAdapter
 
     /// <inheritdoc />
     public ICopySession CreateCopySession() => new CopySessionAdapter(_copyEngine);
+
+    /// <inheritdoc />
+    public IDatabaseReader OpenReader(DatabaseTarget target, ExportOptions options)
+    {
+        var metadataSource = CreateMetadataSource(target);
+        return new PostgreSqlReader(
+            this,
+            target,
+            options,
+            _loggerFactory.CreateLogger<PostgreSqlReader>(),
+            metadataSource);
+    }
+
+    /// <inheritdoc />
+    public IDatabaseWriter OpenWriter(DatabaseTarget target, ImportOptions options) =>
+        new PostgreSqlWriter(
+            this,
+            target,
+            options,
+            _loggerFactory.CreateLogger<PostgreSqlWriter>());
 
     /// <summary>The internal roles a composed adapter hands to its boundary.</summary>
     private sealed record EngineGraph(

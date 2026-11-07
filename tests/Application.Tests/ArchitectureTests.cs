@@ -56,7 +56,7 @@ public class ArchitectureTests
     public void ApplicationProjectHasNoProjectReferenceOutsideTheAllowedSet()
     {
         // Arrange
-        var allowed = new[] { "CanonicalModel.csproj", "DbAdapter.Definitions.csproj" };
+        var allowed = new[] { "CanonicalModel.csproj", "DbAdapter.Definitions.csproj", "DatabaseInterchange.csproj" };
 
         // Act
         var references = ProjectReferencesOf("src/DbClone.Application/DbClone.Application.csproj");
@@ -64,7 +64,8 @@ public class ArchitectureTests
         // Assert
         // The shared model is the language every layer speaks and the definitions assembly is
         // the one boundary contract the application may name; a reference to the block or to
-        // the UI would invert the layer.
+        // the UI would invert the layer. The interchange product is the exchange the application
+        // consumes through its facade.
         references.Should().NotContain(
             reference => reference.EndsWith(BlockDirName + ".csproj", StringComparison.Ordinal)
                          || reference.EndsWith("DbClone.UI.csproj", StringComparison.Ordinal),

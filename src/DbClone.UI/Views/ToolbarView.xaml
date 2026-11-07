@@ -433,10 +433,22 @@
                                 Foreground="{ui:ThemeResource TextFillColorSecondaryBrush}"
                                 Text="Root folder for all catalogs. Subfolders are auto-created per operation."
                                 TextWrapping="Wrap" />
-                            <TextBox
-                                Margin="0,0,0,8"
-                                Text="{Binding Settings.StoreRestore.DefaultCatalogDirectory, UpdateSourceTrigger=PropertyChanged}"
-                                ToolTip="Root catalog directory" />
+                            <Grid Margin="0,0,0,8">
+                                <Grid.ColumnDefinitions>
+                                    <ColumnDefinition Width="*" />
+                                    <ColumnDefinition Width="Auto" />
+                                </Grid.ColumnDefinitions>
+                                <TextBox
+                                    Grid.Column="0"
+                                    Text="{Binding Settings.StoreRestore.DefaultCatalogDirectory, UpdateSourceTrigger=PropertyChanged}"
+                                    ToolTip="Root catalog directory" />
+                                <Button
+                                    Grid.Column="1"
+                                    Margin="4,0,0,0"
+                                    Command="{Binding BrowseCatalogDirectoryCommand}"
+                                    Content="Browse..."
+                                    ToolTip="Select catalog directory" />
+                            </Grid>
                             <TextBlock
                                 Margin="0,0,0,4"
                                 FontWeight="SemiBold"

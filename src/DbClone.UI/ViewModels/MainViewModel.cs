@@ -152,6 +152,9 @@ public sealed partial class MainViewModel : ObservableObject
         // Load settings
         Settings = settingsService.Load();
 
+        // Ensure default catalog directory exists for better UX
+        Settings.StoreRestore.EnsureDefaultDirectoryExists();
+
         // Settings persistence
         var settingsPersister = new SettingsPersistenceManager(settingsService, Settings);
         settingsPersister.Suspend();
@@ -217,8 +220,11 @@ public sealed partial class MainViewModel : ObservableObject
 
         StoreRestore = new StoreRestoreViewModel(
             interchangeService,
+            serviceProvider.GetRequiredService<IDialogService>(),
+            tableSelectionService,
             settingsPersister,
             Settings,
+            Context,
             serviceProvider.GetRequiredService<ILogger<StoreRestoreViewModel>>());
 
         _workflows = [Copy, Compare];
@@ -275,6 +281,7 @@ public sealed partial class MainViewModel : ObservableObject
             catalogService,
             updateService,
             platformService,
+            serviceProvider.GetRequiredService<IDialogService>(),
             serviceProvider.GetRequiredService<ILogger<ToolbarViewModel>>(),
             Context);
 

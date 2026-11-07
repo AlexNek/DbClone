@@ -1,0 +1,20 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <!--
+    The interchange product: Format (text catalog, chunks, hashes, archive) and
+    Transform (export/import orchestration). References CanonicalModel and
+    DbAdapter.Definitions only; knows no engine, names no driver.
+    TargetFramework, Nullable, ImplicitUsings, GenerateDocumentationFile and the
+    build-time GitVersion.MsBuild package come from the repository-root Directory.Build.props.
+  -->
+
+  <ItemGroup>
+    <ProjectReference Include="..\..\..\CanonicalModel\CanonicalModel.csproj" />
+    <ProjectReference Include="..\..\..\DbAdapter.Definitions\DbAdapter.Definitions.csproj" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Microsoft.Extensions.Logging.Abstractions" Version="10.0.9" />
+  </ItemGroup>
+
+</Project>

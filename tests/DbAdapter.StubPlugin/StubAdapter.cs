@@ -1,5 +1,6 @@
 using CanonicalModel.DTOs;
 using CanonicalModel.Enums;
+using CanonicalModel.Interchange;
 using CanonicalModel.Models;
 using CanonicalModel.Platforms;
 
@@ -39,6 +40,7 @@ public sealed class StubAdapter : IDatabaseAdapter
         _loggerFactory = loggerFactory ?? throw new ArgumentNullException(nameof(loggerFactory));
         Platform = new StubPlatformResolver(loggerFactory, pluginDirectory);
         Syntax = new StubSyntax();
+        Capabilities = new StubCapabilities();
         Info = new AdapterInfo(
             Id: "org.dbclone.stub",
             Dialect: Dialect,
@@ -57,6 +59,9 @@ public sealed class StubAdapter : IDatabaseAdapter
 
     /// <inheritdoc />
     public IPlatformResolver Platform { get; }
+
+    /// <inheritdoc />
+    public IDatabaseCapabilities Capabilities { get; }
 
     /// <inheritdoc />
     public IMetadataSource CreateMetadataSource(DatabaseTarget target) =>
@@ -79,6 +84,14 @@ public sealed class StubAdapter : IDatabaseAdapter
 
     /// <inheritdoc />
     public ICopySession CreateCopySession() => new StubCopySession(_loggerFactory);
+
+    /// <inheritdoc />
+    public IDatabaseReader OpenReader(DatabaseTarget target, ExportOptions options) =>
+        throw new NotSupportedException("The stub adapter does not support interchange operations.");
+
+    /// <inheritdoc />
+    public IDatabaseWriter OpenWriter(DatabaseTarget target, ImportOptions options) =>
+        throw new NotSupportedException("The stub adapter does not support interchange operations.");
 
     /// <summary>
     /// The connection-text role. The catalog only enumerates <see cref="Formats"/> (which is empty — the
@@ -235,5 +248,31 @@ public sealed class StubAdapter : IDatabaseAdapter
 
         public Task<StageResult> ExecuteAsync(CopyContext context, CancellationToken cancellationToken = default) =>
             Task.FromResult(new StageResult(Name, Success: true, TimeSpan.FromMilliseconds(1), ObjectsProcessed: 0, Details: []));
+    }
+
+    /// <summary>Stub capabilities — refuses everything.</summary>
+    private sealed class StubCapabilities : IDatabaseCapabilities
+    {
+        public bool CanRead(EObjectKind kind) => false;
+
+        public bool CanPreserve(EObjectKind kind) => false;
+
+        public bool CanCreate(EObjectKind kind) => false;
+
+        public bool CanRestoreData => false;
+
+        public bool CanRestoreSecurity => false;
+
+        public IReadOnlyList<ESnapshotConsistency> SupportedSnapshotModes => [];
+
+        public bool SupportsTransactionalImport => false;
+
+        public bool SupportsExistingTarget => false;
+
+        public IReadOnlyList<ERowOrder> SupportedRowOrders => [];
+
+        public IReadOnlyList<SchemaStage> SupportedSchemaStages => [];
+
+        public IReadOnlyList<ESecurityStage> SupportedSecurityStages => [];
     }
 }

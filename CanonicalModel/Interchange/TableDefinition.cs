@@ -1,0 +1,301 @@
+using System.Text.Json;
+
+namespace CanonicalModel.Interchange;
+
+/// <summary>
+/// Table kind classification.
+/// </summary>
+public enum ETableKind
+{
+    /// <summary>Regular table.</summary>
+    Table,
+
+    /// <summary>Partitioned table.</summary>
+    Partitioned,
+
+    /// <summary>Foreign table.</summary>
+    Foreign,
+
+    /// <summary>Temporary table.</summary>
+    Temporary,
+}
+
+/// <summary>
+/// A table in the interchange model.
+/// </summary>
+public sealed record TableDefinition : ISchemaObject
+{
+    /// <inheritdoc />
+    public InterchangeId Id { get; init; }
+
+    /// <inheritdoc />
+    public EObjectKind Kind => EObjectKind.Table;
+
+    /// <inheritdoc />
+    public string Name { get; init; } = string.Empty;
+
+    /// <inheritdoc />
+    public string? SourceObjectId { get; init; }
+
+    /// <inheritdoc />
+    public NativeDefinition? NativeDefinition { get; init; }
+
+    /// <inheritdoc />
+    public IReadOnlyDictionary<string, JsonElement> ExtensionData { get; init; } =
+        new Dictionary<string, JsonElement>();
+
+    /// <inheritdoc />
+    public IReadOnlyList<InterchangeIssue> Notes { get; init; } = [];
+
+    /// <summary>Gets or sets the schema Id.</summary>
+    public InterchangeId SchemaId { get; init; }
+
+    /// <summary>Gets or sets the table kind.</summary>
+    public ETableKind TableKind { get; init; } = ETableKind.Table;
+
+    /// <summary>Gets or sets the columns.</summary>
+    public IReadOnlyList<ColumnDefinition> Columns { get; init; } = [];
+
+    /// <summary>Gets or sets the primary key.</summary>
+    public PrimaryKeyDefinition? PrimaryKey { get; init; }
+
+    /// <summary>Gets or sets the foreign keys.</summary>
+    public IReadOnlyList<ForeignKeyDefinition> ForeignKeys { get; init; } = [];
+
+    /// <summary>Gets or sets the unique constraints.</summary>
+    public IReadOnlyList<UniqueConstraintDefinition> UniqueConstraints { get; init; } = [];
+
+    /// <summary>Gets or sets the check constraints.</summary>
+    public IReadOnlyList<CheckConstraintDefinition> CheckConstraints { get; init; } = [];
+
+    /// <summary>Gets or sets the exclusion constraints.</summary>
+    public IReadOnlyList<ExclusionConstraintDefinition> ExclusionConstraints { get; init; } = [];
+
+    /// <summary>Gets or sets the indexes.</summary>
+    public IReadOnlyList<IndexDefinition> Indexes { get; init; } = [];
+
+    /// <summary>Gets or sets the triggers.</summary>
+    public IReadOnlyList<TriggerDefinition> Triggers { get; init; } = [];
+
+    /// <summary>Gets or sets the row order mode for export.</summary>
+    public ERowOrder RowOrder { get; init; } = ERowOrder.PrimaryKey;
+}
+
+/// <summary>
+/// A primary key constraint.
+/// </summary>
+public sealed record PrimaryKeyDefinition : ISchemaObject
+{
+    /// <inheritdoc />
+    public InterchangeId Id { get; init; }
+
+    /// <inheritdoc />
+    public EObjectKind Kind => EObjectKind.PrimaryKey;
+
+    /// <inheritdoc />
+    public string Name { get; init; } = string.Empty;
+
+    /// <inheritdoc />
+    public string? SourceObjectId { get; init; }
+
+    /// <inheritdoc />
+    public NativeDefinition? NativeDefinition { get; init; }
+
+    /// <inheritdoc />
+    public IReadOnlyDictionary<string, JsonElement> ExtensionData { get; init; } =
+        new Dictionary<string, JsonElement>();
+
+    /// <inheritdoc />
+    public IReadOnlyList<InterchangeIssue> Notes { get; init; } = [];
+
+    /// <summary>Gets or sets the parent table Id.</summary>
+    public InterchangeId TableId { get; init; }
+
+    /// <summary>Gets or sets the column names in order.</summary>
+    public IReadOnlyList<string> Columns { get; init; } = [];
+}
+
+/// <summary>
+/// A foreign key constraint.
+/// </summary>
+public sealed record ForeignKeyDefinition : ISchemaObject
+{
+    /// <inheritdoc />
+    public InterchangeId Id { get; init; }
+
+    /// <inheritdoc />
+    public EObjectKind Kind => EObjectKind.ForeignKey;
+
+    /// <inheritdoc />
+    public string Name { get; init; } = string.Empty;
+
+    /// <inheritdoc />
+    public string? SourceObjectId { get; init; }
+
+    /// <inheritdoc />
+    public NativeDefinition? NativeDefinition { get; init; }
+
+    /// <inheritdoc />
+    public IReadOnlyDictionary<string, JsonElement> ExtensionData { get; init; } =
+        new Dictionary<string, JsonElement>();
+
+    /// <inheritdoc />
+    public IReadOnlyList<InterchangeIssue> Notes { get; init; } = [];
+
+    /// <summary>Gets or sets the parent table Id.</summary>
+    public InterchangeId TableId { get; init; }
+
+    /// <summary>Gets or sets the referencing column names.</summary>
+    public IReadOnlyList<string> Columns { get; init; } = [];
+
+    /// <summary>Gets or sets the referenced table Id.</summary>
+    public InterchangeId ReferencedTableId { get; init; }
+
+    /// <summary>Gets or sets the referenced column names.</summary>
+    public IReadOnlyList<string> ReferencedColumns { get; init; } = [];
+
+    /// <summary>Gets or sets the ON DELETE action.</summary>
+    public string? OnDelete { get; init; }
+
+    /// <summary>Gets or sets the ON UPDATE action.</summary>
+    public string? OnUpdate { get; init; }
+
+    /// <summary>Gets or sets whether the constraint is deferrable.</summary>
+    public bool IsDeferrable { get; init; }
+
+    /// <summary>Gets or sets whether the constraint is initially deferred.</summary>
+    public bool IsInitiallyDeferred { get; init; }
+}
+
+/// <summary>
+/// A unique constraint.
+/// </summary>
+public sealed record UniqueConstraintDefinition : ISchemaObject
+{
+    /// <inheritdoc />
+    public InterchangeId Id { get; init; }
+
+    /// <inheritdoc />
+    public EObjectKind Kind => EObjectKind.UniqueConstraint;
+
+    /// <inheritdoc />
+    public string Name { get; init; } = string.Empty;
+
+    /// <inheritdoc />
+    public string? SourceObjectId { get; init; }
+
+    /// <inheritdoc />
+    public NativeDefinition? NativeDefinition { get; init; }
+
+    /// <inheritdoc />
+    public IReadOnlyDictionary<string, JsonElement> ExtensionData { get; init; } =
+        new Dictionary<string, JsonElement>();
+
+    /// <inheritdoc />
+    public IReadOnlyList<InterchangeIssue> Notes { get; init; } = [];
+
+    /// <summary>Gets or sets the parent table Id.</summary>
+    public InterchangeId TableId { get; init; }
+
+    /// <summary>Gets or sets the column names in order.</summary>
+    public IReadOnlyList<string> Columns { get; init; } = [];
+}
+
+/// <summary>
+/// A check constraint.
+/// </summary>
+public sealed record CheckConstraintDefinition : ISchemaObject
+{
+    /// <inheritdoc />
+    public InterchangeId Id { get; init; }
+
+    /// <inheritdoc />
+    public EObjectKind Kind => EObjectKind.CheckConstraint;
+
+    /// <inheritdoc />
+    public string Name { get; init; } = string.Empty;
+
+    /// <inheritdoc />
+    public string? SourceObjectId { get; init; }
+
+    /// <inheritdoc />
+    public NativeDefinition? NativeDefinition { get; init; }
+
+    /// <inheritdoc />
+    public IReadOnlyDictionary<string, JsonElement> ExtensionData { get; init; } =
+        new Dictionary<string, JsonElement>();
+
+    /// <inheritdoc />
+    public IReadOnlyList<InterchangeIssue> Notes { get; init; } = [];
+
+    /// <summary>Gets or sets the parent table Id.</summary>
+    public InterchangeId TableId { get; init; }
+
+    /// <summary>Gets or sets the check expression.</summary>
+    public DatabaseExpression Expression { get; init; } = new(string.Empty, string.Empty);
+}
+
+/// <summary>
+/// An exclusion constraint.
+/// </summary>
+public sealed record ExclusionConstraintDefinition : ISchemaObject
+{
+    /// <inheritdoc />
+    public InterchangeId Id { get; init; }
+
+    /// <inheritdoc />
+    public EObjectKind Kind => EObjectKind.ExclusionConstraint;
+
+    /// <inheritdoc />
+    public string Name { get; init; } = string.Empty;
+
+    /// <inheritdoc />
+    public string? SourceObjectId { get; init; }
+
+    /// <inheritdoc />
+    public NativeDefinition? NativeDefinition { get; init; }
+
+    /// <inheritdoc />
+    public IReadOnlyDictionary<string, JsonElement> ExtensionData { get; init; } =
+        new Dictionary<string, JsonElement>();
+
+    /// <inheritdoc />
+    public IReadOnlyList<InterchangeIssue> Notes { get; init; } = [];
+
+    /// <summary>Gets or sets the parent table Id.</summary>
+    public InterchangeId TableId { get; init; }
+}
+
+/// <summary>
+/// An index.
+/// </summary>
+public sealed record IndexDefinition : ISchemaObject
+{
+    /// <inheritdoc />
+    public InterchangeId Id { get; init; }
+
+    /// <inheritdoc />
+    public EObjectKind Kind => EObjectKind.Index;
+
+    /// <inheritdoc />
+    public string Name { get; init; } = string.Empty;
+
+    /// <inheritdoc />
+    public string? SourceObjectId { get; init; }
+
+    /// <inheritdoc />
+    public NativeDefinition? NativeDefinition { get; init; }
+
+    /// <inheritdoc />
+    public IReadOnlyDictionary<string, JsonElement> ExtensionData { get; init; } =
+        new Dictionary<string, JsonElement>();
+
+    /// <inheritdoc />
+    public IReadOnlyList<InterchangeIssue> Notes { get; init; } = [];
+
+    /// <summary>Gets or sets the parent table Id.</summary>
+    public InterchangeId TableId { get; init; }
+
+    /// <summary>Gets or sets whether the index is unique.</summary>
+    public bool IsUnique { get; init; }
+}

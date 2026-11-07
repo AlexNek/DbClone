@@ -5,6 +5,10 @@
   <Folder Name="/DbAdapter.Definitions/">
     <Project Path="DbAdapter.Definitions/DbAdapter.Definitions.csproj" />
   </Folder>
+  <Folder Name="/interchange/">
+    <Project Path="interchange/src/DatabaseInterchange/DatabaseInterchange.csproj" />
+    <Project Path="interchange/tests/DatabaseInterchange.Tests/DatabaseInterchange.Tests.csproj" />
+  </Folder>
   <Folder Name="/src/">
     <Project Path="src/DbClone.Application/DbClone.Application.csproj" />
     <Project Path="src/DbClone.UI/DbClone.UI.csproj" />
