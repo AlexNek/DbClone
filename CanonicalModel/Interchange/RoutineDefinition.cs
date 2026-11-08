@@ -43,8 +43,8 @@ public sealed record TranslatedBy
     /// <summary>Gets or sets the translator identifier.</summary>
     public string Translator { get; init; } = string.Empty;
 
-    /// <summary>Gets or sets the source implementation Id.</summary>
-    public InterchangeId SourceImplementationId { get; init; }
+    /// <summary>Gets or sets the source implementation reference.</summary>
+    public ObjectRef SourceImplementationRef { get; init; }
 
     /// <summary>Gets or sets the mapping profile used.</summary>
     public string? MappingProfile { get; init; }
@@ -83,7 +83,7 @@ public sealed record RoutineImplementation
 public sealed record RoutineDefinition : ISchemaObject
 {
     /// <inheritdoc />
-    public InterchangeId Id { get; init; }
+    public ObjectRef Ref { get; init; }
 
     /// <inheritdoc />
     public EObjectKind Kind { get; init; } = EObjectKind.Function;
@@ -104,8 +104,8 @@ public sealed record RoutineDefinition : ISchemaObject
     /// <inheritdoc />
     public IReadOnlyList<InterchangeIssue> Notes { get; init; } = [];
 
-    /// <summary>Gets or sets the schema Id.</summary>
-    public InterchangeId SchemaId { get; init; }
+    /// <summary>Gets or sets the schema reference.</summary>
+    public ObjectRef SchemaRef { get; init; }
 
     /// <summary>Gets or sets the implementations (one per dialect).</summary>
     public IReadOnlyList<RoutineImplementation> Implementations { get; init; } = [];
@@ -187,7 +187,7 @@ public enum ETriggerOrientation
 public sealed record TriggerDefinition : ISchemaObject
 {
     /// <inheritdoc />
-    public InterchangeId Id { get; init; }
+    public ObjectRef Ref { get; init; }
 
     /// <inheritdoc />
     public EObjectKind Kind => EObjectKind.Trigger;
@@ -208,8 +208,8 @@ public sealed record TriggerDefinition : ISchemaObject
     /// <inheritdoc />
     public IReadOnlyList<InterchangeIssue> Notes { get; init; } = [];
 
-    /// <summary>Gets or sets the parent table Id.</summary>
-    public InterchangeId TableId { get; init; }
+    /// <summary>Gets or sets the parent table reference.</summary>
+    public ObjectRef TableRef { get; init; }
 
     /// <summary>Gets or sets the trigger timing.</summary>
     public ETriggerTiming Timing { get; init; }
@@ -223,8 +223,8 @@ public sealed record TriggerDefinition : ISchemaObject
     /// <summary>Gets or sets the enabled state.</summary>
     public string EnabledState { get; init; } = "O";
 
-    /// <summary>Gets or sets the referenced routine Id.</summary>
-    public InterchangeId ReferencedRoutineId { get; init; }
+    /// <summary>Gets or sets the referenced routine reference.</summary>
+    public ObjectRef ReferencedRoutineRef { get; init; }
 
     /// <summary>Gets or sets the trigger arguments.</summary>
     public IReadOnlyList<string> Arguments { get; init; } = [];

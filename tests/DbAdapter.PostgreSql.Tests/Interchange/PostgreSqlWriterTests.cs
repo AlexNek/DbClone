@@ -130,7 +130,7 @@ public class PostgreSqlWriterTests
         };
         await using var writer = CreateWriter();
 
-        writer.BuildStatements(SchemaStage.Schemas, objects, ObjectNameMap.Empty)
+        writer.BuildStatements(SchemaStage.Schemas, objects)
             .Should()
             .Equal(
                 "CREATE SCHEMA IF NOT EXISTS sales;",
@@ -145,8 +145,7 @@ public class PostgreSqlWriterTests
         var act = () =>
             writer.BuildStatements(
                 SchemaStage.Schemas,
-                [new SequenceDefinition { Name = "orders_id_seq" }],
-                ObjectNameMap.Empty);
+                [new SequenceDefinition { Name = "orders_id_seq" }]);
 
         act.Should().Throw<ArgumentException>().Which.Message
             .Should().Contain("SequenceDefinition");
@@ -165,7 +164,7 @@ public class PostgreSqlWriterTests
             Type(EObjectKind.Enum, "sales", "mood", "CREATE TYPE sales.mood AS ENUM ('sad', 'happy')"),
         };
 
-        var statements = writer.BuildStatements(SchemaStage.Types, objects, ObjectNameMap.Empty);
+        var statements = writer.BuildStatements(SchemaStage.Types, objects);
 
         // The semicolon the capture left on the first statement is not doubled.
         statements.Should().Equal(
@@ -186,7 +185,7 @@ public class PostgreSqlWriterTests
             Type(kind, string.Empty, "pub_all", "CREATE PUBLICATION pub_all FOR ALL TABLES"),
         };
 
-        var act = () => writer.BuildStatements(SchemaStage.Types, objects, ObjectNameMap.Empty);
+        var act = () => writer.BuildStatements(SchemaStage.Types, objects);
 
         // Whether a kind is created at all is the adapter's declared capability, answered before the
         // import writes anything, and which stage creates it is the routing table's answer. An object of
@@ -203,8 +202,7 @@ public class PostgreSqlWriterTests
 
         var act = () => writer.BuildStatements(
             SchemaStage.Types,
-            [new SchemaDefinition { Name = "sales" }],
-            ObjectNameMap.Empty);
+            [new SchemaDefinition { Name = "sales" }]);
 
         act.Should().Throw<ArgumentException>().Which.Message
             .Should().Contain(nameof(NativeObjectDefinition));
@@ -219,7 +217,7 @@ public class PostgreSqlWriterTests
             new NativeObjectDefinition { Kind = EObjectKind.Enum, SchemaName = "sales", Name = "mood" },
         };
 
-        var act = () => writer.BuildStatements(SchemaStage.Types, objects, ObjectNameMap.Empty);
+        var act = () => writer.BuildStatements(SchemaStage.Types, objects);
 
         // The format keeps no field for an enum's labels, so there is nothing here to write a statement
         // from — and inventing labels would create a type the source never had.
@@ -243,7 +241,7 @@ public class PostgreSqlWriterTests
             },
         };
 
-        var act = () => writer.BuildStatements(SchemaStage.Types, objects, ObjectNameMap.Empty);
+        var act = () => writer.BuildStatements(SchemaStage.Types, objects);
 
         act.Should().Throw<InvalidOperationException>().Which.Message
             .Should().Contain("fragment");
@@ -265,7 +263,7 @@ public class PostgreSqlWriterTests
             },
         };
 
-        var act = () => writer.BuildStatements(SchemaStage.Types, objects, ObjectNameMap.Empty);
+        var act = () => writer.BuildStatements(SchemaStage.Types, objects);
 
         act.Should().Throw<InvalidOperationException>().Which.Message
             .Should().Contain("mysql").And.Contain("postgresql");
@@ -277,10 +275,10 @@ public class PostgreSqlWriterTests
         await using var writer = CreateWriter();
         var objects = new ISchemaObject[]
         {
-            new SequenceDefinition { Name = "order_seq", SchemaId = SalesId },
+            new SequenceDefinition { Name = "order_seq", SchemaRef = SalesSchemaRef },
         };
 
-        writer.BuildStatements(SchemaStage.Sequences, objects, NamesOneSchema())
+        writer.BuildStatements(SchemaStage.Sequences, objects)
             .Should()
             .Equal(
                 "CREATE SEQUENCE sales.order_seq AS bigint INCREMENT BY 1 START WITH 1 "
@@ -293,10 +291,10 @@ public class PostgreSqlWriterTests
         await using var writer = CreateWriter();
         var objects = new ISchemaObject[]
         {
-            new SequenceDefinition { Name = "order_seq", SchemaId = OtherSchemaId },
+            new SequenceDefinition { Name = "order_seq", SchemaRef = ObjectRef.Schema("") },
         };
 
-        var act = () => writer.BuildStatements(SchemaStage.Sequences, objects, NamesOneSchema());
+        var act = () => writer.BuildStatements(SchemaStage.Sequences, objects);
 
         // The default schema is the one answer that must never be the fallback: it would place the
         // sequence somewhere the source never said it lived.
@@ -313,19 +311,19 @@ public class PostgreSqlWriterTests
             new ViewDefinition
             {
                 Name = "order_total",
-                SchemaId = SalesId,
+                SchemaRef = SalesSchemaRef,
                 Definition = new DatabaseExpression("postgresql", "SELECT 1"),
             },
             new ViewDefinition
             {
                 Name = "order_totals",
-                SchemaId = SalesId,
+                SchemaRef = SalesSchemaRef,
                 Definition = new DatabaseExpression("postgresql", "SELECT 2"),
                 IsMaterialized = true,
             },
         };
 
-        writer.BuildStatements(SchemaStage.Views, objects, NamesOneSchema())
+        writer.BuildStatements(SchemaStage.Views, objects)
             .Should()
             .Equal(
                 $"CREATE OR REPLACE VIEW sales.order_total AS{Environment.NewLine}SELECT 1;",
@@ -341,12 +339,12 @@ public class PostgreSqlWriterTests
             new ViewDefinition
             {
                 Name = "order_total",
-                SchemaId = SalesId,
+                SchemaRef = SalesSchemaRef,
                 Definition = new DatabaseExpression("mysql", "SELECT 1"),
             },
         };
 
-        var act = () => writer.BuildStatements(SchemaStage.Views, objects, NamesOneSchema());
+        var act = () => writer.BuildStatements(SchemaStage.Views, objects);
 
         act.Should().Throw<InvalidOperationException>().Which.Message
             .Should().Contain("mysql").And.Contain("postgresql");
@@ -362,12 +360,12 @@ public class PostgreSqlWriterTests
             new RoutineDefinition
             {
                 Name = "f",
-                SchemaId = SalesId,
+                SchemaRef = SalesSchemaRef,
                 NativeDefinition = new NativeDefinition("postgresql", Statement),
             },
         };
 
-        writer.BuildStatements(SchemaStage.Routines, objects, NamesOneSchema())
+        writer.BuildStatements(SchemaStage.Routines, objects)
             .Should()
             .Equal($"{Statement};");
     }
@@ -378,10 +376,10 @@ public class PostgreSqlWriterTests
         await using var writer = CreateWriter();
         var objects = new ISchemaObject[]
         {
-            new RoutineDefinition { Name = "f", SchemaId = SalesId },
+            new RoutineDefinition { Name = "f", SchemaRef = SalesSchemaRef },
         };
 
-        var act = () => writer.BuildStatements(SchemaStage.Routines, objects, NamesOneSchema());
+        var act = () => writer.BuildStatements(SchemaStage.Routines, objects);
 
         act.Should().Throw<InvalidOperationException>().Which.Message
             .Should().Contain("carries no captured body");
@@ -396,7 +394,7 @@ public class PostgreSqlWriterTests
             new TableDefinition
             {
                 Name = "orders",
-                SchemaId = SalesId,
+                SchemaRef = SalesSchemaRef,
                 Columns =
                 [
                     Column("id", "integer", nullable: false) with { Identity = "yes" },
@@ -432,7 +430,7 @@ public class PostgreSqlWriterTests
             },
         };
 
-        writer.BuildStatements(SchemaStage.Tables, objects, NamesSalesTables())
+        writer.BuildStatements(SchemaStage.Tables, objects)
             .Should()
             .Equal(
                 // The identity column keeps its NOT NULL, the collation and the generated expression
@@ -459,23 +457,23 @@ public class PostgreSqlWriterTests
             new TableDefinition
             {
                 Name = "orders_2026",
-                SchemaId = SalesId,
-                ParentId = OrdersId,
+                SchemaRef = SalesSchemaRef,
+                ParentRef = OrdersRef,
                 PartitionBound = "FOR VALUES FROM (1) TO (100)",
                 Columns = [Column("id", "integer")],
             },
             new TableDefinition
             {
-                Id = OrdersId,
+                Ref = OrdersRef,
                 Name = "orders",
-                SchemaId = SalesId,
+                SchemaRef = SalesSchemaRef,
                 TableKind = ETableKind.Partitioned,
                 PartitionStrategy = "RANGE (id)",
                 Columns = [Column("id", "integer")],
             },
         };
 
-        writer.BuildStatements(SchemaStage.Tables, objects, NamesSalesTables())
+        writer.BuildStatements(SchemaStage.Tables, objects)
             .Should()
             .Equal(
                 "CREATE TABLE sales.orders (id integer) PARTITION BY RANGE (id);",
@@ -491,9 +489,9 @@ public class PostgreSqlWriterTests
         {
             new TableDefinition
             {
-                Id = OrdersId,
+                Ref = OrdersRef,
                 Name = "orders",
-                SchemaId = SalesId,
+                SchemaRef = SalesSchemaRef,
                 TableKind = ETableKind.Partitioned,
                 PartitionStrategy = "RANGE (id)",
                 Columns = [Column("id", "integer")],
@@ -501,8 +499,8 @@ public class PostgreSqlWriterTests
             new TableDefinition
             {
                 Name = "orders_2026",
-                SchemaId = SalesId,
-                ParentId = OrdersId,
+                SchemaRef = SalesSchemaRef,
+                ParentRef = OrdersRef,
                 TableKind = ETableKind.Partitioned,
                 PartitionStrategy = "HASH (id)",
                 PartitionBound = "FOR VALUES FROM (1) TO (100)",
@@ -510,7 +508,7 @@ public class PostgreSqlWriterTests
             },
         };
 
-        writer.BuildStatements(SchemaStage.Tables, objects, NamesSalesTables())
+        writer.BuildStatements(SchemaStage.Tables, objects)
             .Should()
             .Equal(
                 "CREATE TABLE sales.orders (id integer) PARTITION BY RANGE (id);",
@@ -527,17 +525,17 @@ public class PostgreSqlWriterTests
             new TableDefinition
             {
                 Name = "orders_2026",
-                SchemaId = SalesId,
-                ParentId = OutsideId,
+                SchemaRef = SalesSchemaRef,
+                ParentRef = OutsideRef,
                 PartitionBound = "FOR VALUES FROM (1) TO (100)",
                 Columns = [Column("id", "integer")],
             },
         };
 
-        var act = () => writer.BuildStatements(SchemaStage.Tables, objects, NamesSalesTables());
+        var act = () => writer.BuildStatements(SchemaStage.Tables, objects);
 
         act.Should().Throw<InvalidOperationException>().Which.Message
-            .Should().Contain("orders_2026");
+            .Should().Contain("partition parent");
     }
 
     [Fact]
@@ -552,14 +550,14 @@ public class PostgreSqlWriterTests
             new TableDefinition
             {
                 Name = "orders_2026",
-                SchemaId = SalesId,
-                ParentId = OrdersId,
+                SchemaRef = SalesSchemaRef,
+                ParentRef = OrdersRef,
                 PartitionBound = "FOR VALUES FROM (1) TO (100)",
                 Columns = [Column("id", "integer")],
             },
         };
 
-        var act = () => writer.BuildStatements(SchemaStage.Tables, objects, NamesSalesTables());
+        var act = () => writer.BuildStatements(SchemaStage.Tables, objects);
 
         act.Should().Throw<InvalidOperationException>().Which.Message
             .Should().Contain("parent is not among the tables");
@@ -573,21 +571,21 @@ public class PostgreSqlWriterTests
         {
             new TableDefinition
             {
-                Id = OrdersId,
+                Ref = OrdersRef,
                 Name = "orders",
-                SchemaId = SalesId,
+                SchemaRef = SalesSchemaRef,
                 Columns = [Column("id", "integer")],
             },
             new TableDefinition
             {
                 Name = "orders_archive",
-                SchemaId = SalesId,
-                ParentId = OrdersId,
+                SchemaRef = SalesSchemaRef,
+                ParentRef = OrdersRef,
                 Columns = [Column("id", "integer"), Column("archived_at", "date")],
             },
         };
 
-        var act = () => writer.BuildStatements(SchemaStage.Tables, objects, NamesSalesTables());
+        var act = () => writer.BuildStatements(SchemaStage.Tables, objects);
 
         // A child with a parent and no bound inherits rather than partitions, and PostgreSQL builds
         // one from the columns the child declares for itself — which the catalog does not record.
@@ -607,13 +605,13 @@ public class PostgreSqlWriterTests
             new TableDefinition
             {
                 Name = "orders",
-                SchemaId = SalesId,
+                SchemaRef = SalesSchemaRef,
                 TableKind = kind,
                 Columns = [Column("id", "integer")],
             },
         };
 
-        var act = () => writer.BuildStatements(SchemaStage.Tables, objects, NamesSalesTables());
+        var act = () => writer.BuildStatements(SchemaStage.Tables, objects);
 
         act.Should().Throw<InvalidOperationException>().Which.Message
             .Should().Contain(kind.ToString());
@@ -628,7 +626,7 @@ public class PostgreSqlWriterTests
             new TableDefinition
             {
                 Name = "slots",
-                SchemaId = SalesId,
+                SchemaRef = SalesSchemaRef,
                 Columns = [Column("during", "tsrange")],
                 ExclusionConstraints =
                 [
@@ -637,7 +635,7 @@ public class PostgreSqlWriterTests
             },
         };
 
-        var act = () => writer.BuildStatements(SchemaStage.Tables, objects, NamesSalesTables());
+        var act = () => writer.BuildStatements(SchemaStage.Tables, objects);
 
         // The format keeps the constraint's name and nothing of its operator or predicate, so the
         // table would come back accepting rows the source refused.
@@ -654,14 +652,14 @@ public class PostgreSqlWriterTests
             new TableDefinition
             {
                 Name = "orders",
-                SchemaId = SalesId,
+                SchemaRef = SalesSchemaRef,
                 ForeignKeys =
                 [
                     new ForeignKeyDefinition
                     {
                         Name = "orders_customer_id_fkey",
                         Columns = ["customer_id"],
-                        ReferencedTableId = CustomersId,
+                        ReferencedTableRef = CustomersRef,
                         ReferencedColumns = ["id"],
                         OnUpdate = "NO ACTION",
                         OnDelete = "CASCADE",
@@ -672,14 +670,14 @@ public class PostgreSqlWriterTests
                     {
                         Name = "orders_parent_id_fkey",
                         Columns = ["parent_id"],
-                        ReferencedTableId = OrdersId,
+                        ReferencedTableRef = OrdersRef,
                         ReferencedColumns = ["id"],
                     },
                 ],
             },
         };
 
-        writer.BuildStatements(SchemaStage.Constraints, objects, NamesSalesTables())
+        writer.BuildStatements(SchemaStage.Constraints, objects)
             .Should()
             .Equal(
                 "ALTER TABLE sales.orders ADD CONSTRAINT orders_customer_id_fkey "
@@ -698,21 +696,21 @@ public class PostgreSqlWriterTests
             new TableDefinition
             {
                 Name = "orders",
-                SchemaId = SalesId,
+                SchemaRef = SalesSchemaRef,
                 ForeignKeys =
                 [
                     new ForeignKeyDefinition
                     {
                         Name = "orders_customer_id_fkey",
                         Columns = ["customer_id"],
-                        ReferencedTableId = OutsideId,
+                        ReferencedTableRef = ObjectRef.Table("", "outside"),
                         ReferencedColumns = ["id"],
                     },
                 ],
             },
         };
 
-        var act = () => writer.BuildStatements(SchemaStage.Constraints, objects, NamesSalesTables());
+        var act = () => writer.BuildStatements(SchemaStage.Constraints, objects);
 
         act.Should().Throw<InvalidOperationException>().Which.Message
             .Should().Contain("orders_customer_id_fkey");
@@ -727,7 +725,7 @@ public class PostgreSqlWriterTests
             new TableDefinition
             {
                 Name = "orders",
-                SchemaId = SalesId,
+                SchemaRef = SalesSchemaRef,
                 Indexes =
                 [
                     Index(
@@ -743,7 +741,7 @@ public class PostgreSqlWriterTests
 
         // Sort order, operator class and the predicate survive only in this text, which is why the
         // stage runs it instead of rebuilding the statement from what the format structures.
-        writer.BuildStatements(SchemaStage.Indexes, objects, NamesSalesTables())
+        writer.BuildStatements(SchemaStage.Indexes, objects)
             .Should()
             .Equal(
                 "CREATE INDEX orders_created_at_idx ON sales.orders USING btree "
@@ -760,7 +758,7 @@ public class PostgreSqlWriterTests
             new TableDefinition
             {
                 Name = "orders",
-                SchemaId = SalesId,
+                SchemaRef = SalesSchemaRef,
                 PrimaryKey = new PrimaryKeyDefinition { Name = "orders_pkey", Columns = ["id"] },
                 UniqueConstraints =
                 [
@@ -786,7 +784,7 @@ public class PostgreSqlWriterTests
         // The table statement creates both constraints inline, and PostgreSQL names the enforcing index
         // after the constraint, so the two captured indexes are already there: creating them again
         // fails with "relation already exists" and rolls the whole stage back.
-        writer.BuildStatements(SchemaStage.Indexes, objects, NamesSalesTables())
+        writer.BuildStatements(SchemaStage.Indexes, objects)
             .Should()
             .Equal("CREATE INDEX orders_created_at_idx ON sales.orders (created_at);");
     }
@@ -798,8 +796,7 @@ public class PostgreSqlWriterTests
 
         var act = () => writer.BuildStatements(
             SchemaStage.Indexes,
-            [new IndexDefinition { Name = "orders_created_at_idx", TableId = OrdersId }],
-            NamesSalesTables());
+            [new IndexDefinition { Name = "orders_created_at_idx", TableRef = OrdersRef }]);
 
         act.Should().Throw<ArgumentException>().Which.Message
             .Should().Contain("TableDefinition");
@@ -814,12 +811,12 @@ public class PostgreSqlWriterTests
             new TableDefinition
             {
                 Name = "orders",
-                SchemaId = SalesId,
-                Indexes = [new IndexDefinition { Name = "orders_created_at_idx", TableId = OrdersId }],
+                SchemaRef = SalesSchemaRef,
+                Indexes = [new IndexDefinition { Name = "orders_created_at_idx", TableRef = OrdersRef }],
             },
         };
 
-        var act = () => writer.BuildStatements(SchemaStage.Indexes, objects, NamesSalesTables());
+        var act = () => writer.BuildStatements(SchemaStage.Indexes, objects);
 
         // The format gives an index a name, a table and whether it is unique: no columns to write a
         // statement from, so an index without its captured text cannot be restored.
@@ -836,13 +833,13 @@ public class PostgreSqlWriterTests
             new TableDefinition
             {
                 Name = "orders",
-                SchemaId = SalesId,
+                SchemaRef = SalesSchemaRef,
                 Indexes =
                 [
                     new IndexDefinition
                     {
                         Name = "orders_created_at_idx",
-                        TableId = OrdersId,
+                        TableRef = OrdersRef,
                         NativeDefinition = new NativeDefinition(
                             "postgresql",
                             "CREATE INDEX orders_created_at_idx ON sales.orders",
@@ -852,7 +849,7 @@ public class PostgreSqlWriterTests
             },
         };
 
-        var act = () => writer.BuildStatements(SchemaStage.Indexes, objects, NamesSalesTables());
+        var act = () => writer.BuildStatements(SchemaStage.Indexes, objects);
 
         act.Should().Throw<InvalidOperationException>().Which.Message
             .Should().Contain("fragment");
@@ -867,13 +864,13 @@ public class PostgreSqlWriterTests
             new TableDefinition
             {
                 Name = "orders",
-                SchemaId = SalesId,
+                SchemaRef = SalesSchemaRef,
                 Indexes =
                 [
                     new IndexDefinition
                     {
                         Name = "orders_created_at_idx",
-                        TableId = OrdersId,
+                        TableRef = OrdersRef,
                         NativeDefinition = new NativeDefinition(
                             "mysql",
                             "CREATE INDEX orders_created_at_idx ON orders (created_at)"),
@@ -882,7 +879,7 @@ public class PostgreSqlWriterTests
             },
         };
 
-        var act = () => writer.BuildStatements(SchemaStage.Indexes, objects, NamesSalesTables());
+        var act = () => writer.BuildStatements(SchemaStage.Indexes, objects);
 
         act.Should().Throw<InvalidOperationException>().Which.Message
             .Should().Contain("mysql").And.Contain("postgresql");
@@ -907,7 +904,7 @@ public class PostgreSqlWriterTests
         // The columns an UPDATE OF event names, the order its events were declared in, the WHEN clause
         // and the function's arguments exist in no field of the record, so the stage runs the text the
         // engine reported instead of writing a statement from what the format structures.
-        writer.BuildStatements(SchemaStage.Triggers, objects, NamesSalesTables())
+        writer.BuildStatements(SchemaStage.Triggers, objects)
             .Should()
             .Equal(
                 "CREATE TRIGGER tr_audit BEFORE UPDATE OF total OR INSERT ON sales.orders "
@@ -931,7 +928,7 @@ public class PostgreSqlWriterTests
 
         // pg_get_triggerdef describes the trigger, never its enabled flag, and the statement it yields
         // always creates one that fires. The recorded state therefore needs the extra statement.
-        writer.BuildStatements(SchemaStage.Triggers, objects, NamesSalesTables())
+        writer.BuildStatements(SchemaStage.Triggers, objects)
             .Should()
             .Equal(
                 "CREATE TRIGGER tr_audit AFTER INSERT ON sales.orders FOR EACH ROW "
@@ -946,8 +943,7 @@ public class PostgreSqlWriterTests
 
         var act = () => writer.BuildStatements(
             SchemaStage.Triggers,
-            [new TableDefinition { Name = "orders", SchemaId = SalesId }],
-            NamesSalesTables());
+            [new TableDefinition { Name = "orders", SchemaRef = SalesSchemaRef }]);
 
         act.Should().Throw<ArgumentException>().Which.Message
             .Should().Contain("TriggerDefinition");
@@ -959,10 +955,10 @@ public class PostgreSqlWriterTests
         await using var writer = CreateWriter();
         var objects = new ISchemaObject[]
         {
-            new TriggerDefinition { Name = "tr_audit", TableId = OrdersId },
+            new TriggerDefinition { Name = "tr_audit", TableRef = OrdersRef },
         };
 
-        var act = () => writer.BuildStatements(SchemaStage.Triggers, objects, NamesSalesTables());
+        var act = () => writer.BuildStatements(SchemaStage.Triggers, objects);
 
         // The record names no function, so a trigger that arrived without its text cannot be written.
         act.Should().Throw<InvalidOperationException>().Which.Message
@@ -978,7 +974,7 @@ public class PostgreSqlWriterTests
             new TriggerDefinition
             {
                 Name = "tr_audit",
-                TableId = OrdersId,
+                TableRef = OrdersRef,
                 NativeDefinition = new NativeDefinition(
                     "postgresql",
                     "CREATE TRIGGER tr_audit BEFORE UPDATE ON sales.orders",
@@ -986,7 +982,7 @@ public class PostgreSqlWriterTests
             },
         };
 
-        var act = () => writer.BuildStatements(SchemaStage.Triggers, objects, NamesSalesTables());
+        var act = () => writer.BuildStatements(SchemaStage.Triggers, objects);
 
         act.Should().Throw<InvalidOperationException>().Which.Message
             .Should().Contain("fragment");
@@ -1001,14 +997,14 @@ public class PostgreSqlWriterTests
             new TriggerDefinition
             {
                 Name = "tr_audit",
-                TableId = OrdersId,
+                TableRef = OrdersRef,
                 NativeDefinition = new NativeDefinition(
                     "mysql",
                     "CREATE TRIGGER tr_audit AFTER INSERT ON orders FOR EACH ROW EXECUTE FUNCTION audit()"),
             },
         };
 
-        var act = () => writer.BuildStatements(SchemaStage.Triggers, objects, NamesSalesTables());
+        var act = () => writer.BuildStatements(SchemaStage.Triggers, objects);
 
         act.Should().Throw<InvalidOperationException>().Which.Message
             .Should().Contain("mysql").And.Contain("postgresql");
@@ -1027,7 +1023,7 @@ public class PostgreSqlWriterTests
                 enabledState: "R"),
         };
 
-        var act = () => writer.BuildStatements(SchemaStage.Triggers, objects, NamesSalesTables());
+        var act = () => writer.BuildStatements(SchemaStage.Triggers, objects);
 
         // Creating the trigger would leave it firing when the source kept it from firing in some of the
         // states this flag can hold, and the format gives the restore no statement for those.
@@ -1044,7 +1040,7 @@ public class PostgreSqlWriterTests
             new TriggerDefinition
             {
                 Name = "tr_audit",
-                TableId = OutsideId,
+                TableRef = ObjectRef.Table("", "outside"),
                 NativeDefinition = new NativeDefinition(
                     "postgresql",
                     "CREATE TRIGGER tr_audit AFTER INSERT ON sales.outside FOR EACH ROW "
@@ -1052,7 +1048,7 @@ public class PostgreSqlWriterTests
             },
         };
 
-        var act = () => writer.BuildStatements(SchemaStage.Triggers, objects, NamesSalesTables());
+        var act = () => writer.BuildStatements(SchemaStage.Triggers, objects);
 
         act.Should().Throw<InvalidOperationException>().Which.Message
             .Should().Contain("table");
@@ -1067,7 +1063,7 @@ public class PostgreSqlWriterTests
         await using var writer = CreateWriter();
         var objects = new ISchemaObject[] { new SchemaDefinition { Name = "sales" } };
 
-        var act = () => writer.BuildStatements(stage, objects, NamesOneSchema());
+        var act = () => writer.BuildStatements(stage, objects);
 
         act.Should().Throw<NotSupportedException>().Which.Message
             .Should().Contain(stage.ToString());
@@ -1084,7 +1080,6 @@ public class PostgreSqlWriterTests
                 w => w.ApplySchemaAsync(
                     SchemaStage.Tables,
                     [],
-                    ObjectNameMap.Empty,
                     CancellationToken.None))
             .Should().NotThrowAsync();
     }
@@ -1393,7 +1388,6 @@ public class PostgreSqlWriterTests
                 w => w.ApplySchemaAsync(
                     SchemaStage.Schemas,
                     [],
-                    ObjectNameMap.Empty,
                     CancellationToken.None))
             .Should().ThrowAsync<ObjectDisposedException>();
         await writer.Invoking(w => w.ValidateAsync(new TargetExpectation(), CancellationToken.None))
@@ -1404,37 +1398,10 @@ public class PostgreSqlWriterTests
     /// The schema id the map below answers. A staged object names its parent by id alone, so a test
     /// that wants an object placed must name the id the same way the catalog reader did.
     /// </summary>
-    private static readonly InterchangeId SalesId =
-        InterchangeId.Compute("schema", string.Empty, "sales");
-
-    private static readonly InterchangeId OtherSchemaId =
-        InterchangeId.Compute("schema", string.Empty, "unnamed");
-
-    private static readonly InterchangeId OrdersId =
-        InterchangeId.Compute("table", "sales", "orders");
-
-    private static readonly InterchangeId CustomersId =
-        InterchangeId.Compute("table", "sales", "customers");
-
-    private static readonly InterchangeId OutsideId =
-        InterchangeId.Compute("table", "sales", "outside");
-
-    private static ObjectNameMap NamesOneSchema() =>
-        new(
-            new Dictionary<InterchangeId, string> { [SalesId] = "sales" },
-            new Dictionary<InterchangeId, TableRef>());
-
-    /// <summary>
-    /// The map a catalog holding <c>sales.orders</c> and <c>sales.customers</c> would hand the writer.
-    /// </summary>
-    private static ObjectNameMap NamesSalesTables() =>
-        new(
-            new Dictionary<InterchangeId, string> { [SalesId] = "sales" },
-            new Dictionary<InterchangeId, TableRef>
-            {
-                [OrdersId] = new TableRef("sales", "orders"),
-                [CustomersId] = new TableRef("sales", "customers"),
-            });
+    private static readonly ObjectRef SalesSchemaRef = ObjectRef.Schema("sales");
+    private static readonly ObjectRef OrdersRef = ObjectRef.Table("sales", "orders");
+    private static readonly ObjectRef CustomersRef = ObjectRef.Table("sales", "customers");
+    private static readonly ObjectRef OutsideRef = ObjectRef.Table("sales", "outside");
 
     private static ColumnDefinition Column(
         string name,
@@ -1492,7 +1459,7 @@ public class PostgreSqlWriterTests
         new()
         {
             Name = name,
-            TableId = OrdersId,
+            TableRef = OrdersRef,
             NativeDefinition = new NativeDefinition("postgresql", definition),
         };
 
@@ -1507,7 +1474,7 @@ public class PostgreSqlWriterTests
         new()
         {
             Name = name,
-            TableId = OrdersId,
+            TableRef = OrdersRef,
             EnabledState = enabledState,
             NativeDefinition = new NativeDefinition("postgresql", definition),
         };

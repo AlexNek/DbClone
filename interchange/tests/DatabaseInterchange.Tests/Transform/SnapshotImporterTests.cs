@@ -23,30 +23,26 @@ namespace DatabaseInterchange.Tests.Transform;
 /// <para>
 /// What the importer owns — and therefore what only it can get wrong — is the order the stages are
 /// applied in, and the names behind the ids. A catalog object points at its parent by
-/// <see cref="InterchangeId"/> alone, and an adapter may not open a catalog to look an id up, so
-/// resolving those ids into names is work the reader side has to finish before the objects cross the
+/// <see cref="ObjectRef"/> alone, and an adapter may not open a catalog to look a ref up, so
+/// resolving those refs into names is work the reader side has to finish before the objects cross the
 /// boundary.
 /// </para>
 /// </summary>
 public sealed class SnapshotImporterTests : IDisposable
 {
-    private static readonly InterchangeId PublicId =
-        InterchangeId.Compute("schema", string.Empty, "public");
+    private static readonly ObjectRef PublicRef = ObjectRef.Schema("public");
 
-    private static readonly InterchangeId ReportingId =
-        InterchangeId.Compute("schema", string.Empty, "reporting");
+    private static readonly ObjectRef ReportingRef = ObjectRef.Schema("reporting");
 
-    private static readonly InterchangeId CustomersId =
-        InterchangeId.Compute("table", "public", "customers", PublicId);
+    private static readonly ObjectRef CustomersRef = ObjectRef.Table("public", "customers");
 
-    private static readonly InterchangeId CustomersSeqId =
-        InterchangeId.Compute("sequence", "reporting", "customers_seq", ReportingId);
+    private static readonly ObjectRef CustomersSeqRef =
+        ObjectRef.Sequence("reporting", "customers_seq");
 
-    private static readonly InterchangeId CustomersEmailIdxId =
-        InterchangeId.Compute("index", "public", "customers_email_idx", CustomersId);
+    private static readonly ObjectRef CustomersEmailIdxRef =
+        ObjectRef.SubObject("index", "public", "customers", "customers_email_idx");
 
-    private static readonly InterchangeId MoodTypeId =
-        InterchangeId.Compute("type", "public", "mood", PublicId);
+    private static readonly ObjectRef MoodTypeRef = ObjectRef.Type("public", "mood");
 
     private readonly string _catalogPath = Path.Combine(
         Path.GetTempPath(),
@@ -162,9 +158,9 @@ public sealed class SnapshotImporterTests : IDisposable
         var sequence = (SequenceDefinition)writer.Objects[SchemaStage.Sequences].Single();
         sequence.Name.Should().Be("customers_seq");
 
-        // The object carries no schema name, only its id — so a writer that was never given the map
-        // could not say where the sequence belongs.
-        writer.Names[SchemaStage.Sequences].SchemaName(sequence.SchemaId).Should().Be("reporting");
+        // The object carries a qualified-name reference (ObjectRef) that already contains the schema
+        // name, so no separate name map is needed to resolve it.
+        sequence.SchemaRef.ObjectName().Should().Be("reporting");
     }
 
     [Fact]
@@ -296,19 +292,19 @@ public sealed class SnapshotImporterTests : IDisposable
     {
         var schemas = new List<SchemaDefinition>
         {
-            new() { Id = PublicId, Name = "public" },
-            new() { Id = ReportingId, Name = "reporting" },
+            new() { Ref = PublicRef, Name = "public" },
+            new() { Ref = ReportingRef, Name = "reporting" },
         };
 
         var tables = new List<TableDefinition>
         {
             new()
             {
-                Id = CustomersId,
+                Ref = CustomersRef,
                 Name = "customers",
-                SchemaId = schemalessTable
-                    ? InterchangeId.Compute("schema", string.Empty, "not_captured")
-                    : PublicId,
+                SchemaRef = schemalessTable
+                    ? ObjectRef.Schema("")
+                    : PublicRef,
 
                 // An index and a trigger belong to the table that owns them, and the stages that
                 // create them take those objects rather than the table, so the fixture carries one of
@@ -317,22 +313,18 @@ public sealed class SnapshotImporterTests : IDisposable
                 [
                     new IndexDefinition
                     {
-                        Id = CustomersEmailIdxId,
+                        Ref = CustomersEmailIdxRef,
                         Name = "customers_email_idx",
-                        TableId = CustomersId,
+                        TableRef = CustomersRef,
                     },
                 ],
                 Triggers =
                 [
                     new TriggerDefinition
                     {
-                        Id = InterchangeId.Compute(
-                            "trigger",
-                            "public",
-                            "customers_touch",
-                            CustomersId),
+                        Ref = ObjectRef.SubObject("trigger", "public", "customers", "customers_touch"),
                         Name = "customers_touch",
-                        TableId = CustomersId,
+                        TableRef = CustomersRef,
                     },
                 ],
             },
@@ -340,7 +332,7 @@ public sealed class SnapshotImporterTests : IDisposable
 
         var sequences = new List<SequenceDefinition>
         {
-            new() { Id = CustomersSeqId, Name = "customers_seq", SchemaId = ReportingId },
+            new() { Ref = CustomersSeqRef, Name = "customers_seq", SchemaRef = ReportingRef },
         };
 
         // The kinds the structured sections have no home for go to the catalog's native file, named after
@@ -350,7 +342,7 @@ public sealed class SnapshotImporterTests : IDisposable
         {
             new()
             {
-                Id = MoodTypeId,
+                Ref = MoodTypeRef,
                 Kind = EObjectKind.Enum,
                 SchemaName = "public",
                 Name = "mood",
@@ -393,24 +385,24 @@ public sealed class SnapshotImporterTests : IDisposable
     {
         var customers = new TableDefinition
         {
-            Id = CustomersId,
+            Ref = CustomersRef,
             Name = "customers",
-            SchemaId = PublicId,
+            SchemaRef = PublicRef,
             Columns =
             [
                 new ColumnDefinition
                 {
-                    Id = InterchangeId.Compute("column", "public", "customers.id", CustomersId),
+                    Ref = ObjectRef.Column("public", "customers", "id"),
                     Name = "id",
-                    TableId = CustomersId,
+                    TableRef = CustomersRef,
                     Ordinal = 1,
                     NativeType = new NativeType("integer"),
                 },
                 new ColumnDefinition
                 {
-                    Id = InterchangeId.Compute("column", "public", "customers.name", CustomersId),
+                    Ref = ObjectRef.Column("public", "customers", "name"),
                     Name = "name",
-                    TableId = CustomersId,
+                    TableRef = CustomersRef,
                     Ordinal = 2,
                     NativeType = new NativeType("text"),
                 },
@@ -424,7 +416,7 @@ public sealed class SnapshotImporterTests : IDisposable
 
         await catalog.WriteSectionAsync(
             "schemas",
-            new List<SchemaDefinition> { new() { Id = PublicId, Name = "public" } });
+            new List<SchemaDefinition> { new() { Ref = PublicRef, Name = "public" } });
         await catalog.WriteSectionAsync("tables", new List<TableDefinition> { customers });
         await catalog.WriteTableAsync(customers, "public", CustomerRows());
         await catalog.CompleteAsync();
@@ -486,7 +478,7 @@ public sealed class SnapshotImporterTests : IDisposable
 
         public Dictionary<SchemaStage, IReadOnlyList<ISchemaObject>> Objects { get; } = [];
 
-        public Dictionary<SchemaStage, ObjectNameMap> Names { get; } = [];
+
 
         public List<TableRef> RowTargets { get; } = [];
 
@@ -503,12 +495,10 @@ public sealed class SnapshotImporterTests : IDisposable
         public Task ApplySchemaAsync(
             SchemaStage stage,
             IReadOnlyList<ISchemaObject> objects,
-            ObjectNameMap names,
             CancellationToken ct)
         {
             Stages.Add(stage);
             Objects[stage] = objects;
-            Names[stage] = names;
 
             return Task.CompletedTask;
         }

@@ -187,16 +187,16 @@ public sealed class SnapshotExporter
 
             // A table row query must be qualified, and the name of the owning schema is carried by
             // the schema section: the table points at it by id.
-            var schemaNames = snapshot.Schemas.ToDictionary(s => s.Id, s => s.Name);
+            var schemaNames = snapshot.Schemas.ToDictionary(s => s.Ref, s => s.Name);
 
             foreach (var table in snapshot.Tables)
             {
                 ct.ThrowIfCancellationRequested();
 
-                var schemaName = schemaNames.TryGetValue(table.SchemaId, out var name)
+                var schemaName = schemaNames.TryGetValue(table.SchemaRef, out var name)
                     ? name
                     : throw new InvalidOperationException(
-                        $"Table {table.Name} references schema id {table.SchemaId}, which is not in the captured schema section.");
+                        $"Table {table.Name} references schema {table.SchemaRef}, which is not in the captured schema section.");
                 var tableRef = new TableRef(schemaName, table.Name);
                 var rowOrder = table.RowOrder;
 

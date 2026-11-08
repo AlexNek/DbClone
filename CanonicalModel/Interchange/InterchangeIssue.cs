@@ -6,12 +6,12 @@ namespace CanonicalModel.Interchange;
 /// <param name="Code">Stable issue code (e.g., "RoutineNotDeployable", "CredentialOmitted").</param>
 /// <param name="Severity">Issue severity.</param>
 /// <param name="Message">Human-readable description.</param>
-/// <param name="ObjectId">Optional Id of the affected object.</param>
+/// <param name="TargetRef">Optional reference of the affected object.</param>
 public sealed record InterchangeIssue(
     string Code,
     EIssueSeverity Severity,
     string Message,
-    InterchangeId ObjectId = default)
+    ObjectRef TargetRef = default)
 {
     /// <inheritdoc />
     public override string ToString() => $"[{Severity}] {Code}: {Message}";

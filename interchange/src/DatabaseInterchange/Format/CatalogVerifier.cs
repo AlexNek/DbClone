@@ -127,9 +127,16 @@ public sealed class CatalogVerifier
                     }
                 }
 
-                // Verify table count matches
+                // Verify table count matches (data/<schema>/<table>/ structure)
                 var dataDir = Path.Combine(catalogPath, InterchangeFormat.DataDirectory);
-                var actualTableCount = Directory.Exists(dataDir) ? Directory.GetDirectories(dataDir).Length : 0;
+                var actualTableCount = 0;
+                if (Directory.Exists(dataDir))
+                {
+                    foreach (var parentDir in Directory.GetDirectories(dataDir))
+                    {
+                        actualTableCount += Directory.GetDirectories(parentDir).Length;
+                    }
+                }
                 if (actualTableCount != catalogIndex.TableCount)
                 {
                     issues.Add($"Table count mismatch: catalog index says {catalogIndex.TableCount}, found {actualTableCount} table directories.");

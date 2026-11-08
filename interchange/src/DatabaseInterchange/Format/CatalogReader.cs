@@ -184,17 +184,22 @@ public sealed class CatalogReader : IAsyncDisposable
     /// <summary>
     /// Reads rows from a table's chunks.
     /// </summary>
-    /// <param name="tableId">The table's interchange Id.</param>
+    /// <param name="schemaName">The table's schema name.</param>
+    /// <param name="tableName">The table's name.</param>
     /// <param name="ct">Cancellation token.</param>
     /// <returns>An async enumerable of rows.</returns>
     public async IAsyncEnumerable<DataValue[]> ReadRowsAsync(
-        string tableId,
+        string schemaName,
+        string tableName,
         [System.Runtime.CompilerServices.EnumeratorCancellation] CancellationToken ct = default)
     {
         ObjectDisposedException.ThrowIf(_disposed, this);
-        ArgumentException.ThrowIfNullOrWhiteSpace(tableId);
+        ArgumentException.ThrowIfNullOrWhiteSpace(schemaName);
+        ArgumentException.ThrowIfNullOrWhiteSpace(tableName);
 
-        var tableDir = Path.Combine(_catalogPath, InterchangeFormat.DataDirectory, tableId);
+        var encodedSchema = NameEncoder.EncodeSegment(schemaName);
+        var encodedTable = NameEncoder.EncodeSegment(tableName);
+        var tableDir = Path.Combine(_catalogPath, InterchangeFormat.DataDirectory, encodedSchema, encodedTable);
         if (!Directory.Exists(tableDir))
         {
             yield break;
@@ -254,19 +259,24 @@ public sealed class CatalogReader : IAsyncDisposable
     /// <summary>
     /// Reads the row count the catalog recorded for a table.
     /// </summary>
-    /// <param name="tableId">The table's interchange Id.</param>
+    /// <param name="schemaName">The table's schema name.</param>
+    /// <param name="tableName">The table's name.</param>
     /// <param name="ct">Cancellation token.</param>
     /// <returns>The count the table's manifest states, or <see langword="null"/> when the catalog holds
     /// no data folder for the table — which is what an export run without data writes.</returns>
-    public async Task<long?> ReadTableRowCountAsync(string tableId, CancellationToken ct = default)
+    public async Task<long?> ReadTableRowCountAsync(string schemaName, string tableName, CancellationToken ct = default)
     {
         ObjectDisposedException.ThrowIf(_disposed, this);
-        ArgumentException.ThrowIfNullOrWhiteSpace(tableId);
+        ArgumentException.ThrowIfNullOrWhiteSpace(schemaName);
+        ArgumentException.ThrowIfNullOrWhiteSpace(tableName);
 
+        var encodedSchema = NameEncoder.EncodeSegment(schemaName);
+        var encodedTable = NameEncoder.EncodeSegment(tableName);
         var tableManifestPath = Path.Combine(
             _catalogPath,
             InterchangeFormat.DataDirectory,
-            tableId,
+            encodedSchema,
+            encodedTable,
             "table.json");
         if (!File.Exists(tableManifestPath))
         {

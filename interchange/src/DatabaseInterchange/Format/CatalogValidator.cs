@@ -46,16 +46,16 @@ public sealed class CatalogValidator
         }
 
         // Validate tables
-        var tableIds = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        var tableRefs = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
         foreach (var table in snapshot.Tables)
         {
-            if (string.IsNullOrWhiteSpace(table.Id.Hex))
+            if (string.IsNullOrWhiteSpace(table.Ref.Value))
             {
-                issues.Add($"Table '{table.Name}' must have an Id.");
+                issues.Add($"Table '{table.Name}' must have a Ref.");
             }
-            else if (!tableIds.Add(table.Id.Hex))
+            else if (!tableRefs.Add(table.Ref.Value))
             {
-                issues.Add($"Duplicate table Id: {table.Id.Hex}");
+                issues.Add($"Duplicate table Ref: {table.Ref.Value}");
             }
 
             if (string.IsNullOrWhiteSpace(table.Name))
@@ -119,9 +119,9 @@ public sealed class CatalogValidator
         // Validate views
         foreach (var view in snapshot.Views)
         {
-            if (string.IsNullOrWhiteSpace(view.Id.Hex))
+            if (string.IsNullOrWhiteSpace(view.Ref.Value))
             {
-                issues.Add($"View '{view.Name}' must have an Id.");
+                issues.Add($"View '{view.Name}' must have a Ref.");
             }
 
             if (string.IsNullOrWhiteSpace(view.Name))
@@ -133,9 +133,9 @@ public sealed class CatalogValidator
         // Validate routines
         foreach (var routine in snapshot.Routines)
         {
-            if (string.IsNullOrWhiteSpace(routine.Id.Hex))
+            if (string.IsNullOrWhiteSpace(routine.Ref.Value))
             {
-                issues.Add($"Routine '{routine.Name}' must have an Id.");
+                issues.Add($"Routine '{routine.Name}' must have a Ref.");
             }
 
             if (string.IsNullOrWhiteSpace(routine.Name))
@@ -171,9 +171,9 @@ public sealed class CatalogValidator
         // Validate sequences
         foreach (var sequence in snapshot.Sequences)
         {
-            if (string.IsNullOrWhiteSpace(sequence.Id.Hex))
+            if (string.IsNullOrWhiteSpace(sequence.Ref.Value))
             {
-                issues.Add($"Sequence '{sequence.Name}' must have an Id.");
+                issues.Add($"Sequence '{sequence.Name}' must have a Ref.");
             }
 
             if (string.IsNullOrWhiteSpace(sequence.Name))

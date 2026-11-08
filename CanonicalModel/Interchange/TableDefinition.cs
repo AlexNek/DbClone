@@ -26,7 +26,7 @@ public enum ETableKind
 public sealed record TableDefinition : ISchemaObject
 {
     /// <inheritdoc />
-    public InterchangeId Id { get; init; }
+    public ObjectRef Ref { get; init; }
 
     /// <inheritdoc />
     public EObjectKind Kind => EObjectKind.Table;
@@ -47,8 +47,8 @@ public sealed record TableDefinition : ISchemaObject
     /// <inheritdoc />
     public IReadOnlyList<InterchangeIssue> Notes { get; init; } = [];
 
-    /// <summary>Gets or sets the schema Id.</summary>
-    public InterchangeId SchemaId { get; init; }
+    /// <summary>Gets or sets the schema reference.</summary>
+    public ObjectRef SchemaRef { get; init; }
 
     /// <summary>Gets or sets the table kind.</summary>
     public ETableKind TableKind { get; init; } = ETableKind.Table;
@@ -57,7 +57,7 @@ public sealed record TableDefinition : ISchemaObject
     /// Gets or sets the table this one is a partition of, or an <c>INHERITS</c> child of; null for
     /// a table that stands on its own. The bound says which of the two it is.
     /// </summary>
-    public InterchangeId? ParentId { get; init; }
+    public ObjectRef? ParentRef { get; init; }
 
     /// <summary>
     /// Gets or sets the partition strategy of a partitioned table (<c>RANGE</c>, <c>LIST</c> or
@@ -106,7 +106,7 @@ public sealed record TableDefinition : ISchemaObject
 public sealed record PrimaryKeyDefinition : ISchemaObject
 {
     /// <inheritdoc />
-    public InterchangeId Id { get; init; }
+    public ObjectRef Ref { get; init; }
 
     /// <inheritdoc />
     public EObjectKind Kind => EObjectKind.PrimaryKey;
@@ -127,8 +127,8 @@ public sealed record PrimaryKeyDefinition : ISchemaObject
     /// <inheritdoc />
     public IReadOnlyList<InterchangeIssue> Notes { get; init; } = [];
 
-    /// <summary>Gets or sets the parent table Id.</summary>
-    public InterchangeId TableId { get; init; }
+    /// <summary>Gets or sets the parent table reference.</summary>
+    public ObjectRef TableRef { get; init; }
 
     /// <summary>Gets or sets the column names in order.</summary>
     public IReadOnlyList<string> Columns { get; init; } = [];
@@ -140,7 +140,7 @@ public sealed record PrimaryKeyDefinition : ISchemaObject
 public sealed record ForeignKeyDefinition : ISchemaObject
 {
     /// <inheritdoc />
-    public InterchangeId Id { get; init; }
+    public ObjectRef Ref { get; init; }
 
     /// <inheritdoc />
     public EObjectKind Kind => EObjectKind.ForeignKey;
@@ -161,14 +161,14 @@ public sealed record ForeignKeyDefinition : ISchemaObject
     /// <inheritdoc />
     public IReadOnlyList<InterchangeIssue> Notes { get; init; } = [];
 
-    /// <summary>Gets or sets the parent table Id.</summary>
-    public InterchangeId TableId { get; init; }
+    /// <summary>Gets or sets the parent table reference.</summary>
+    public ObjectRef TableRef { get; init; }
 
     /// <summary>Gets or sets the referencing column names.</summary>
     public IReadOnlyList<string> Columns { get; init; } = [];
 
-    /// <summary>Gets or sets the referenced table Id.</summary>
-    public InterchangeId ReferencedTableId { get; init; }
+    /// <summary>Gets or sets the referenced table reference.</summary>
+    public ObjectRef ReferencedTableRef { get; init; }
 
     /// <summary>Gets or sets the referenced column names.</summary>
     public IReadOnlyList<string> ReferencedColumns { get; init; } = [];
@@ -192,7 +192,7 @@ public sealed record ForeignKeyDefinition : ISchemaObject
 public sealed record UniqueConstraintDefinition : ISchemaObject
 {
     /// <inheritdoc />
-    public InterchangeId Id { get; init; }
+    public ObjectRef Ref { get; init; }
 
     /// <inheritdoc />
     public EObjectKind Kind => EObjectKind.UniqueConstraint;
@@ -213,8 +213,8 @@ public sealed record UniqueConstraintDefinition : ISchemaObject
     /// <inheritdoc />
     public IReadOnlyList<InterchangeIssue> Notes { get; init; } = [];
 
-    /// <summary>Gets or sets the parent table Id.</summary>
-    public InterchangeId TableId { get; init; }
+    /// <summary>Gets or sets the parent table reference.</summary>
+    public ObjectRef TableRef { get; init; }
 
     /// <summary>Gets or sets the column names in order.</summary>
     public IReadOnlyList<string> Columns { get; init; } = [];
@@ -226,7 +226,7 @@ public sealed record UniqueConstraintDefinition : ISchemaObject
 public sealed record CheckConstraintDefinition : ISchemaObject
 {
     /// <inheritdoc />
-    public InterchangeId Id { get; init; }
+    public ObjectRef Ref { get; init; }
 
     /// <inheritdoc />
     public EObjectKind Kind => EObjectKind.CheckConstraint;
@@ -247,8 +247,8 @@ public sealed record CheckConstraintDefinition : ISchemaObject
     /// <inheritdoc />
     public IReadOnlyList<InterchangeIssue> Notes { get; init; } = [];
 
-    /// <summary>Gets or sets the parent table Id.</summary>
-    public InterchangeId TableId { get; init; }
+    /// <summary>Gets or sets the parent table reference.</summary>
+    public ObjectRef TableRef { get; init; }
 
     /// <summary>Gets or sets the check expression.</summary>
     public DatabaseExpression Expression { get; init; } = new(string.Empty, string.Empty);
@@ -260,7 +260,7 @@ public sealed record CheckConstraintDefinition : ISchemaObject
 public sealed record ExclusionConstraintDefinition : ISchemaObject
 {
     /// <inheritdoc />
-    public InterchangeId Id { get; init; }
+    public ObjectRef Ref { get; init; }
 
     /// <inheritdoc />
     public EObjectKind Kind => EObjectKind.ExclusionConstraint;
@@ -281,8 +281,8 @@ public sealed record ExclusionConstraintDefinition : ISchemaObject
     /// <inheritdoc />
     public IReadOnlyList<InterchangeIssue> Notes { get; init; } = [];
 
-    /// <summary>Gets or sets the parent table Id.</summary>
-    public InterchangeId TableId { get; init; }
+    /// <summary>Gets or sets the parent table reference.</summary>
+    public ObjectRef TableRef { get; init; }
 }
 
 /// <summary>
@@ -291,7 +291,7 @@ public sealed record ExclusionConstraintDefinition : ISchemaObject
 public sealed record IndexDefinition : ISchemaObject
 {
     /// <inheritdoc />
-    public InterchangeId Id { get; init; }
+    public ObjectRef Ref { get; init; }
 
     /// <inheritdoc />
     public EObjectKind Kind => EObjectKind.Index;
@@ -312,8 +312,8 @@ public sealed record IndexDefinition : ISchemaObject
     /// <inheritdoc />
     public IReadOnlyList<InterchangeIssue> Notes { get; init; } = [];
 
-    /// <summary>Gets or sets the parent table Id.</summary>
-    public InterchangeId TableId { get; init; }
+    /// <summary>Gets or sets the parent table reference.</summary>
+    public ObjectRef TableRef { get; init; }
 
     /// <summary>Gets or sets whether the index is unique.</summary>
     public bool IsUnique { get; init; }

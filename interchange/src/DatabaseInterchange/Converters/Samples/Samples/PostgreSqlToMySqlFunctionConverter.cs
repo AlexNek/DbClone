@@ -68,7 +68,7 @@ public sealed partial class PostgreSqlToMySqlFunctionConverter : IObjectConverte
             // recorded as a fragment: nothing here has checked that it parses on the target engine.
             var result = new NativeObjectDefinition
             {
-                Id = source.Id,
+                Ref = source.Ref,
                 Kind = source.Kind,
                 SchemaName = string.Empty, // MySQL doesn't have schemas in the same way
                 Name = source.Name,

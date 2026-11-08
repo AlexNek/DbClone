@@ -9,8 +9,8 @@ namespace DbAdapter.Definitions.Interchange;
 /// the statement text its source engine's dialect speaks.
 /// <para>
 /// These objects are <see cref="ISchemaObject"/>s, which lets a restore stage be handed them beside
-/// the structured ones: the kind is the neutral <see cref="EObjectKind"/>, the identity is computed by
-/// the same graph every other object's identity comes from, and the SQL lives in
+/// the structured ones: the kind is the neutral <see cref="EObjectKind"/>, the reference is a
+/// qualified name such as <c>table:public.orders</c>, and the SQL lives in
 /// <see cref="NativeDefinition"/> carrying its dialect and whether it is a whole statement — the same
 /// two facts the structured sections record, and decided against at import rather than at export,
 /// because at export the restore target is not known yet.
@@ -26,7 +26,7 @@ namespace DbAdapter.Definitions.Interchange;
 public sealed record NativeObjectDefinition : ISchemaObject
 {
     /// <inheritdoc />
-    public InterchangeId Id { get; init; }
+    public ObjectRef Ref { get; init; }
 
     /// <inheritdoc />
     public EObjectKind Kind { get; init; }

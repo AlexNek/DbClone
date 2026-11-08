@@ -37,6 +37,7 @@ internal static class CatalogJson
             PropertyNamingPolicy = JsonNamingPolicy.CamelCase,
         };
         options.Converters.Add(new JsonStringEnumConverter(JsonNamingPolicy.CamelCase));
+        options.Converters.Add(new ObjectRefJsonConverter());
         return options;
     }
 
@@ -47,6 +48,7 @@ internal static class CatalogJson
             PropertyNamingPolicy = JsonNamingPolicy.CamelCase,
         };
         options.Converters.Add(new JsonStringEnumConverter(JsonNamingPolicy.CamelCase));
+        options.Converters.Add(new ObjectRefJsonConverter());
         return options;
     }
 }

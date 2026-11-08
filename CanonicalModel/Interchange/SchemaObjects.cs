@@ -8,7 +8,7 @@ namespace CanonicalModel.Interchange;
 public sealed record SchemaDefinition : ISchemaObject
 {
     /// <inheritdoc />
-    public InterchangeId Id { get; init; }
+    public ObjectRef Ref { get; init; }
 
     /// <inheritdoc />
     public EObjectKind Kind => EObjectKind.Schema;
@@ -39,7 +39,7 @@ public sealed record SchemaDefinition : ISchemaObject
 public sealed record SequenceDefinition : ISchemaObject
 {
     /// <inheritdoc />
-    public InterchangeId Id { get; init; }
+    public ObjectRef Ref { get; init; }
 
     /// <inheritdoc />
     public EObjectKind Kind => EObjectKind.Sequence;
@@ -60,8 +60,8 @@ public sealed record SequenceDefinition : ISchemaObject
     /// <inheritdoc />
     public IReadOnlyList<InterchangeIssue> Notes { get; init; } = [];
 
-    /// <summary>Gets or sets the schema Id.</summary>
-    public InterchangeId SchemaId { get; init; }
+    /// <summary>Gets or sets the schema reference.</summary>
+    public ObjectRef SchemaRef { get; init; }
 
     /// <summary>Gets or sets the data type.</summary>
     public string DataType { get; init; } = "bigint";
@@ -97,7 +97,7 @@ public sealed record SequenceDefinition : ISchemaObject
 public sealed record ViewDefinition : ISchemaObject
 {
     /// <inheritdoc />
-    public InterchangeId Id { get; init; }
+    public ObjectRef Ref { get; init; }
 
     /// <inheritdoc />
     public EObjectKind Kind => EObjectKind.View;
@@ -118,8 +118,8 @@ public sealed record ViewDefinition : ISchemaObject
     /// <inheritdoc />
     public IReadOnlyList<InterchangeIssue> Notes { get; init; } = [];
 
-    /// <summary>Gets or sets the schema Id.</summary>
-    public InterchangeId SchemaId { get; init; }
+    /// <summary>Gets or sets the schema reference.</summary>
+    public ObjectRef SchemaRef { get; init; }
 
     /// <summary>Gets or sets the view definition SQL.</summary>
     public DatabaseExpression? Definition { get; init; }

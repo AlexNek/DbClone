@@ -56,14 +56,13 @@ internal sealed class DatabaseModelMapper
     }
 
     /// <summary>
-    /// Maps the schema half of a snapshot: every object kind, with content-derived identities
-    /// resolved first so child objects can reference their parents.
+    /// Maps the schema half of a snapshot: every object kind, with qualified-name references
+    /// built first so child objects can reference their parents.
     /// </summary>
     public SnapshotSchema Map(Models.DatabaseModel model)
     {
         ArgumentNullException.ThrowIfNull(model);
 
-        var ids = InterchangeIdGraph.Create(model, _dialect);
         var enumTypeNames = BuildEnumTypeNameSet(model);
 
         return new SnapshotSchema
@@ -73,14 +72,14 @@ internal sealed class DatabaseModelMapper
                 Name = model.DatabaseName,
                 ServerVersion = model.ServerVersion,
             },
-            Schemas = MapSchemas(model, ids),
-            Tables = MapTables(model, ids, enumTypeNames),
-            Views = MapViews(model, ids),
-            Routines = MapRoutines(model, ids),
-            Sequences = MapSequences(model, ids),
-            Extensions = MapExtensions(model, ids),
-            Relationships = MapRelationships(model, ids),
-            Security = MapSecurity(model, ids),
+            Schemas = MapSchemas(model),
+            Tables = MapTables(model, enumTypeNames),
+            Views = MapViews(model),
+            Routines = MapRoutines(model),
+            Sequences = MapSequences(model),
+            Extensions = MapExtensions(model),
+            Relationships = MapRelationships(model),
+            Security = MapSecurity(model),
         };
     }
 
@@ -92,9 +91,6 @@ internal sealed class DatabaseModelMapper
     {
         ArgumentNullException.ThrowIfNull(model);
 
-        // The same graph the structured sections are given ids from, so one row of pg_type cannot end up
-        // with two identities depending on which pass asked about it.
-        var ids = InterchangeIdGraph.Create(model, _dialect);
         var extracted = new NativeObjectExtractor(_dialect).Extract(model);
 
         // Deterministic order: the catalog is diffable, so one database state is one byte stream.
@@ -104,28 +100,28 @@ internal sealed class DatabaseModelMapper
                 .OrderBy(o => o.Kind.ToString(), StringComparer.Ordinal)
                 .ThenBy(o => o.SchemaName, StringComparer.Ordinal)
                 .ThenBy(o => o.Name, StringComparer.Ordinal)
-                .Select(o => o with { Id = NativeId(ids, o) }),
+                .Select(o => o with { Ref = NativeRef(o) }),
         ];
     }
 
     /// <summary>
-    /// Gives a native-section object the identity its kind answers to.
+    /// Gives a native-section object the qualified-name reference its kind answers to.
     /// </summary>
     /// <remarks>
     /// A publication and a subscription are named by the database rather than by a schema, so they take
     /// their own tokens; the rest are the three type kinds, whose single token
-    /// <see cref="InterchangeIdGraph.Type"/> explains.
+    /// <see cref="ObjectRef.Type"/> explains.
     /// </remarks>
-    private static InterchangeId NativeId(InterchangeIdGraph ids, NativeObjectDefinition native) =>
+    private static ObjectRef NativeRef(NativeObjectDefinition native) =>
         native.Kind switch
         {
-            EObjectKind.Publication => ids.Publication(native.Name),
-            EObjectKind.Subscription => ids.Subscription(native.Name),
-            _ => ids.Type(native.SchemaName, native.Name),
+            EObjectKind.Publication => ObjectRef.Publication(native.Name),
+            EObjectKind.Subscription => ObjectRef.Subscription(native.Name),
+            _ => ObjectRef.Type(native.SchemaName, native.Name),
         };
 
     /// <summary>
-    /// Builds the signature used as a routine's identity component, so the mapper and the id graph
+    /// Builds the signature used as a routine's identity component, so the mapper
     /// cannot drift apart on the same function.
     /// </summary>
     internal static string RoutineSignature(Models.FunctionDefinition function) =>
@@ -144,14 +140,13 @@ internal sealed class DatabaseModelMapper
     }
 
     private static IReadOnlyList<SchemaDefinition> MapSchemas(
-        Models.DatabaseModel model,
-        InterchangeIdGraph ids) =>
+        Models.DatabaseModel model) =>
         [
             .. model.Schemas
                 .OrderBy(s => s.Name, StringComparer.Ordinal)
                 .Select(s => new SchemaDefinition
                 {
-                    Id = ids.Schema(s.Name),
+                    Ref = ObjectRef.Schema(s.Name),
                     Name = s.Name,
                     Owner = s.Owner,
                     SourceObjectId = s.Name,
@@ -160,7 +155,6 @@ internal sealed class DatabaseModelMapper
 
     private IReadOnlyList<TableDefinition> MapTables(
         Models.DatabaseModel model,
-        InterchangeIdGraph ids,
         IReadOnlySet<string> enumTypeNames)
     {
         // Triggers are reported flat by schema and table, so they are grouped here to hang each
@@ -171,11 +165,11 @@ internal sealed class DatabaseModelMapper
 
         // The metadata reader reports a partition's parent as one "schema.table" key, so parents are
         // resolved by matching that key whole instead of splitting it: a quoted schema name can
-        // itself contain a dot, and the reader built the key from the parent's own two names, so an
+        // itself contain a dot, and the catalog built the key from the parent's own two names, so an
         // equal key is the same table.
-        var parentIds = model.Tables.ToLookup(
+        var parentRefs = model.Tables.ToLookup(
             t => $"{t.SchemaName}.{t.Name}",
-            t => ids.Table(t.SchemaName, t.Name),
+            t => ObjectRef.Table(t.SchemaName, t.Name),
             StringComparer.Ordinal);
 
         return [
@@ -184,25 +178,23 @@ internal sealed class DatabaseModelMapper
                 .ThenBy(t => t.Name, StringComparer.Ordinal)
                 .Select(t => MapTable(
                     t,
-                    ids,
                     enumTypeNames,
                     triggersByTable,
-                    parentIds)),
+                    parentRefs)),
         ];
     }
 
     private TableDefinition MapTable(
         Models.TableDefinition table,
-        InterchangeIdGraph ids,
         IReadOnlySet<string> enumTypeNames,
         Dictionary<string, List<Models.TriggerDefinition>> triggersByTable,
-        ILookup<string, InterchangeId> parentIds)
+        ILookup<string, ObjectRef> parentRefs)
     {
-        var tableId = ids.Table(table.SchemaName, table.Name);
-        var parentId = ResolveParentId(table.ParentTable, parentIds);
+        var tableRef = ObjectRef.Table(table.SchemaName, table.Name);
+        var parentRef = ResolveParentRef(table.ParentTable, parentRefs);
         var columns = table.Columns
             .OrderBy(c => c.OrdinalPosition)
-            .Select(c => MapColumn(table, c, tableId, ids, enumTypeNames))
+            .Select(c => MapColumn(table, c, tableRef, enumTypeNames))
             .ToList();
 
         var primaryKey = table.Indexes.FirstOrDefault(i => i.IsPrimary);
@@ -217,34 +209,34 @@ internal sealed class DatabaseModelMapper
 
         return new TableDefinition
         {
-            Id = tableId,
+            Ref = tableRef,
             Name = table.Name,
-            SchemaId = ids.Schema(table.SchemaName),
+            SchemaRef = ObjectRef.Schema(table.SchemaName),
             SourceObjectId = $"{table.SchemaName}.{table.Name}",
             TableKind = table.IsPartitioned ? ETableKind.Partitioned : ETableKind.Table,
-            ParentId = parentId,
+            ParentRef = parentRef,
             PartitionStrategy = table.PartitionStrategy,
             PartitionBound = table.PartitionBound,
             Columns = columns,
-            PrimaryKey = MapPrimaryKey(table, primaryKey, tableId, ids),
+            PrimaryKey = MapPrimaryKey(table, primaryKey, tableRef),
             ForeignKeys = [
                 .. table.ForeignKeys
                     .OrderBy(f => f.Name, StringComparer.Ordinal)
-                    .Select(f => MapForeignKey(table, f, tableId, ids)),
+                    .Select(f => MapForeignKey(table, f, tableRef)),
             ],
             UniqueConstraints = [
                 .. table.UniqueConstraints
                     .OrderBy(u => u.Name, StringComparer.Ordinal)
-                    .Select(u => MapUniqueConstraint(table, u, tableId, ids)),
+                    .Select(u => MapUniqueConstraint(table, u, tableRef)),
             ],
             CheckConstraints = [
                 .. table.CheckConstraints
                     .OrderBy(c => c.Name, StringComparer.Ordinal)
                     .Select(c => new CheckConstraintDefinition
                     {
-                        Id = ids.CheckConstraint(table.SchemaName, table.Name, c.Name, tableId),
+                        Ref = ObjectRef.SubObject("checkConstraint", table.SchemaName, table.Name, c.Name),
                         Name = c.Name,
-                        TableId = tableId,
+                        TableRef = tableRef,
                         Expression = new DatabaseExpression(_dialect, c.Expression),
                     }),
             ],
@@ -253,9 +245,9 @@ internal sealed class DatabaseModelMapper
                     .OrderBy(i => i.Name, StringComparer.Ordinal)
                     .Select(i => new IndexDefinition
                     {
-                        Id = ids.Index(table.SchemaName, table.Name, i.Name, tableId),
+                        Ref = ObjectRef.SubObject("index", table.SchemaName, table.Name, i.Name),
                         Name = i.Name,
-                        TableId = tableId,
+                        TableRef = tableRef,
                         IsUnique = i.IsUnique,
                         NativeDefinition = Native(
                             i.Definition,
@@ -265,12 +257,12 @@ internal sealed class DatabaseModelMapper
             ],
             Triggers = triggers is null
                            ? []
-                           : MapTriggers(triggers, table, tableId, ids),
+                           : MapTriggers(triggers, table, tableRef),
             RowOrder = hasKey ? ERowOrder.PrimaryKey : ERowOrder.SourceOrder,
 
-            // A child whose parent was not captured keeps no link: naming an id for an object the
+            // A child whose parent was not captured keeps no link: naming a ref for an object the
             // catalog does not hold would hand the restore a statement that cannot run.
-            Notes = table.ParentTable is { Length: > 0 } && parentId is null
+            Notes = table.ParentTable is { Length: > 0 } && parentRef is null
                         ?
                         [
                             new InterchangeIssue(
@@ -279,7 +271,7 @@ internal sealed class DatabaseModelMapper
                                 $"Table {table.SchemaName}.{table.Name} is a partition of "
                                 + $"{table.ParentTable}, which is not part of the captured set, so "
                                 + "the link between them is not recorded.",
-                                tableId),
+                                tableRef),
                         ]
                         : [],
         };
@@ -287,18 +279,18 @@ internal sealed class DatabaseModelMapper
 
     /// <summary>
     /// Resolves the "schema.table" key a child table reports for its parent into that parent's
-    /// catalog id. Nothing is named when the key matches no captured table, or more than one.
+    /// catalog reference. Nothing is named when the key matches no captured table, or more than one.
     /// </summary>
-    private static InterchangeId? ResolveParentId(
+    private static ObjectRef? ResolveParentRef(
         string? parentKey,
-        ILookup<string, InterchangeId> parentIds)
+        ILookup<string, ObjectRef> parentRefs)
     {
         if (string.IsNullOrEmpty(parentKey))
         {
             return null;
         }
 
-        var matches = parentIds[parentKey].ToList();
+        var matches = parentRefs[parentKey].ToList();
 
         return matches.Count == 1 ? matches[0] : null;
     }
@@ -306,8 +298,7 @@ internal sealed class DatabaseModelMapper
     private ColumnDefinition MapColumn(
         Models.TableDefinition table,
         Models.ColumnDefinition column,
-        InterchangeId tableId,
-        InterchangeIdGraph ids,
+        ObjectRef tableRef,
         IReadOnlySet<string> enumTypeNames)
     {
         var logical = PgLogicalTypeMap.Classify(column.DataType, enumTypeNames);
@@ -315,9 +306,9 @@ internal sealed class DatabaseModelMapper
 
         return new ColumnDefinition
         {
-            Id = ids.Column(table.SchemaName, table.Name, column.Name, tableId),
+            Ref = ObjectRef.Column(table.SchemaName, table.Name, column.Name),
             Name = column.Name,
-            TableId = tableId,
+            TableRef = tableRef,
             Ordinal = column.OrdinalPosition,
             NativeType = new NativeType(column.DataType),
             LogicalType = logical,
@@ -342,8 +333,7 @@ internal sealed class DatabaseModelMapper
     private PrimaryKeyDefinition? MapPrimaryKey(
         Models.TableDefinition table,
         Models.IndexDefinition? primaryKey,
-        InterchangeId tableId,
-        InterchangeIdGraph ids)
+        ObjectRef tableRef)
     {
         if (primaryKey is null)
         {
@@ -352,9 +342,9 @@ internal sealed class DatabaseModelMapper
 
         return new PrimaryKeyDefinition
         {
-            Id = ids.PrimaryKey(table.SchemaName, table.Name, primaryKey.Name, tableId),
+            Ref = ObjectRef.SubObject("primaryKey", table.SchemaName, table.Name, primaryKey.Name),
             Name = primaryKey.Name,
-            TableId = tableId,
+            TableRef = tableRef,
             Columns = [.. primaryKey.Columns],
             // A primary key is enforced by an index, and pg_get_indexdef reports that index as a
             // complete statement.
@@ -365,28 +355,26 @@ internal sealed class DatabaseModelMapper
     private UniqueConstraintDefinition MapUniqueConstraint(
         Models.TableDefinition table,
         Models.UniqueConstraintDefinition constraint,
-        InterchangeId tableId,
-        InterchangeIdGraph ids) =>
+        ObjectRef tableRef) =>
         new()
         {
-            Id = ids.UniqueConstraint(table.SchemaName, table.Name, constraint.Name, tableId),
+            Ref = ObjectRef.SubObject("uniqueConstraint", table.SchemaName, table.Name, constraint.Name),
             Name = constraint.Name,
-            TableId = tableId,
+            TableRef = tableRef,
             Columns = [.. constraint.Columns],
         };
 
     private ForeignKeyDefinition MapForeignKey(
         Models.TableDefinition table,
         Models.ForeignKeyDefinition foreignKey,
-        InterchangeId tableId,
-        InterchangeIdGraph ids) =>
+        ObjectRef tableRef) =>
         new()
         {
-            Id = ids.ForeignKey(table.SchemaName, table.Name, foreignKey.Name, tableId),
+            Ref = ObjectRef.SubObject("foreignKey", table.SchemaName, table.Name, foreignKey.Name),
             Name = foreignKey.Name,
-            TableId = tableId,
+            TableRef = tableRef,
             Columns = [.. foreignKey.Columns],
-            ReferencedTableId = ids.Table(
+            ReferencedTableRef = ObjectRef.Table(
                 foreignKey.ReferencedSchema,
                 foreignKey.ReferencedTable),
             ReferencedColumns = [.. foreignKey.ReferencedColumns],
@@ -399,16 +387,15 @@ internal sealed class DatabaseModelMapper
     private IReadOnlyList<TriggerDefinition> MapTriggers(
         List<Models.TriggerDefinition> triggers,
         Models.TableDefinition table,
-        InterchangeId tableId,
-        InterchangeIdGraph ids) =>
+        ObjectRef tableRef) =>
         [
             .. triggers
                 .OrderBy(t => t.Name, StringComparer.Ordinal)
                 .Select(t => new TriggerDefinition
                 {
-                    Id = ids.Trigger(table.SchemaName, table.Name, t.Name),
+                    Ref = ObjectRef.SubObject("trigger", table.SchemaName, table.Name, t.Name),
                     Name = t.Name,
-                    TableId = tableId,
+                    TableRef = tableRef,
                     Timing = ParseTiming(t.Timing),
                     Events = ParseEvents(t.Events),
                     Orientation = t.IsRowLevel
@@ -420,13 +407,15 @@ internal sealed class DatabaseModelMapper
                     // is refused there, rather than being quietly reported as enabled.
                     EnabledState = t.EnabledState ?? (t.IsEnabled ? "O" : "D"),
                     // The metadata model names the trigger's function but not its argument types,
-                    // so the reference resolves by name; the graph picks the single overload, or
-                    // the first of several in sorted order, to keep the id reproducible.
-                    ReferencedRoutineId = ids.Routine(t.FunctionSchema, t.FunctionName, null),
-                    When = t.Condition is null
+                    // so the reference resolves by qualified name; the routine reference carries
+                    // no signature, which is the form for a single-overload name.
+                    ReferencedRoutineRef = ObjectRef.Routine(t.FunctionSchema, t.FunctionName),
+                    // The WHEN condition the metadata reader captured, if any. The full trigger
+                    // definition text also carries it, but the structured field is what a consumer
+                    // reads first.
+                    When = string.IsNullOrWhiteSpace(t.Condition)
                                ? null
-                               : new DatabaseExpression("postgresql", t.Condition),
-
+                               : new DatabaseExpression(_dialect, t.Condition),
                     // The engine's own statement text, and the only complete record of what the
                     // trigger is: the columns named by an UPDATE OF event, the WHEN clause and the
                     // function's arguments appear nowhere in the structured fields above.
@@ -435,18 +424,17 @@ internal sealed class DatabaseModelMapper
         ];
 
     private IReadOnlyList<ViewDefinition> MapViews(
-        Models.DatabaseModel model,
-        InterchangeIdGraph ids)
+        Models.DatabaseModel model)
     {
         var views = model.Views
             .OrderBy(v => v.SchemaName, StringComparer.Ordinal)
             .ThenBy(v => v.Name, StringComparer.Ordinal)
-            .Select(v => MapView(v.SchemaName, v.Name, v.Definition, ids, materialized: false));
+            .Select(v => MapView(v.SchemaName, v.Name, v.Definition, materialized: false));
 
         var materialized = model.MaterializedViews
             .OrderBy(v => v.SchemaName, StringComparer.Ordinal)
             .ThenBy(v => v.Name, StringComparer.Ordinal)
-            .Select(v => MapView(v.SchemaName, v.Name, v.Definition, ids, materialized: true));
+            .Select(v => MapView(v.SchemaName, v.Name, v.Definition, materialized: true));
 
         return [.. views, .. materialized];
     }
@@ -455,13 +443,12 @@ internal sealed class DatabaseModelMapper
         string schemaName,
         string name,
         string definition,
-        InterchangeIdGraph ids,
         bool materialized) =>
         new()
         {
-            Id = ids.View(schemaName, name),
+            Ref = ObjectRef.View(schemaName, name),
             Name = name,
-            SchemaId = ids.Schema(schemaName),
+            SchemaRef = ObjectRef.Schema(schemaName),
             SourceObjectId = $"{schemaName}.{name}",
 
             // pg_get_viewdef returns the query body, not the CREATE statement, so the recorded
@@ -472,25 +459,24 @@ internal sealed class DatabaseModelMapper
         };
 
     private IReadOnlyList<RoutineDefinition> MapRoutines(
-        Models.DatabaseModel model,
-        InterchangeIdGraph ids) =>
+        Models.DatabaseModel model) =>
         [
             .. model.Functions
                 .OrderBy(f => f.SchemaName, StringComparer.Ordinal)
                 .ThenBy(f => f.Name, StringComparer.Ordinal)
-                .Select(f => MapRoutine(f, ids)),
+                .Select(MapRoutine),
         ];
 
-    private RoutineDefinition MapRoutine(Models.FunctionDefinition function, InterchangeIdGraph ids)
+    private RoutineDefinition MapRoutine(Models.FunctionDefinition function)
     {
         var signature = RoutineSignature(function);
 
         return new RoutineDefinition
         {
-            Id = ids.Routine(function.SchemaName, function.Name, signature),
+            Ref = ObjectRef.Routine(function.SchemaName, function.Name, signature),
             Name = function.Name,
             Kind = function.IsProcedure ? EObjectKind.Procedure : EObjectKind.Function,
-            SchemaId = ids.Schema(function.SchemaName),
+            SchemaRef = ObjectRef.Schema(function.SchemaName),
             SourceObjectId = $"{function.SchemaName}.{function.Name}({signature})",
             ReturnType = function.ReturnType,
             Parameters = [
@@ -529,20 +515,19 @@ internal sealed class DatabaseModelMapper
     }
 
     private IReadOnlyList<SequenceDefinition> MapSequences(
-        Models.DatabaseModel model,
-        InterchangeIdGraph ids) =>
+        Models.DatabaseModel model) =>
         [
             .. model.Sequences
                 .OrderBy(s => s.SchemaName, StringComparer.Ordinal)
                 .ThenBy(s => s.Name, StringComparer.Ordinal)
                 .Select(s =>
                 {
-                    var id = ids.Sequence(s.SchemaName, s.Name);
+                    var seqRef = ObjectRef.Sequence(s.SchemaName, s.Name);
                     return new SequenceDefinition
                     {
-                        Id = id,
+                        Ref = seqRef,
                         Name = s.Name,
-                        SchemaId = ids.Schema(s.SchemaName),
+                        SchemaRef = ObjectRef.Schema(s.SchemaName),
                         SourceObjectId = $"{s.SchemaName}.{s.Name}",
                         DataType = s.DataType ?? "bigint",
                         StartValue = s.StartValue,
@@ -551,7 +536,7 @@ internal sealed class DatabaseModelMapper
                         MaxValue = s.MaxValue,
                         Cache = s.CacheSize,
                         Cycle = s.IsCycled,
-                        Notes = SequenceNotes(s, id),
+                        Notes = SequenceNotes(s, seqRef),
                     };
                 }),
         ];
@@ -561,7 +546,7 @@ internal sealed class DatabaseModelMapper
     /// </summary>
     private static IReadOnlyList<InterchangeIssue> SequenceNotes(
         Models.SequenceDefinition sequence,
-        InterchangeId id)
+        ObjectRef seqRef)
     {
         var notes = new List<InterchangeIssue>
         {
@@ -572,7 +557,7 @@ internal sealed class DatabaseModelMapper
                 EIssueSeverity.Info,
                 $"Sequence {sequence.SchemaName}.{sequence.Name} was captured with its "
                 + "declaration only; its current value is not part of the metadata model.",
-                id),
+                seqRef),
         };
 
         if (sequence.IsOwned)
@@ -586,21 +571,20 @@ internal sealed class DatabaseModelMapper
                 $"Sequence {sequence.SchemaName}.{sequence.Name} is owned by "
                 + $"{sequence.OwnerTable}.{sequence.OwnerColumn}, which the interchange format "
                 + "records no field for, so a restore cannot recreate the link.",
-                id));
+                seqRef));
         }
 
         return notes;
     }
 
     private IReadOnlyList<ExtensionDefinition> MapExtensions(
-        Models.DatabaseModel model,
-        InterchangeIdGraph ids) =>
+        Models.DatabaseModel model) =>
         [
             .. model.Extensions
                 .OrderBy(e => e.Name, StringComparer.Ordinal)
                 .Select(e => new ExtensionDefinition
                 {
-                    Id = ids.Extension(e.Name),
+                    Ref = ObjectRef.Extension(e.Name),
                     Name = e.Name,
                     Version = e.Version,
                     Schema = e.SchemaName,
@@ -616,20 +600,19 @@ internal sealed class DatabaseModelMapper
         ];
 
     private static IReadOnlyList<Relationship> MapRelationships(
-        Models.DatabaseModel model,
-        InterchangeIdGraph ids)
+        Models.DatabaseModel model)
     {
         var relationships = new List<Relationship>();
 
         foreach (var table in model.Tables)
         {
-            var tableId = ids.Table(table.SchemaName, table.Name);
+            var tableRef = ObjectRef.Table(table.SchemaName, table.Name);
             foreach (var foreignKey in table.ForeignKeys)
             {
                 relationships.Add(new Relationship
                 {
-                    DependentId = tableId,
-                    DependencyId = ids.Table(
+                    DependentRef = tableRef,
+                    DependencyRef = ObjectRef.Table(
                         foreignKey.ReferencedSchema,
                         foreignKey.ReferencedTable),
                     Type = "foreignKey",
@@ -640,11 +623,13 @@ internal sealed class DatabaseModelMapper
         // A view depends on the relations it reads. The metadata reader reports those already
         // qualified as "schema.name", so they resolve by exact lookup against the captured
         // objects instead of being re-parsed into pieces.
+        var relationsLookup = BuildRelationsLookup(model);
+
         foreach (var view in model.Views)
         {
             AddViewReferences(
                 relationships,
-                ids,
+                relationsLookup,
                 view.SchemaName,
                 view.Name,
                 view.ReferencedRelations);
@@ -654,7 +639,7 @@ internal sealed class DatabaseModelMapper
         {
             AddViewReferences(
                 relationships,
-                ids,
+                relationsLookup,
                 materialized.SchemaName,
                 materialized.Name,
                 materialized.ReferencedRelations);
@@ -662,15 +647,50 @@ internal sealed class DatabaseModelMapper
 
         return [
             .. relationships
-                .OrderBy(r => r.DependentId.ToString(), StringComparer.Ordinal)
-                .ThenBy(r => r.DependencyId.ToString(), StringComparer.Ordinal)
+                .OrderBy(r => r.DependentRef.Value, StringComparer.Ordinal)
+                .ThenBy(r => r.DependencyRef.Value, StringComparer.Ordinal)
                 .ThenBy(r => r.Type, StringComparer.Ordinal),
         ];
     }
 
+    /// <summary>
+    /// Builds the lookup dictionary that resolves <c>schema.name</c> strings the metadata reader
+    /// reports as referenced relations to the <see cref="ObjectRef"/> values of the objects they name.
+    /// </summary>
+    private static Dictionary<string, ObjectRef> BuildRelationsLookup(Models.DatabaseModel model)
+    {
+        var lookup = new Dictionary<string, ObjectRef>(StringComparer.Ordinal);
+
+        // Tables first; a view of the same qualified name would not overwrite a table
+        // (the old graph shared one id space keyed by qualified name, last-write-wins in
+        //  sorted order; tables sort before views for the same schema.name pair).
+        foreach (var table in model.Tables
+                     .OrderBy(t => t.SchemaName, StringComparer.Ordinal)
+                     .ThenBy(t => t.Name, StringComparer.Ordinal))
+        {
+            lookup[$"{table.SchemaName}.{table.Name}"] = ObjectRef.Table(table.SchemaName, table.Name);
+        }
+
+        foreach (var view in model.Views
+                     .OrderBy(v => v.SchemaName, StringComparer.Ordinal)
+                     .ThenBy(v => v.Name, StringComparer.Ordinal))
+        {
+            lookup[$"{view.SchemaName}.{view.Name}"] = ObjectRef.View(view.SchemaName, view.Name);
+        }
+
+        foreach (var mv in model.MaterializedViews
+                     .OrderBy(v => v.SchemaName, StringComparer.Ordinal)
+                     .ThenBy(v => v.Name, StringComparer.Ordinal))
+        {
+            lookup[$"{mv.SchemaName}.{mv.Name}"] = ObjectRef.View(mv.SchemaName, mv.Name);
+        }
+
+        return lookup;
+    }
+
     private static void AddViewReferences(
         List<Relationship> relationships,
-        InterchangeIdGraph ids,
+        Dictionary<string, ObjectRef> relationsLookup,
         string viewSchema,
         string viewName,
         IReadOnlyList<string>? referencedRelations)
@@ -680,30 +700,33 @@ internal sealed class DatabaseModelMapper
             return;
         }
 
-        var viewId = ids.View(viewSchema, viewName);
-        foreach (var dependency in ids.ResolveRelations(referencedRelations))
+        var viewRef = ObjectRef.View(viewSchema, viewName);
+        var seen = new HashSet<ObjectRef>();
+        foreach (var qualifiedName in referencedRelations.OrderBy(n => n, StringComparer.Ordinal))
         {
-            relationships.Add(new Relationship
+            if (relationsLookup.TryGetValue(qualifiedName, out var depRef) && seen.Add(depRef))
             {
-                DependentId = viewId,
-                DependencyId = dependency,
-                Type = "viewReference",
-            });
+                relationships.Add(new Relationship
+                {
+                    DependentRef = viewRef,
+                    DependencyRef = depRef,
+                    Type = "viewReference",
+                });
+            }
         }
     }
 
     private IReadOnlyList<PolicyDefinition> MapPolicies(
-        Models.DatabaseModel model,
-        InterchangeIdGraph ids) =>
+        Models.DatabaseModel model) =>
         [
             .. model.Policies
                 .OrderBy(p => p.SchemaName, StringComparer.Ordinal)
                 .ThenBy(p => p.Name, StringComparer.Ordinal)
                 .Select(p => new PolicyDefinition
                 {
-                    Id = ids.Policy(p.SchemaName, p.Name),
+                    Ref = ObjectRef.Policy(p.SchemaName, p.TableName, p.Name),
                     Name = p.Name,
-                    TableId = ids.Table(p.SchemaName, p.TableName),
+                    TableRef = ObjectRef.Table(p.SchemaName, p.TableName),
                     Command = p.Command,
                     IsPermissive = p.IsPermissive,
                     ApplicableRoles = [.. p.Roles],
@@ -716,10 +739,10 @@ internal sealed class DatabaseModelMapper
                 }),
         ];
 
-    private SecuritySection MapSecurity(Models.DatabaseModel model, InterchangeIdGraph ids) =>
+    private SecuritySection MapSecurity(Models.DatabaseModel model) =>
         // Roles and grants are not part of the metadata model, so those lists stay empty: an
         // absent section records what was not captured instead of implying the database had none.
-        new SecuritySection { Policies = MapPolicies(model, ids) };
+        new SecuritySection { Policies = MapPolicies(model) };
 
     private NativeDefinition? Native(string? text, string? capturedBy, bool complete) =>
         string.IsNullOrEmpty(text)

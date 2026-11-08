@@ -193,16 +193,14 @@ public sealed class SnapshotImporter
         progress?.Report(new InterchangeProgress { Stage = "Checking target", Percentage = 10 });
         await writer.EnsureEmptyTargetAsync(ct);
 
-        // Every section is read before any of them is applied. A catalog object names its parent by
-        // id and by nothing else, and an adapter may not open a catalog to look an id up, so the
-        // names behind the ids are resolved here, where the catalog is open.
+        // Every section is read before any of them is applied. Objects carry their qualified-name
+        // reference (Ref), so no separate name resolution is needed.
         progress?.Report(new InterchangeProgress { Stage = "Reading catalog", Percentage = 15 });
         var schemas = await catalogReader.ReadSectionAsync<SchemaDefinition>("schemas", ct);
         var sequences = await catalogReader.ReadSectionAsync<SequenceDefinition>("sequences", ct);
         var tables = await catalogReader.ReadSectionAsync<TableDefinition>("tables", ct);
         var routines = await catalogReader.ReadSectionAsync<RoutineDefinition>("routines", ct);
         var views = await catalogReader.ReadSectionAsync<ViewDefinition>("views", ct);
-        var names = BuildNameMap(schemas, tables);
 
         // The native file is named after the dialect the export recorded in its manifest, so nothing here
         // names an engine to find it. A catalog whose manifest carries no source dialect has no native
@@ -238,7 +236,7 @@ public sealed class SnapshotImporter
         // applied once everything it names has been applied. Routines come before views because a
         // view may call a function.
         progress?.Report(new InterchangeProgress { Stage = "Applying schemas", Percentage = 20 });
-        await writer.ApplySchemaAsync(SchemaStage.Schemas, AsObjects(schemas), names, ct);
+        await writer.ApplySchemaAsync(SchemaStage.Schemas, AsObjects(schemas), ct);
 
         // Types come before the tables because a table column, a function signature and a domain can all
         // name one, so nothing that follows can be created before them.
@@ -246,28 +244,27 @@ public sealed class SnapshotImporter
             writer,
             nativeStages,
             stage => stage < SchemaStage.Tables,
-            names,
             percentage: 25,
             progress,
             ct);
 
         progress?.Report(new InterchangeProgress { Stage = "Applying sequences", Percentage = 30 });
-        await writer.ApplySchemaAsync(SchemaStage.Sequences, AsObjects(sequences), names, ct);
+        await writer.ApplySchemaAsync(SchemaStage.Sequences, AsObjects(sequences), ct);
 
         progress?.Report(new InterchangeProgress { Stage = "Applying tables", Percentage = 40 });
-        await writer.ApplySchemaAsync(SchemaStage.Tables, AsObjects(tables), names, ct);
+        await writer.ApplySchemaAsync(SchemaStage.Tables, AsObjects(tables), ct);
 
         progress?.Report(new InterchangeProgress { Stage = "Applying routines", Percentage = 50 });
-        await writer.ApplySchemaAsync(SchemaStage.Routines, AsObjects(routines), names, ct);
+        await writer.ApplySchemaAsync(SchemaStage.Routines, AsObjects(routines), ct);
 
         progress?.Report(new InterchangeProgress { Stage = "Applying views", Percentage = 60 });
-        await writer.ApplySchemaAsync(SchemaStage.Views, AsObjects(views), names, ct);
+        await writer.ApplySchemaAsync(SchemaStage.Views, AsObjects(views), ct);
 
         // The tables are handed to this stage a second time, because the format keeps a foreign key
         // inside the table that owns it and the key cannot be created until the table it points at
         // exists — which, for the whole catalog, is not true until every table is.
         progress?.Report(new InterchangeProgress { Stage = "Applying constraints", Percentage = 65 });
-        await writer.ApplySchemaAsync(SchemaStage.Constraints, AsObjects(tables), names, ct);
+        await writer.ApplySchemaAsync(SchemaStage.Constraints, AsObjects(tables), ct);
 
         // The tables are handed to the index stage as well, for the same reason they are handed to the
         // constraint stage: which recorded indexes still have to be created is decided against the
@@ -275,13 +272,12 @@ public sealed class SnapshotImporter
         // already written the function it calls, so trigger objects are flattened out of the tables and
         // passed alone.
         progress?.Report(new InterchangeProgress { Stage = "Applying indexes", Percentage = 70 });
-        await writer.ApplySchemaAsync(SchemaStage.Indexes, AsObjects(tables), names, ct);
+        await writer.ApplySchemaAsync(SchemaStage.Indexes, AsObjects(tables), ct);
 
         progress?.Report(new InterchangeProgress { Stage = "Applying triggers", Percentage = 75 });
         await writer.ApplySchemaAsync(
             SchemaStage.Triggers,
             AsObjects([.. tables.SelectMany(t => t.Triggers)]),
-            names,
             ct);
 
         // The native kinds the routing places after the tables are applied here: a publication lists
@@ -292,7 +288,6 @@ public sealed class SnapshotImporter
             writer,
             nativeStages,
             stage => stage >= SchemaStage.Tables,
-            names,
             percentage: 78,
             progress,
             ct);
@@ -309,24 +304,28 @@ public sealed class SnapshotImporter
 
             _logger.LogInformation("Importing data for table {Table}", table.Name);
 
-            // A table the map cannot name would be addressed by bare name and land in whichever
-            // schema the connection happens to search first, so its rows are not read at all.
-            var tableRef = names.Table(table.Id)
-                ?? throw new InvalidOperationException(
-                    $"The catalog does not name the schema the table \"{table.Name}\" lives in, so "
-                    + "its rows cannot be addressed.");
+            // A table whose schema the catalog does not name cannot be addressed, so its rows are
+            // not read at all.
+            var schemaName = table.SchemaRef.ObjectName();
+            if (string.IsNullOrWhiteSpace(schemaName))
+            {
+                throw new InvalidOperationException(
+                    $"The catalog does not name the schema the table \"{table.Name}\" lives in, so " +
+                    "its rows cannot be addressed.");
+            }
+            var tableRef = new TableRef(schemaName, table.Ref.ObjectName());
 
             // The stored row is positional text, so the columns travel with it: the writer needs them
             // to know which value answers which column, what type to read it as, and which columns the
             // server computes for itself.
-            var rows = catalogReader.ReadRowsAsync(table.Id.ToString()!, ct);
+            var rows = catalogReader.ReadRowsAsync(schemaName, table.Name, ct);
             var applied = await writer.WriteTableRowsAsync(tableRef, table.Columns, rows, ct);
             totalRows += applied;
 
             // The count the table's own manifest states is what the target is checked against, because
             // it was written by the capture and not by this restore. A catalog holding no data folder
             // for a table — an export run without data — recorded no count, so nothing is expected.
-            var recorded = await catalogReader.ReadTableRowCountAsync(table.Id.ToString()!, ct);
+            var recorded = await catalogReader.ReadTableRowCountAsync(schemaName, table.Name, ct);
             if (recorded is not null)
             {
                 recordedRowCounts[tableRef] = recorded.Value;
@@ -427,43 +426,6 @@ public sealed class SnapshotImporter
     }
 
     /// <summary>
-    /// Resolves the names the ids inside this catalog stand for.
-    /// </summary>
-    /// <remarks>
-    /// <para>
-    /// A table whose schema id no schema answers is left out of the map on purpose. The alternative —
-    /// reading the name as empty — addresses the object to the connection's search path, which puts
-    /// the object in a schema the source never named it in. Leaving it out makes the adapter refuse
-    /// it, which is the honest outcome for a catalog that cannot describe its own contents.
-    /// </para>
-    /// <para>
-    /// An id is derived from the object's kind, schema, name and parent, so a repeated id repeats the
-    /// same name and last-one-wins cannot hide a conflict.
-    /// </para>
-    /// </remarks>
-    private static ObjectNameMap BuildNameMap(
-        IReadOnlyList<SchemaDefinition> schemas,
-        IReadOnlyList<TableDefinition> tables)
-    {
-        var schemaNames = new Dictionary<InterchangeId, string>();
-        foreach (var schema in schemas)
-        {
-            schemaNames[schema.Id] = schema.Name;
-        }
-
-        var tableRefs = new Dictionary<InterchangeId, TableRef>();
-        foreach (var table in tables)
-        {
-            if (schemaNames.TryGetValue(table.SchemaId, out var schemaName))
-            {
-                tableRefs[table.Id] = new TableRef(schemaName, table.Name);
-            }
-        }
-
-        return new ObjectNameMap(schemaNames, tableRefs);
-    }
-
-    /// <summary>
     /// Groups the native objects by the stage that creates them and reports the ones nothing can place.
     /// </summary>
     private static IReadOnlyDictionary<SchemaStage, IReadOnlyList<NativeObjectDefinition>> PlaceNativeObjects(
@@ -512,7 +474,6 @@ public sealed class SnapshotImporter
         IDatabaseWriter writer,
         IReadOnlyDictionary<SchemaStage, IReadOnlyList<NativeObjectDefinition>> nativeStages,
         Func<SchemaStage, bool> sideOfTables,
-        ObjectNameMap names,
         int percentage,
         IProgress<InterchangeProgress>? progress,
         CancellationToken ct)
@@ -525,7 +486,7 @@ public sealed class SnapshotImporter
                 Percentage = percentage,
             });
 
-            await writer.ApplySchemaAsync(stage, AsObjects(nativeStages[stage]), names, ct);
+            await writer.ApplySchemaAsync(stage, AsObjects(nativeStages[stage]), ct);
         }
     }
 

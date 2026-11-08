@@ -36,10 +36,10 @@ public sealed class CatalogWriterTests : IDisposable
     public async Task CompleteAsync_writes_manifest_catalog_and_section_files()
     {
         // Arrange
-        var schemaId = InterchangeId.Compute("schema", string.Empty, "public");
+        var schemaRef = ObjectRef.Schema("public");
         var schemas = new List<SchemaDefinition>
         {
-            new() { Id = schemaId, Name = "public" },
+            new() { Ref = schemaRef, Name = "public" },
         };
 
         // Act
@@ -63,32 +63,32 @@ public sealed class CatalogWriterTests : IDisposable
     public async Task Section_written_by_CatalogReader_is_read_back_with_same_values()
     {
         // Arrange
-        var schemaId = InterchangeId.Compute("schema", string.Empty, "public");
-        var tableId = InterchangeId.Compute("table", "public", "customers", schemaId);
-        var schemas = new List<SchemaDefinition> { new() { Id = schemaId, Name = "public" } };
+        var schemaRef = ObjectRef.Schema("public");
+        var tableRef = ObjectRef.Table("public", "customers");
+        var schemas = new List<SchemaDefinition> { new() { Ref = schemaRef, Name = "public" } };
         var tables = new List<TableDefinition>
         {
             new()
             {
-                Id = tableId,
+                Ref = tableRef,
                 Name = "customers",
-                SchemaId = schemaId,
+                SchemaRef = schemaRef,
                 Columns =
                 [
                     new ColumnDefinition
                     {
-                        Id = InterchangeId.Compute("column", "public", "customers_id", tableId),
+                        Ref = ObjectRef.Column("public", "customers", "customers_id"),
                         Name = "id",
-                        TableId = tableId,
+                        TableRef = tableRef,
                         Ordinal = 0,
                         LogicalType = ELogicalType.Decimal,
                         Nullable = false,
                     },
                     new ColumnDefinition
                     {
-                        Id = InterchangeId.Compute("column", "public", "customers_name", tableId),
+                        Ref = ObjectRef.Column("public", "customers", "customers_name"),
                         Name = "name",
-                        TableId = tableId,
+                        TableRef = tableRef,
                         Ordinal = 1,
                         LogicalType = ELogicalType.String,
                         Nullable = true,
@@ -128,20 +128,20 @@ public sealed class CatalogWriterTests : IDisposable
     public async Task WriteTableAsync_writes_row_chunks_and_counts_them_in_manifest()
     {
         // Arrange
-        var schemaId = InterchangeId.Compute("schema", string.Empty, "public");
-        var tableId = InterchangeId.Compute("table", "public", "orders", schemaId);
+        var schemaRef = ObjectRef.Schema("public");
+        var tableRef = ObjectRef.Table("public", "orders");
         var table = new TableDefinition
         {
-            Id = tableId,
+            Ref = tableRef,
             Name = "orders",
-            SchemaId = schemaId,
+            SchemaRef = schemaRef,
             Columns =
             [
                 new ColumnDefinition
                 {
-                    Id = InterchangeId.Compute("column", "public", "orders_id", tableId),
+                    Ref = ObjectRef.Column("public", "orders", "orders_id"),
                     Name = "id",
-                    TableId = tableId,
+                    TableRef = tableRef,
                     Ordinal = 0,
                     LogicalType = ELogicalType.Decimal,
                 },
@@ -160,7 +160,7 @@ public sealed class CatalogWriterTests : IDisposable
 
         // Assert
         written.Should().Be(3);
-        var dataDir = Path.Combine(_catalogPath, InterchangeFormat.DataDirectory, tableId.Hex);
+        var dataDir = Path.Combine(_catalogPath, InterchangeFormat.DataDirectory, "public", "orders");
         Directory.Exists(dataDir).Should().BeTrue();
         File.Exists(Path.Combine(dataDir, "table.json")).Should().BeTrue();
         File.Exists(Path.Combine(dataDir, "chunk-000000.ndjson")).Should().BeTrue();
@@ -197,17 +197,17 @@ public sealed class CatalogWriterTests : IDisposable
     }
 
     [Fact]
-    public void InterchangeId_is_stable_and_content_derived()
+    public void ObjectRef_is_stable_and_deterministic()
     {
         // Arrange / Act
-        var first = InterchangeId.Compute("table", "public", "customers");
-        var second = InterchangeId.Compute("table", "public", "customers");
-        var other = InterchangeId.Compute("table", "public", "orders");
+        var first = ObjectRef.Table("public", "customers");
+        var second = ObjectRef.Table("public", "customers");
+        var other = ObjectRef.Table("public", "orders");
 
         // Assert
         first.Should().Be(second);
         first.Should().NotBe(other);
-        first.Hex.Should().HaveLength(64);
+        first.Value.Should().StartWith("table:");
     }
 
     private static async IAsyncEnumerable<DataValue[]> ThreeRows()

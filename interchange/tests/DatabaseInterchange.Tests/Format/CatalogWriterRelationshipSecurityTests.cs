@@ -10,7 +10,7 @@ namespace DatabaseInterchange.Tests.Format;
 
 /// <summary>
 /// The two sections whose content is not a list of <see cref="ISchemaObject"/>: relationships, which
-/// are pairs of ids rather than objects, and security, which is one compound object holding three
+/// are pairs of refs rather than objects, and security, which is one compound object holding three
 /// lists of them. Both live under <c>schema/</c> like every other section, so both are declared in
 /// <c>catalog.json</c> and hashed into <c>manifest.json</c> — a file written around the writer would
 /// be readable and unverifiable at the same time.
@@ -36,11 +36,11 @@ public sealed class CatalogWriterRelationshipSecurityTests : IDisposable
     public async Task WriteRelationshipsAsync_isListedHashedAndReadBackByTheGenericSectionReader()
     {
         // Arrange
-        var (customers, orders, view) = TableIds();
+        var (customers, orders, view) = TableRefs();
         var edges = new List<Relationship>
         {
-            new() { Type = "viewReference", DependentId = view, DependencyId = customers },
-            new() { Type = "foreignKey", DependentId = orders, DependencyId = customers },
+            new() { Type = "viewReference", DependentRef = view, DependencyRef = customers },
+            new() { Type = "foreignKey", DependentRef = orders, DependencyRef = customers },
         };
 
         // Act
@@ -70,12 +70,12 @@ public sealed class CatalogWriterRelationshipSecurityTests : IDisposable
     {
         // Arrange — the same three edges in two arrival orders. The metadata reader's output order is
         // not part of the database's identity, so it must not reach the file.
-        var (customers, orders, view) = TableIds();
+        var (customers, orders, view) = TableRefs();
         var edges = new List<Relationship>
         {
-            new() { Type = "viewReference", DependentId = view, DependencyId = orders },
-            new() { Type = "foreignKey", DependentId = orders, DependencyId = customers },
-            new() { Type = "viewReference", DependentId = view, DependencyId = customers },
+            new() { Type = "viewReference", DependentRef = view, DependencyRef = orders },
+            new() { Type = "foreignKey", DependentRef = orders, DependencyRef = customers },
+            new() { Type = "viewReference", DependentRef = view, DependencyRef = customers },
         };
         var filePath = Path.Combine(_catalogPath, "schema", "relationships.json");
 
@@ -106,9 +106,9 @@ public sealed class CatalogWriterRelationshipSecurityTests : IDisposable
         var read = await reader.ReadSectionAsync<Relationship>("relationships");
         read.Select(r => r.Type).Should().Equal("foreignKey", "viewReference", "viewReference");
 
-        // Edges of one kind are ordered by the ids they name, so the order is stated rather than
+        // Edges of one kind are ordered by the refs they name, so the order is stated rather than
         // guessed from a hash value the test cannot know in advance.
-        var sameKind = read.Skip(1).Select(r => r.DependencyId.ToString()).ToList();
+        var sameKind = read.Skip(1).Select(r => r.DependencyRef.ToString()).ToList();
         string.CompareOrdinal(sameKind[0], sameKind[1]).Should().BeNegative();
         sameKind.Should().HaveCount(2);
     }
@@ -136,16 +136,16 @@ public sealed class CatalogWriterRelationshipSecurityTests : IDisposable
     public async Task WriteSecurityAsync_carriesThePoliciesAndSurvivesTheRoundTrip()
     {
         // Arrange
-        var (customers, _, _) = TableIds();
+        var (customers, _, _) = TableRefs();
         var security = new SecuritySection
         {
             Policies =
             [
                 new PolicyDefinition
                 {
-                    Id = InterchangeId.Compute("policy", "public", "customers_read", customers),
+                    Ref = ObjectRef.Policy("public", "customers", "customers_read"),
                     Name = "customers_read",
-                    TableId = customers,
+                    TableRef = customers,
                     Command = "SELECT",
                     IsPermissive = false,
                     ApplicableRoles = ["test_user"],
@@ -170,7 +170,7 @@ public sealed class CatalogWriterRelationshipSecurityTests : IDisposable
         var read = await reader.ReadSecurityAsync();
         var policy = read!.Policies.Should().ContainSingle().Which;
         policy.Name.Should().Be("customers_read");
-        policy.TableId.Should().Be(customers);
+        policy.TableRef.Should().Be(customers);
         policy.Command.Should().Be("SELECT");
         policy.IsPermissive.Should().BeFalse();
         policy.ApplicableRoles.Should().Equal("test_user");
@@ -205,14 +205,14 @@ public sealed class CatalogWriterRelationshipSecurityTests : IDisposable
         (await reader.ReadSecurityAsync()).Should().BeNull();
     }
 
-    private static (InterchangeId Customers, InterchangeId Orders, InterchangeId View) TableIds()
+    private static (ObjectRef Customers, ObjectRef Orders, ObjectRef View) TableRefs()
     {
-        var schemaId = InterchangeId.Compute("schema", string.Empty, "public");
+        var schemaRef = ObjectRef.Schema("public");
         return
         (
-            InterchangeId.Compute("table", "public", "customers", schemaId),
-            InterchangeId.Compute("table", "public", "orders", schemaId),
-            InterchangeId.Compute("view", "public", "v_recent_orders", schemaId)
+            ObjectRef.Table("public", "customers"),
+            ObjectRef.Table("public", "orders"),
+            ObjectRef.View("public", "v_recent_orders")
         );
     }
 }

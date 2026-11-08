@@ -133,7 +133,7 @@ public sealed record SnapshotSchema
 public sealed record ExtensionDefinition : ISchemaObject
 {
     /// <inheritdoc />
-    public InterchangeId Id { get; init; }
+    public ObjectRef Ref { get; init; }
 
     /// <inheritdoc />
     public EObjectKind Kind => EObjectKind.Extension;
@@ -166,11 +166,11 @@ public sealed record ExtensionDefinition : ISchemaObject
 /// </summary>
 public sealed record Relationship
 {
-    /// <summary>Gets or sets the dependent object Id.</summary>
-    public InterchangeId DependentId { get; init; }
+    /// <summary>Gets or sets the dependent object reference.</summary>
+    public ObjectRef DependentRef { get; init; }
 
-    /// <summary>Gets or sets the dependency object Id.</summary>
-    public InterchangeId DependencyId { get; init; }
+    /// <summary>Gets or sets the dependency object reference.</summary>
+    public ObjectRef DependencyRef { get; init; }
 
     /// <summary>Gets or sets the relationship type.</summary>
     public string Type { get; init; } = string.Empty;
@@ -197,7 +197,7 @@ public sealed record SecuritySection
 public sealed record RoleDefinition : ISchemaObject
 {
     /// <inheritdoc />
-    public InterchangeId Id { get; init; }
+    public ObjectRef Ref { get; init; }
 
     /// <inheritdoc />
     public EObjectKind Kind => EObjectKind.Role;
@@ -240,7 +240,7 @@ public sealed record RoleDefinition : ISchemaObject
 public sealed record GrantDefinition : ISchemaObject
 {
     /// <inheritdoc />
-    public InterchangeId Id { get; init; }
+    public ObjectRef Ref { get; init; }
 
     /// <inheritdoc />
     public EObjectKind Kind => EObjectKind.Grant;
@@ -261,11 +261,11 @@ public sealed record GrantDefinition : ISchemaObject
     /// <inheritdoc />
     public IReadOnlyList<InterchangeIssue> Notes { get; init; } = [];
 
-    /// <summary>Gets or sets the grantee role Id.</summary>
-    public InterchangeId GranteeId { get; init; }
+    /// <summary>Gets or sets the grantee role reference.</summary>
+    public ObjectRef GranteeRef { get; init; }
 
-    /// <summary>Gets or sets the object Id being granted access to.</summary>
-    public InterchangeId ObjectId { get; init; }
+    /// <summary>Gets or sets the object reference being granted access to.</summary>
+    public ObjectRef TargetRef { get; init; }
 
     /// <summary>Gets or sets the privileges.</summary>
     public IReadOnlyList<string> Privileges { get; init; } = [];
@@ -280,7 +280,7 @@ public sealed record GrantDefinition : ISchemaObject
 public sealed record PolicyDefinition : ISchemaObject
 {
     /// <inheritdoc />
-    public InterchangeId Id { get; init; }
+    public ObjectRef Ref { get; init; }
 
     /// <inheritdoc />
     public EObjectKind Kind => EObjectKind.Policy;
@@ -301,8 +301,8 @@ public sealed record PolicyDefinition : ISchemaObject
     /// <inheritdoc />
     public IReadOnlyList<InterchangeIssue> Notes { get; init; } = [];
 
-    /// <summary>Gets or sets the table Id this policy applies to.</summary>
-    public InterchangeId TableId { get; init; }
+    /// <summary>Gets or sets the table reference this policy applies to.</summary>
+    public ObjectRef TableRef { get; init; }
 
     /// <summary>Gets or sets the command this policy applies to (ALL, SELECT, INSERT, etc.).</summary>
     public string Command { get; init; } = "ALL";

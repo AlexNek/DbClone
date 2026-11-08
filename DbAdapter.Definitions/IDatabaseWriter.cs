@@ -33,17 +33,13 @@ public interface IDatabaseWriter : IAsyncDisposable
     /// foreign key, an index — may arrive as the parent that owns it instead of as a list of the
     /// children, because what to do with one is decided against the siblings recorded in the same
     /// object; an adapter walks the objects it is handed and creates what each of them holds.</param>
-    /// <param name="names">The names the object ids stand for, resolved by whoever read the catalog.
-    /// A canonical object names its parent by id alone, and the adapter cannot open a catalog to look
-    /// one up, so the caller supplies the names a statement has to be qualified with.</param>
     /// <param name="ct">Cancellation token.</param>
-    /// <exception cref="InvalidOperationException">Thrown when an object's parent is not named in
-    /// <paramref name="names"/>, because creating it in a guessed schema is not a failure this
-    /// product is allowed to risk.</exception>
+    /// <exception cref="InvalidOperationException">Thrown when an object's parent cannot be resolved
+    /// from its qualified-name reference, because creating it in a guessed schema is not a failure
+    /// this product is allowed to risk.</exception>
     Task ApplySchemaAsync(
         SchemaStage stage,
         IReadOnlyList<ISchemaObject> objects,
-        ObjectNameMap names,
         CancellationToken ct);
 
     /// <summary>
@@ -94,8 +90,8 @@ public sealed record TargetExpectation
         new Dictionary<TableRef, long>();
 
     /// <summary>Gets or sets the expected sequence states.</summary>
-    public IReadOnlyDictionary<InterchangeId, SequenceState> SequenceStates { get; init; } =
-        new Dictionary<InterchangeId, SequenceState>();
+    public IReadOnlyDictionary<ObjectRef, SequenceState> SequenceStates { get; init; } =
+        new Dictionary<ObjectRef, SequenceState>();
 }
 
 /// <summary>

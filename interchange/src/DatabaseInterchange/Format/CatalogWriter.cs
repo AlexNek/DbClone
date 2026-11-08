@@ -110,7 +110,7 @@ public sealed class CatalogWriter : IAsyncDisposable
             Section = sectionName,
             FormatVersion = InterchangeFormat.Version,
             Count = objects.Count,
-            Objects = objects.OrderBy(o => o.Id.ToString()).ToList(),
+            Objects = objects.OrderBy(o => o.Ref.Value).ToList(),
         };
 
         await WriteSectionFileAsync(sectionName, section, ct);
@@ -132,7 +132,7 @@ public sealed class CatalogWriter : IAsyncDisposable
     /// <param name="ct">Cancellation token.</param>
     /// <returns>The number of edges written.</returns>
     /// <remarks>
-    /// An edge is not an object: a relationship has no identity of its own, it is a pair of ids, so
+    /// An edge is not an object: a relationship has no identity of its own, it is a pair of references, so
     /// it is not an <see cref="ISchemaObject"/> and cannot go through
     /// <see cref="WriteSectionAsync{T}"/>. It keeps the same header-and-array file shape as every
     /// list section though, which is why <see cref="CatalogReader.ReadSectionAsync{T}"/> reads it
@@ -151,8 +151,8 @@ public sealed class CatalogWriter : IAsyncDisposable
 
         var ordered = relationships
             .OrderBy(r => r.Type, StringComparer.Ordinal)
-            .ThenBy(r => r.DependencyId)
-            .ThenBy(r => r.DependentId)
+            .ThenBy(r => r.DependencyRef.Value)
+            .ThenBy(r => r.DependentRef.Value)
             .ToList();
 
         var section = new SectionFile<Relationship>
@@ -339,7 +339,9 @@ public sealed class CatalogWriter : IAsyncDisposable
         ObjectDisposedException.ThrowIf(_disposed, this);
         ArgumentNullException.ThrowIfNull(table);
 
-        var tableDir = Path.Combine(_catalogPath, InterchangeFormat.DataDirectory, table.Id.ToString()!);
+        var encodedSchema = NameEncoder.EncodeSegment(table.Ref.SchemaName() ?? schemaName);
+        var encodedTable = NameEncoder.EncodeSegment(table.Name);
+        var tableDir = Path.Combine(_catalogPath, InterchangeFormat.DataDirectory, encodedSchema, encodedTable);
         Directory.CreateDirectory(tableDir);
 
         var chunkIndex = 0;
@@ -382,7 +384,7 @@ public sealed class CatalogWriter : IAsyncDisposable
         // Write table.json
         var tableManifest = new TableManifest
         {
-            Id = table.Id.ToString()!,
+            Id = table.Ref.Value,
             Schema = schemaName,
             Name = table.Name,
             Columns = table.Columns.Select(c => new TableManifestColumn
@@ -403,7 +405,7 @@ public sealed class CatalogWriter : IAsyncDisposable
         var hash = await ComputeSha256Async(tableManifestPath, ct);
         _fileEntries.Add(new ManifestFileEntry
         {
-            Path = $"{InterchangeFormat.DataDirectory}/{table.Id}/table.json",
+            Path = $"{InterchangeFormat.DataDirectory}/{encodedSchema}/{encodedTable}/table.json",
             Bytes = fileInfo.Length,
             Sha256 = hash,
         });

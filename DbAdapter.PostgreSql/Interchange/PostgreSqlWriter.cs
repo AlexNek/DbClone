@@ -115,21 +115,17 @@ public sealed class PostgreSqlWriter : IDatabaseWriter
     public async Task ApplySchemaAsync(
         SchemaStage stage,
         IReadOnlyList<ISchemaObject> objects,
-        ObjectNameMap names,
         CancellationToken ct)
     {
         ObjectDisposedException.ThrowIf(_disposed, this);
         ArgumentNullException.ThrowIfNull(objects);
-        ArgumentNullException.ThrowIfNull(names);
 
         if (objects.Count == 0)
         {
-            // An empty stage says the catalog holds nothing of that kind. That is a fact about the
-            // source, not a limitation of the adapter, so it is not a failure.
             return;
         }
 
-        var statements = BuildStatements(stage, objects, names);
+        var statements = BuildStatements(stage, objects);
 
         if (statements.Count == 0)
         {
@@ -347,10 +343,9 @@ public sealed class PostgreSqlWriter : IDatabaseWriter
     /// <para>
     /// A schema is named by its own name; every other object names a parent — the schema a sequence
     /// lives in, the table an index belongs to — and the interchange model points at that parent by
-    /// <see cref="InterchangeId"/> alone. <paramref name="names"/> carries the answers, resolved by
-    /// whoever read the catalog, since an adapter never opens one. An object whose parent the map
-    /// does not name stops the import: creating a sequence in the default schema because its schema
-    /// id went unanswered would relocate the object and still report the stage as applied.
+    /// <see cref="ObjectRef"/> qualified-name references. An object whose parent reference does not
+    /// resolve to a name stops the import: creating a sequence in the default schema because its schema
+    /// reference went unanswered would relocate the object and still report the stage as applied.
     /// </para>
     /// <para>
     /// Schemas, sequences and views are converted into the live model records
@@ -372,19 +367,18 @@ public sealed class PostgreSqlWriter : IDatabaseWriter
     /// </remarks>
     internal IReadOnlyList<string> BuildStatements(
         SchemaStage stage,
-        IReadOnlyList<ISchemaObject> objects,
-        ObjectNameMap names) =>
+        IReadOnlyList<ISchemaObject> objects) =>
         stage switch
         {
             SchemaStage.Schemas => CreateSchemaStatements(objects),
             SchemaStage.Types => CreateTypeStatements(objects),
-            SchemaStage.Sequences => CreateSequenceStatements(objects, names),
-            SchemaStage.Tables => CreateTableStatements(objects, names),
-            SchemaStage.Routines => CreateRoutineStatements(objects, names),
-            SchemaStage.Views => CreateViewStatements(objects, names),
-            SchemaStage.Constraints => CreateForeignKeyStatements(objects, names),
-            SchemaStage.Indexes => CreateIndexStatements(objects, names),
-            SchemaStage.Triggers => CreateTriggerStatements(objects, names),
+            SchemaStage.Sequences => CreateSequenceStatements(objects),
+            SchemaStage.Tables => CreateTableStatements(objects),
+            SchemaStage.Routines => CreateRoutineStatements(objects),
+            SchemaStage.Views => CreateViewStatements(objects),
+            SchemaStage.Constraints => CreateForeignKeyStatements(objects),
+            SchemaStage.Indexes => CreateIndexStatements(objects),
+            SchemaStage.Triggers => CreateTriggerStatements(objects),
             _ => throw new NotSupportedException(
                 $"The schema stage \"{stage}\" holds {objects.Count} object(s) this adapter " +
                 "cannot apply yet, so nothing was executed."),
@@ -542,8 +536,7 @@ public sealed class PostgreSqlWriter : IDatabaseWriter
     /// is restored as a standalone one. The reader marks that loss in the object's notes.
     /// </remarks>
     private static IReadOnlyList<string> CreateSequenceStatements(
-        IReadOnlyList<ISchemaObject> objects,
-        ObjectNameMap names)
+        IReadOnlyList<ISchemaObject> objects)
     {
         var sequences = new List<Models.SequenceDefinition>(objects.Count);
 
@@ -555,7 +548,7 @@ public sealed class PostgreSqlWriter : IDatabaseWriter
             }
 
             sequences.Add(new Models.SequenceDefinition(
-                RequireSchema(names, sequence.SchemaId, $"the sequence \"{sequence.Name}\""),
+                RequireSchema(sequence.SchemaRef, $"the sequence \"{sequence.Name}\""),
                 sequence.Name,
                 sequence.StartValue,
                 sequence.Increment,
@@ -588,8 +581,7 @@ public sealed class PostgreSqlWriter : IDatabaseWriter
     /// </para>
     /// </remarks>
     private IReadOnlyList<string> CreateTableStatements(
-        IReadOnlyList<ISchemaObject> objects,
-        ObjectNameMap names)
+        IReadOnlyList<ISchemaObject> objects)
     {
         var tables = new List<TableDefinition>(objects.Count);
 
@@ -604,17 +596,17 @@ public sealed class PostgreSqlWriter : IDatabaseWriter
         }
 
         var statements = new List<string>(tables.Count);
-        var created = new HashSet<InterchangeId>();
+        var created = new HashSet<ObjectRef>();
         var pending = tables;
 
         // A parent the catalog does not name is asked about before the ordering below, because it is
-        // a fact about the catalog rather than about the set handed to this stage, and "the map holds
-        // no name" is the answer the import has to be given.
+        // a fact about the catalog rather than about the set handed to this stage, and "the reference
+        // is empty" is the answer the import has to be given.
         foreach (var table in tables)
         {
-            if (table.ParentId is { } linked)
+            if (table.ParentRef is { } linked)
             {
-                RequireTableName(names, linked, $"\"{table.Name}\"");
+                RequireTableName(linked, $"\"{table.Name}\"");
             }
         }
 
@@ -624,10 +616,10 @@ public sealed class PostgreSqlWriter : IDatabaseWriter
 
             foreach (var table in pending)
             {
-                if (table.ParentId is null || created.Contains(table.ParentId.Value))
+                if (table.ParentRef is null || created.Contains(table.ParentRef.Value))
                 {
-                    statements.Add(CreateTableStatement(table, names));
-                    created.Add(table.Id);
+                    statements.Add(CreateTableStatement(table));
+                    created.Add(table.Ref);
                 }
                 else
                 {
@@ -658,11 +650,11 @@ public sealed class PostgreSqlWriter : IDatabaseWriter
     /// left it: a table on its own, a partitioned table waiting for its partitions, or a partition of
     /// a parent that is already created.
     /// </summary>
-    private string CreateTableStatement(TableDefinition table, ObjectNameMap names)
+    private string CreateTableStatement(TableDefinition table)
     {
         var named = $"the table \"{table.Name}\"";
         var tableName = PgIdentifierQuoter.QuoteSchemaQualified(
-            RequireSchema(names, table.SchemaId, named),
+            RequireSchema(table.SchemaRef, named),
             table.Name);
 
         if (table.TableKind is ETableKind.Foreign or ETableKind.Temporary)
@@ -689,9 +681,9 @@ public sealed class PostgreSqlWriter : IDatabaseWriter
                 "the catalog does not record, so the table is not created.");
         }
 
-        if (table.ParentId is { } parentId)
+        if (table.ParentRef is { } parentId)
         {
-            var parent = RequireTableName(names, parentId, $"\"{table.Name}\"");
+            var parent = RequireTableName(parentId, $"\"{table.Name}\"");
 
             if (string.IsNullOrWhiteSpace(table.PartitionBound))
             {
@@ -819,11 +811,10 @@ public sealed class PostgreSqlWriter : IDatabaseWriter
     /// <remarks>
     /// The keys travel with the table objects, because that is where the format keeps them: this
     /// stage is handed the tables again rather than a constraint section of its own. A key names the
-    /// table it points at by id, which the caller's map answers.
+    /// table it points at by qualified-name reference.
     /// </remarks>
     private IReadOnlyList<string> CreateForeignKeyStatements(
-        IReadOnlyList<ISchemaObject> objects,
-        ObjectNameMap names)
+        IReadOnlyList<ISchemaObject> objects)
     {
         var statements = new List<string>();
 
@@ -836,7 +827,7 @@ public sealed class PostgreSqlWriter : IDatabaseWriter
 
             foreach (var foreignKey in table.ForeignKeys)
             {
-                statements.Add(CreateForeignKeyStatement(table, foreignKey, names));
+                statements.Add(CreateForeignKeyStatement(table, foreignKey));
             }
         }
 
@@ -845,13 +836,11 @@ public sealed class PostgreSqlWriter : IDatabaseWriter
 
     private string CreateForeignKeyStatement(
         TableDefinition table,
-        ForeignKeyDefinition foreignKey,
-        ObjectNameMap names)
+        ForeignKeyDefinition foreignKey)
     {
-        var schemaName = RequireSchema(names, table.SchemaId, $"the table \"{table.Name}\"");
+        var schemaName = RequireSchema(table.SchemaRef, $"the table \"{table.Name}\"");
         var referenced = RequireTableName(
-            names,
-            foreignKey.ReferencedTableId,
+            foreignKey.ReferencedTableRef,
             $"\"{foreignKey.Name}\"");
 
         var sql = new StringBuilder();
@@ -906,8 +895,7 @@ public sealed class PostgreSqlWriter : IDatabaseWriter
     /// </para>
     /// </remarks>
     private IReadOnlyList<string> CreateIndexStatements(
-        IReadOnlyList<ISchemaObject> objects,
-        ObjectNameMap names)
+        IReadOnlyList<ISchemaObject> objects)
     {
         var statements = new List<string>();
 
@@ -921,7 +909,7 @@ public sealed class PostgreSqlWriter : IDatabaseWriter
             // The recorded text already names the schema-qualified table, so the name is not needed to
             // build the statement — but a table whose schema the import cannot name belongs to a
             // catalog that does not describe its own contents, and that is worth stopping for.
-            RequireSchema(names, table.SchemaId, $"the table \"{table.Name}\"");
+            RequireSchema(table.SchemaRef, $"the table \"{table.Name}\"");
 
             foreach (var index in table.Indexes)
             {
@@ -996,8 +984,7 @@ public sealed class PostgreSqlWriter : IDatabaseWriter
     /// </para>
     /// </remarks>
     private IReadOnlyList<string> CreateTriggerStatements(
-        IReadOnlyList<ISchemaObject> objects,
-        ObjectNameMap names)
+        IReadOnlyList<ISchemaObject> objects)
     {
         var statements = new List<string>();
 
@@ -1009,7 +996,7 @@ public sealed class PostgreSqlWriter : IDatabaseWriter
             }
 
             var named = $"the trigger \"{trigger.Name}\"";
-            var tableName = RequireTableName(names, trigger.TableId, named);
+            var tableName = RequireTableName(trigger.TableRef, named);
 
             // A captured CREATE TRIGGER always creates an enabled trigger, and the format gives this flag
             // only the enabled and disabled states to hold. Anything else is a state the restore has no
@@ -1092,8 +1079,7 @@ public sealed class PostgreSqlWriter : IDatabaseWriter
     /// Runs the captured routine text, which is already a complete <c>CREATE</c> statement.
     /// </summary>
     private IReadOnlyList<string> CreateRoutineStatements(
-        IReadOnlyList<ISchemaObject> objects,
-        ObjectNameMap names)
+        IReadOnlyList<ISchemaObject> objects)
     {
         var statements = new List<string>(objects.Count);
 
@@ -1107,7 +1093,7 @@ public sealed class PostgreSqlWriter : IDatabaseWriter
             // The statement text carries the routine's own schema, so the name is not needed to
             // build it — but a routine whose schema the import cannot name belongs to a catalog that
             // does not describe its own contents, and that is worth stopping for.
-            RequireSchema(names, routine.SchemaId, $"the routine \"{routine.Name}\"");
+            RequireSchema(routine.SchemaRef, $"the routine \"{routine.Name}\"");
 
             var native = routine.NativeDefinition;
             if (native is null || string.IsNullOrWhiteSpace(native.Text))
@@ -1129,8 +1115,7 @@ public sealed class PostgreSqlWriter : IDatabaseWriter
     /// Creates views and materialized views from the query body the catalog recorded.
     /// </summary>
     private IReadOnlyList<string> CreateViewStatements(
-        IReadOnlyList<ISchemaObject> objects,
-        ObjectNameMap names)
+        IReadOnlyList<ISchemaObject> objects)
     {
         var views = new List<Models.ViewDefinition>();
         var materializedViews = new List<Models.MaterializedViewDefinition>();
@@ -1142,7 +1127,7 @@ public sealed class PostgreSqlWriter : IDatabaseWriter
                 throw WrongObject(SchemaStage.Views, nameof(ViewDefinition), obj);
             }
 
-            var schemaName = RequireSchema(names, view.SchemaId, $"the view \"{view.Name}\"");
+            var schemaName = RequireSchema(view.SchemaRef, $"the view \"{view.Name}\"");
             var body = DefinitionText(view);
 
             if (view.IsMaterialized)
@@ -1191,10 +1176,10 @@ public sealed class PostgreSqlWriter : IDatabaseWriter
     /// <summary>
     /// Names the schema an object belongs to, or stops the import rather than guessing one.
     /// </summary>
-    private static string RequireSchema(ObjectNameMap names, InterchangeId schemaId, string objectName)
+    private static string RequireSchema(ObjectRef schemaRef, string objectName)
     {
-        var schema = names.SchemaName(schemaId);
-        if (schema is null)
+        var schema = schemaRef.ObjectName();
+        if (string.IsNullOrWhiteSpace(schema))
         {
             throw new InvalidOperationException(
                 $"The catalog being imported does not name the schema {objectName} lives in, so the " +
@@ -1205,20 +1190,21 @@ public sealed class PostgreSqlWriter : IDatabaseWriter
     }
 
     /// <summary>
-    /// Names the table an object points at by id, or stops the import rather than guessing one.
+    /// Names the table an object points at by reference, or stops the import rather than guessing one.
     /// </summary>
     /// <remarks>
     /// <paramref name="referringObject"/> is the pointing object's own name, quoted, as the catalog
     /// spells it; it appears in the message so the refusal says whose link is unanswered.
     /// </remarks>
     private static string RequireTableName(
-        ObjectNameMap names,
-        InterchangeId tableId,
+        ObjectRef tableRef,
         string referringObject)
     {
-        if (names.Table(tableId) is { } table)
+        var schema = tableRef.SchemaName();
+        var name = tableRef.ObjectName();
+        if (!string.IsNullOrWhiteSpace(schema) && !string.IsNullOrWhiteSpace(name))
         {
-            return PgIdentifierQuoter.QuoteSchemaQualified(table.Schema, table.Name);
+            return PgIdentifierQuoter.QuoteSchemaQualified(schema, name);
         }
 
         throw new InvalidOperationException(

@@ -8,7 +8,7 @@ namespace CanonicalModel.Interchange;
 public sealed record ColumnDefinition : ISchemaObject
 {
     /// <inheritdoc />
-    public InterchangeId Id { get; init; }
+    public ObjectRef Ref { get; init; }
 
     /// <inheritdoc />
     public EObjectKind Kind => EObjectKind.Column;
@@ -29,8 +29,8 @@ public sealed record ColumnDefinition : ISchemaObject
     /// <inheritdoc />
     public IReadOnlyList<InterchangeIssue> Notes { get; init; } = [];
 
-    /// <summary>Gets or sets the parent table's Id.</summary>
-    public InterchangeId TableId { get; init; }
+    /// <summary>Gets or sets the parent table's reference.</summary>
+    public ObjectRef TableRef { get; init; }
 
     /// <summary>Gets or sets the ordinal position (1-based).</summary>
     public int Ordinal { get; init; }

@@ -6,8 +6,8 @@ namespace CanonicalModel.Interchange;
 /// </summary>
 public interface ISchemaObject
 {
-    /// <summary>Gets the content-derived identity (SHA-256 hash).</summary>
-    InterchangeId Id { get; }
+    /// <summary>Gets the qualified-name reference (e.g. <c>table:public.orders</c>).</summary>
+    ObjectRef Ref { get; }
 
     /// <summary>Gets the object kind.</summary>
     EObjectKind Kind { get; }

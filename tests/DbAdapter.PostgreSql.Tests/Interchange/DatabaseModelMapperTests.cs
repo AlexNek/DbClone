@@ -41,16 +41,16 @@ public class DatabaseModelMapperTests
     }
 
     [Fact]
-    public void Map_TablesAreSortedAndPointAtTheirSchemaById()
+    public void Map_TablesAreSortedAndPointAtTheirSchemaByRef()
     {
         var snapshot = MapFull();
-        var publicId = snapshot.Schemas.Single(s => s.Name == "public").Id;
+        var publicRef = snapshot.Schemas.Single(s => s.Name == "public").Ref;
 
         snapshot.Tables.Select(t => t.SourceObjectId).Should()
             .Equal("public.customers", "public.orders", "reporting.key_value");
 
         var customers = snapshot.Tables.Single(t => t.Name == "customers");
-        customers.SchemaId.Should().Be(publicId);
+        customers.SchemaRef.Should().Be(publicRef);
         customers.TableKind.Should().Be(ETableKind.Table);
     }
 
@@ -93,19 +93,19 @@ public class DatabaseModelMapperTests
     }
 
     [Fact]
-    public void Map_ColumnsBelongToTheirTableAndHaveDistinctIds()
+    public void Map_ColumnsBelongToTheirTableAndHaveDistinctRefs()
     {
         var snapshot = MapFull();
-        var tableIds = snapshot.Tables.Select(t => t.Id).ToList();
+        var tableRefs = snapshot.Tables.Select(t => t.Ref).ToList();
 
         foreach (var table in snapshot.Tables)
         {
-            table.Columns.Should().OnlyContain(c => c.TableId == table.Id);
+            table.Columns.Should().OnlyContain(c => c.TableRef == table.Ref);
         }
 
-        var columnIds = snapshot.Tables.SelectMany(t => t.Columns).Select(c => c.Id).ToList();
-        columnIds.Should().OnlyHaveUniqueItems();
-        columnIds.Intersect(tableIds).Should().BeEmpty();
+        var columnRefs = snapshot.Tables.SelectMany(t => t.Columns).Select(c => c.Ref).ToList();
+        columnRefs.Should().OnlyHaveUniqueItems();
+        columnRefs.Intersect(tableRefs).Should().BeEmpty();
     }
 
     [Fact]
@@ -116,7 +116,7 @@ public class DatabaseModelMapperTests
         var primaryKey = customers.PrimaryKey!;
         primaryKey.Name.Should().Be("pk_customers");
         primaryKey.Columns.Should().Equal("id");
-        primaryKey.TableId.Should().Be(customers.Id);
+        primaryKey.TableRef.Should().Be(customers.Ref);
         primaryKey.NativeDefinition!.Complete.Should().BeTrue();
         primaryKey.NativeDefinition.CapturedBy.Should().Be("pg_get_indexdef");
         primaryKey.NativeDefinition.Text.Should().StartWith("CREATE UNIQUE INDEX pk_customers");
@@ -154,9 +154,9 @@ public class DatabaseModelMapperTests
 
         var foreignKey = orders.ForeignKeys.Single();
         foreignKey.Name.Should().Be("fk_orders_customer");
-        foreignKey.TableId.Should().Be(orders.Id);
+        foreignKey.TableRef.Should().Be(orders.Ref);
         foreignKey.Columns.Should().Equal("customer_id");
-        foreignKey.ReferencedTableId.Should().Be(customers.Id);
+        foreignKey.ReferencedTableRef.Should().Be(customers.Ref);
         foreignKey.ReferencedColumns.Should().Equal("id");
         foreignKey.OnDelete.Should().Be("CASCADE");
         foreignKey.OnUpdate.Should().Be("NO ACTION");
@@ -171,7 +171,7 @@ public class DatabaseModelMapperTests
         check.Name.Should().Be("chk_balance");
         check.Expression.Text.Should().Be("balance >= 0::numeric");
         check.Expression.Dialect.Should().Be(Dialect);
-        check.TableId.Should().Be(customers.Id);
+        check.TableRef.Should().Be(customers.Ref);
 
         var unique = customers.UniqueConstraints.Single();
         unique.Name.Should().Be("uq_customers_name");
@@ -188,17 +188,20 @@ public class DatabaseModelMapperTests
 
         var audit = customers.Triggers.Single();
         audit.Name.Should().Be("tr_audit");
-        audit.TableId.Should().Be(customers.Id);
+        audit.TableRef.Should().Be(customers.Ref);
         audit.Timing.Should().Be(ETriggerTiming.Before);
         audit.Events.Should().Be(ETriggerEvent.Insert | ETriggerEvent.Update);
         audit.Orientation.Should().Be(ETriggerOrientation.Row);
         audit.EnabledState.Should().Be("O");
         audit.When!.Text.Should().Be("NEW.id IS NOT NULL");
-        audit.ReferencedRoutineId.Should().Be(routine.Id);
+        // The trigger references the routine by qualified name without a signature, while the
+        // routine's own Ref carries one — so the comparison is on the parts that must agree.
+        audit.ReferencedRoutineRef.SchemaName().Should().Be(routine.Ref.SchemaName());
+        audit.ReferencedRoutineRef.ObjectName().Should().Be(routine.Ref.ObjectName());
 
         var disabled = orders.Triggers.Single();
         disabled.Name.Should().Be("tr_disabled");
-        disabled.TableId.Should().Be(orders.Id);
+        disabled.TableRef.Should().Be(orders.Ref);
         disabled.Orientation.Should().Be(ETriggerOrientation.Statement);
         disabled.EnabledState.Should().Be("D");
         disabled.When.Should().BeNull();
@@ -243,7 +246,7 @@ public class DatabaseModelMapperTests
 
         var materialized = snapshot.Views.Single(v => v.Name == "mv_totals");
         materialized.IsMaterialized.Should().BeTrue();
-        materialized.SchemaId.Should().Be(snapshot.Schemas.Single(s => s.Name == "reporting").Id);
+        materialized.SchemaRef.Should().Be(snapshot.Schemas.Single(s => s.Name == "reporting").Ref);
     }
 
     [Fact]
@@ -315,7 +318,7 @@ public class DatabaseModelMapperTests
 
         var policy = snapshot.Security!.Policies.Single();
         policy.Name.Should().Be("customers_read");
-        policy.TableId.Should().Be(customers.Id);
+        policy.TableRef.Should().Be(customers.Ref);
         policy.Command.Should().Be("SELECT");
         policy.IsPermissive.Should().BeTrue();
         policy.ApplicableRoles.Should().Equal("test_user");
@@ -341,15 +344,15 @@ public class DatabaseModelMapperTests
         snapshot.Relationships.Should().HaveCount(3);
 
         snapshot.Relationships.Should().Contain(r =>
-            r.Type == "foreignKey" && r.DependentId == orders.Id && r.DependencyId == customers.Id);
+            r.Type == "foreignKey" && r.DependentRef == orders.Ref && r.DependencyRef == customers.Ref);
         snapshot.Relationships.Should().Contain(r =>
-            r.Type == "viewReference" && r.DependentId == view.Id && r.DependencyId == customers.Id);
+            r.Type == "viewReference" && r.DependentRef == view.Ref && r.DependencyRef == customers.Ref);
         snapshot.Relationships.Should().Contain(r =>
-            r.Type == "viewReference" && r.DependentId == matView.Id && r.DependencyId == orders.Id);
+            r.Type == "viewReference" && r.DependentRef == matView.Ref && r.DependencyRef == orders.Ref);
 
         // No edge may dangle: every dependency has to name a table the catalog actually captured.
-        var tableIds = snapshot.Tables.Select(t => t.Id).ToHashSet();
-        snapshot.Relationships.Should().OnlyContain(r => tableIds.Contains(r.DependencyId));
+        var tableIds = snapshot.Tables.Select(t => t.Ref).ToHashSet();
+        snapshot.Relationships.Should().OnlyContain(r => tableIds.Contains(r.DependencyRef));
     }
 
     [Fact]
@@ -358,9 +361,9 @@ public class DatabaseModelMapperTests
         var first = Mapper.Map(InterchangeTestModel.Full());
         var second = Mapper.Map(InterchangeTestModel.Full());
 
-        second.Tables.Select(t => t.Id).Should().Equal(first.Tables.Select(t => t.Id));
-        second.Relationships.Select(r => r.DependencyId).Should().Equal(first.Relationships.Select(r => r.DependencyId));
-        second.Routines.Select(r => r.Id).Should().Equal(first.Routines.Select(r => r.Id));
+        second.Tables.Select(t => t.Ref).Should().Equal(first.Tables.Select(t => t.Ref));
+        second.Relationships.Select(r => r.DependencyRef).Should().Equal(first.Relationships.Select(r => r.DependencyRef));
+        second.Routines.Select(r => r.Ref).Should().Equal(first.Routines.Select(r => r.Ref));
     }
 
     [Fact]
@@ -389,27 +392,26 @@ public class DatabaseModelMapperTests
     }
 
     [Fact]
-    public void MapNativeObjects_IdentifyTheirObjectsFromTheSameGraphTheSectionsUse()
+    public void MapNativeObjects_IdentifyTheirObjectsByQualifiedName()
     {
         var model = InterchangeTestModel.Full();
         var natives = Mapper.MapNativeObjects(model);
-        var graph = InterchangeIdGraph.Create(model, Dialect);
 
         var mood = natives.Single(n => n.Name == "mood");
-        mood.Id.Should().Be(graph.Type("public", "mood"));
+        mood.Ref.Should().Be(ObjectRef.Type("public", "mood"));
         mood.SourceObjectId.Should().Be("public.mood");
 
         // A publication belongs to the database rather than to a schema, so it is identified the way
         // an extension is: by its name alone.
         var publication = natives.Single(n => n.Name == "pub_all");
-        publication.Id.Should().Be(graph.Publication("pub_all"));
+        publication.Ref.Should().Be(ObjectRef.Publication("pub_all"));
         publication.SourceObjectId.Should().Be("pub_all");
 
-        natives.Single(n => n.Name == "sub_1").Id.Should().Be(graph.Subscription("sub_1"));
+        natives.Single(n => n.Name == "sub_1").Ref.Should().Be(ObjectRef.Subscription("sub_1"));
 
         // One pg_type namespace per schema is what lets an enum, a composite and a domain share the
-        // "type" token, so no two of these objects may land on one id.
-        natives.Select(n => n.Id).Should().OnlyHaveUniqueItems();
+        // "type" token, so no two of these objects may land on one ref.
+        natives.Select(n => n.Ref).Should().OnlyHaveUniqueItems();
     }
 
     [Fact]
@@ -532,7 +534,7 @@ public class DatabaseModelMapperTests
 
         events.TableKind.Should().Be(ETableKind.Partitioned);
         events.PartitionStrategy.Should().Be("RANGE");
-        events.ParentId.Should().BeNull();
+        events.ParentRef.Should().BeNull();
         events.PartitionBound.Should().BeNull();
     }
 
@@ -559,12 +561,12 @@ public class DatabaseModelMapperTests
         var parent = snapshot.Tables.Single(t => t.Name == "measurements");
 
         var partition = snapshot.Tables.Single(t => t.Name == "measurements_2026");
-        partition.ParentId.Should().Be(parent.Id);
+        partition.ParentRef.Should().Be(parent.Ref);
         partition.PartitionBound.Should().Be("FOR VALUES FROM ('2026-01-01') TO ('2027-01-01')");
         partition.Notes.Should().BeEmpty();
 
         var inherited = snapshot.Tables.Single(t => t.Name == "measurements_legacy");
-        inherited.ParentId.Should().Be(parent.Id);
+        inherited.ParentRef.Should().Be(parent.Ref);
         inherited.PartitionBound.Should().BeNull();
     }
 
@@ -580,7 +582,7 @@ public class DatabaseModelMapperTests
 
         // An id standing for a table the catalog does not hold would hand the restore a statement it
         // cannot run, so the link is left out and the omission is written down.
-        child.ParentId.Should().BeNull();
+        child.ParentRef.Should().BeNull();
 
         var note = child.Notes.Single();
         note.Code.Should().Be("PartitionParentNotCaptured");

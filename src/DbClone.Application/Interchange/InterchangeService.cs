@@ -301,7 +301,8 @@ public sealed class InterchangeService : IInterchangeService
         int totalChunks = 0;
         foreach (var table in tables)
         {
-            await foreach (var row in reader.ReadRowsAsync(table.Id.Hex, cancellationToken))
+            var schemaName = table.SchemaRef.ObjectName();
+            await foreach (var row in reader.ReadRowsAsync(schemaName, table.Name, cancellationToken))
             {
                 totalRows++;
             }
