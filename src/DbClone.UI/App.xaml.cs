@@ -171,6 +171,14 @@ public partial class App : System.Windows.Application, IDisposable
                     services.AddSingleton<ITableSelectionPresetNameValidator, TableSelectionPresetNameValidator>();
                     services.AddSingleton<IBackupEncryptionService, BackupEncryptionService>();
                     services.AddSingleton<DatabaseTargetFactory>();
+
+                    // Store/Restore workflow services
+                    services.AddTransient<StoreRestore.Workflows.IWorkflowService<StoreRestore.Workflows.StoreRequest, StoreRestore.Workflows.StoreResult>, StoreRestore.Workflows.StoreWorkflowService>();
+                    services.AddTransient<StoreRestore.Workflows.IWorkflowService<StoreRestore.Workflows.RestoreRequest, StoreRestore.Workflows.RestoreResult>, StoreRestore.Workflows.RestoreWorkflowService>();
+                    services.AddSingleton<StoreRestore.Handlers.IWorkflowResultHandler, StoreRestore.Handlers.WorkflowResultHandler>();
+                    services.AddSingleton<StoreRestore.Validators.IWorkflowValidator, StoreRestore.Validators.WorkflowValidator>();
+                    services.AddSingleton<StoreRestore.Services.ICatalogPathResolver, StoreRestore.Services.CatalogPathResolver>();
+
                     services.AddTransient<ITableCatalogService, TableCatalogService>();
                     services.AddTransient<IComparisonService, ComparisonService>();
                     services.AddTransient<ICopyWorkflow, CopyWorkflow>();

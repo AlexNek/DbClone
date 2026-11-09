@@ -146,16 +146,38 @@ public sealed class PostgreSqlReader : IDatabaseReader
                     {
                         CommandTimeout = 300,
                     })
-                await using (var reader = await fetch.ExecuteReaderAsync(ct))
+                await using (var reader = await fetch.ExecuteReaderAsync(
+                    System.Data.CommandBehavior.SequentialAccess, ct))
                 {
                     while (await reader.ReadAsync(ct))
                     {
                         var row = new DataValue[reader.FieldCount];
                         for (var i = 0; i < reader.FieldCount; i++)
                         {
-                            row[i] = await reader.IsDBNullAsync(i, ct)
-                                         ? DataValue.Null(logicalTypes[i])
-                                         : DataValue.FromText(logicalTypes[i], reader.GetString(i));
+                            if (await reader.IsDBNullAsync(i, ct))
+                            {
+                                row[i] = DataValue.Null(logicalTypes[i]);
+                            }
+                            else if (IsTextCarrier(logicalTypes[i]))
+                            {
+                                // R6: oversized text values stream through a TextReader in
+                                // fixed-size chunks instead of becoming one large GetString.
+                                // The token text stays byte-identical to col::text output.
+                                using var textReader = reader.GetTextReader(i);
+                                var sb = new System.Text.StringBuilder();
+                                var buffer = new char[8192];
+                                int read;
+                                while ((read = await textReader.ReadAsync(buffer, 0, buffer.Length)) > 0)
+                                {
+                                    sb.Append(buffer, 0, read);
+                                }
+
+                                row[i] = DataValue.FromText(logicalTypes[i], sb.ToString());
+                            }
+                            else
+                            {
+                                row[i] = DataValue.FromText(logicalTypes[i], reader.GetString(i));
+                            }
                         }
 
                         rowsInBatch++;
@@ -342,4 +364,19 @@ public sealed class PostgreSqlReader : IDatabaseReader
         return found ?? throw new InvalidOperationException(
             $"Table {table} is not part of the captured schema.");
     }
+
+    /// <summary>
+    /// Says whether a logical type is a text carrier — a type whose stored token is the
+    /// verbatim <c>col::text</c> output and which may therefore be very large. Text carriers
+    /// are read through <c>GetTextReader</c> in fixed-size chunks (R6) instead of through
+    /// <c>GetString</c>, so a 50 MB value does not appear in memory as one allocation.
+    /// <c>Binary</c> is not a text carrier: part B stores it as bytes in a container instead
+    /// of streaming a hex token.
+    /// </summary>
+    private static bool IsTextCarrier(ELogicalType type) =>
+        type is ELogicalType.String
+            or ELogicalType.Json
+            or ELogicalType.Xml
+            or ELogicalType.BitString
+            or ELogicalType.Unknown;
 }

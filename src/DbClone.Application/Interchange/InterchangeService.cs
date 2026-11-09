@@ -55,16 +55,25 @@ public sealed class InterchangeService : IInterchangeService
             var runtime = DatabaseInterchangeRuntime.Create(adapter);
             var exporter = runtime.CreateExporter();
 
+            var exportOptions = new ExportOptions
+            {
+                IncludeData = request.IncludeData,
+                ChunkBytes = request.ChunkBytes,
+                MaxRowsPerChunk = request.RowsPerChunk,
+                RequestedConsistency = Enum.TryParse<ESnapshotConsistency>(
+                    request.SnapshotConsistency, ignoreCase: true, out var consistency)
+                    ? consistency
+                    : ESnapshotConsistency.ConsistentSnapshot,
+                ExcludedTables = request.TableSelection.ExcludedTables
+                    .Select(t => new TableRef(t.Schema, t.Name))
+                    .ToHashSet(),
+            };
+
             var exportRequest = new ExportRequest
             {
                 Source = target,
                 CatalogDirectory = request.CatalogPath,
-                Options = new ExportOptions
-                {
-                    IncludeData = request.IncludeData,
-                    ChunkBytes = request.ChunkBytes,
-                    MaxRowsPerChunk = request.RowsPerChunk,
-                },
+                Options = exportOptions,
             };
 
             var progressAdapter = progress is null ? null : new Progress<InterchangeProgress>(p =>
@@ -214,14 +223,20 @@ public sealed class InterchangeService : IInterchangeService
             var runtime = DatabaseInterchangeRuntime.Create(adapter);
             var importer = runtime.CreateImporter();
 
+            var importOptions = new ImportOptions
+            {
+                ValidateAfterImport = true,
+                UnsupportedFeaturePolicy = Enum.TryParse<EUnsupportedFeaturePolicy>(
+                    request.UnsupportedFeaturePolicy, ignoreCase: true, out var policy)
+                    ? policy
+                    : EUnsupportedFeaturePolicy.Fail,
+            };
+
             var importRequest = new ImportRequest
             {
                 CatalogDirectory = request.CatalogPath,
                 Target = target,
-                Options = new ImportOptions
-                {
-                    ValidateAfterImport = true,
-                },
+                Options = importOptions,
             };
 
             var progressAdapter = progress is null ? null : new Progress<InterchangeProgress>(p =>
@@ -296,18 +311,10 @@ public sealed class InterchangeService : IInterchangeService
         var sequences = await reader.ReadSectionAsync<SequenceDefinition>("sequences", cancellationToken);
         var extensions = await reader.ReadSectionAsync<ExtensionDefinition>("extensions", cancellationToken);
 
-        // Count rows by reading table manifests
-        long totalRows = 0;
-        int totalChunks = 0;
-        foreach (var table in tables)
-        {
-            var schemaName = table.SchemaRef.ObjectName();
-            await foreach (var row in reader.ReadRowsAsync(schemaName, table.Name, cancellationToken))
-            {
-                totalRows++;
-            }
-            // TODO: Count chunks when TableManifest provides this
-        }
+        // R9: Inspection never re-reads data. Row counts come from the manifest, not from iterating rows.
+        // The manifest's counts are recorded during the write pass (R8), so they are truthful.
+        var totalRows = manifest.Counts.Rows;
+        var totalChunks = manifest.Counts.Chunks;
 
         // Count preservation levels
         var preservationCounts = new Dictionary<string, int>
@@ -383,6 +390,82 @@ public sealed class InterchangeService : IInterchangeService
 
         _logger.LogWarning("Archive support not yet implemented.");
         return null;
+    }
+
+    /// <inheritdoc />
+    public async Task<BlobExtractionResult> ExtractBlobsAsync(
+        BlobExtractionRequest request,
+        IProgress<BlobExtractionProgressView>? progress,
+        CancellationToken cancellationToken)
+    {
+        ArgumentNullException.ThrowIfNull(request);
+
+        _logger.LogInformation(
+            "Blob extraction started: catalog={CatalogPath} schema={Schema} table={Table} output={OutputDir}",
+            request.CatalogPath,
+            request.Schema,
+            request.Table,
+            request.OutputDirectory);
+
+        var productRequest = new DatabaseInterchange.Transform.BlobExtractionRequest(
+            request.CatalogPath,
+            request.Schema,
+            request.Table,
+            request.OutputDirectory);
+
+        IProgress<DatabaseInterchange.Transform.BlobExtractionProgress>? progressAdapter = null;
+        if (progress is not null)
+        {
+            progressAdapter = new Progress<DatabaseInterchange.Transform.BlobExtractionProgress>(p =>
+                progress.Report(new BlobExtractionProgressView(
+                    p.Stage,
+                    p.RowsProcessed,
+                    p.TotalRows)));
+        }
+
+        var extractor = new DatabaseInterchange.Transform.BlobExtractor(_logger);
+        var result = await extractor.ExtractAsync(productRequest, progressAdapter, cancellationToken).ConfigureAwait(false);
+
+        return new BlobExtractionResult(
+            result.FilesExtracted,
+            result.BytesExtracted,
+            result.RowsProcessed,
+            result.Elapsed);
+    }
+
+    /// <inheritdoc />
+    public async Task<BlobExtractionResult> ExtractAllBlobsAsync(
+        string catalogPath,
+        string outputDirectory,
+        IProgress<BlobExtractionProgressView>? progress,
+        CancellationToken cancellationToken)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(catalogPath);
+        ArgumentException.ThrowIfNullOrWhiteSpace(outputDirectory);
+
+        _logger.LogInformation(
+            "Extract all blobs started: catalog={CatalogPath} output={OutputDir}",
+            catalogPath,
+            outputDirectory);
+
+        IProgress<DatabaseInterchange.Transform.BlobExtractionProgress>? progressAdapter = null;
+        if (progress is not null)
+        {
+            progressAdapter = new Progress<DatabaseInterchange.Transform.BlobExtractionProgress>(p =>
+                progress.Report(new BlobExtractionProgressView(
+                    p.Stage,
+                    p.RowsProcessed,
+                    p.TotalRows)));
+        }
+
+        var extractor = new DatabaseInterchange.Transform.BlobExtractor(_logger);
+        var result = await extractor.ExtractAllAsync(catalogPath, outputDirectory, progressAdapter, cancellationToken).ConfigureAwait(false);
+
+        return new BlobExtractionResult(
+            result.FilesExtracted,
+            result.BytesExtracted,
+            result.RowsProcessed,
+            result.Elapsed);
     }
 
     /// <summary>

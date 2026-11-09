@@ -19,11 +19,15 @@ public sealed record ExportOptions
     /// <summary>Gets or sets whether to include data.</summary>
     public bool IncludeData { get; init; } = true;
 
-    /// <summary>Gets or sets the tables to include (empty = all).</summary>
+    /// <summary>Gets or sets the tables to include (empty = all, subject to <see cref="ExcludedTables"/>).</summary>
     public IReadOnlyList<TableRef> Tables { get; init; } = [];
+
+    /// <summary>Gets or sets the tables to exclude from the export. Applied after <see cref="Tables"/>.</summary>
+    public IReadOnlySet<TableRef> ExcludedTables { get; init; } = new HashSet<TableRef>();
 
     /// <summary>Gets or sets the default row order mode.</summary>
     public ERowOrder DefaultRowOrder { get; init; } = ERowOrder.PrimaryKey;
+
 }
 
 /// <summary>

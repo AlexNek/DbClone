@@ -14,6 +14,8 @@ using Microsoft.Extensions.Logging;
 
 using Npgsql;
 
+using NpgsqlTypes;
+
 using Models = CanonicalModel.Models;
 
 namespace DbAdapter.PostgreSql.Interchange;
@@ -59,6 +61,12 @@ public sealed class PostgreSqlWriter : IDatabaseWriter
     /// outruns the row count, and a statement of several megabytes is not worth building to send.
     /// </summary>
     private const int MaxBatchTextLength = 2_000_000;
+
+    /// <summary>
+    /// What one stored binary value costs the batch budget: its placeholder text. The bytes themselves travel
+    /// as parameter data, outside the statement text R7 measures, so a payload never inflates the budget.
+    /// </summary>
+    private const int BinaryPlaceholderTextLength = 12;
 
     private static readonly PgDdlGenerator Ddl = new();
 
@@ -191,23 +199,37 @@ public sealed class PostgreSqlWriter : IDatabaseWriter
 
         var applied = 0L;
         var batch = new List<DataValue[]>();
-        var batchTextLength = 0;
 
+        // R7: the batch budget is measured on the final SQL text that goes on the wire — after
+        // quoting, escaping and joining — not on raw value lengths before those transformations.
+        // Each row's SQL text is built once and measured; when adding it would push the batch past
+        // the budget, the current batch is sent first.
         await foreach (var row in rows.WithCancellation(ct))
         {
+            var rowSqlLength = MeasureRowSqlLength(targets, row);
+
+            // When the batch is non-empty and adding this row would exceed the text budget,
+            // send what is already accumulated first.
+            if (batch.Count > 0 && batch.Count < MaxBatchRows)
+            {
+                var projectedLength = EstimateBatchStatementLength(tableName, columnList, targets, batch)
+                    + rowSqlLength + 2; // ", " separator before the new row's values
+                if (projectedLength > MaxBatchTextLength)
+                {
+                    applied += await InsertBatchAsync(connection, tableName, columnList, targets, batch, ct);
+                    batch.Clear();
+                }
+            }
+
             batch.Add(row);
-            batchTextLength += row.Sum(v => v.Value?.Length ?? 0);
 
             // One row always forms a batch on its own, however large it is: a single value bigger
             // than the text budget is the source's own row, and there is no smaller batch to send.
-            if (batch.Count < MaxBatchRows && batchTextLength < MaxBatchTextLength)
+            if (batch.Count >= MaxBatchRows)
             {
-                continue;
+                applied += await InsertBatchAsync(connection, tableName, columnList, targets, batch, ct);
+                batch.Clear();
             }
-
-            applied += await InsertBatchAsync(connection, tableName, columnList, targets, batch, ct);
-            batch.Clear();
-            batchTextLength = 0;
         }
 
         if (batch.Count > 0)
@@ -221,6 +243,71 @@ public sealed class PostgreSqlWriter : IDatabaseWriter
             QualifiedName(table));
 
         return applied;
+    }
+
+    /// <summary>
+    /// Estimates the SQL text length a single row's values will occupy in an INSERT statement,
+    /// measured after quoting and escaping — the budget R7 names.
+    /// </summary>
+    private static int MeasureRowSqlLength(IReadOnlyList<RowTarget> targets, DataValue[] row)
+    {
+        var length = 0;
+        for (var i = 0; i < targets.Count; i++)
+        {
+            if (i > 0)
+            {
+                length += 2; // ", "
+            }
+
+            var target = targets[i];
+            if (target.RowIndex >= row.Length)
+            {
+                continue;
+            }
+
+            var value = row[target.RowIndex];
+            if (value.Binary is not null)
+            {
+                length += BinaryPlaceholderTextLength; // "@blobN", the bytes going as parameter data
+            }
+            else if (value.IsNull || value.Value is null)
+            {
+                length += 4; // "NULL"
+            }
+            else
+            {
+                // The escaped value: each single quote becomes two, plus the surrounding quotes
+                // and the ::type cast.
+                var escaped = value.Value.Replace("'", "''");
+                length += 1 + escaped.Length + 1 + 2 + target.Type.Length; // 'value'::type
+            }
+        }
+
+        return length;
+    }
+
+    /// <summary>
+    /// Builds the INSERT statement for the current batch rows and returns its text length.
+    /// Used to project whether adding another row would exceed the text budget.
+    /// </summary>
+    private static int EstimateBatchStatementLength(
+        string tableName,
+        string columnList,
+        IReadOnlyList<RowTarget> targets,
+        List<DataValue[]> batch)
+    {
+        // "INSERT INTO <table> (<cols>) VALUES " = prefix
+        var prefix = $"INSERT INTO {tableName} ({columnList}) VALUES ".Length;
+        var suffix = 1; // ";"
+        var separators = batch.Count > 1 ? (batch.Count - 1) * 2 : 0; // ", " between rows
+
+        var rowsLength = 0;
+        foreach (var row in batch)
+        {
+            rowsLength += MeasureRowSqlLength(targets, row) + 2; // "(" + ")" per row
+        }
+
+        return prefix + rowsLength + separators + suffix;
     }
 
     /// <inheritdoc />
@@ -1312,14 +1399,22 @@ public sealed class PostgreSqlWriter : IDatabaseWriter
     /// <summary>
     /// Builds the statement that writes one batch.
     /// </summary>
+    /// <remarks>
+    /// The <c>parameters</c> list is where a stored binary value's parameter is added, so the caller can attach
+    /// it to the command. Leaving it out is only for building a batch's text, which means a batch holding no
+    /// payload.
+    /// </remarks>
     internal static string BuildInsertStatement(
         string tableName,
         string columnList,
         IReadOnlyList<RowTarget> targets,
-        IReadOnlyList<DataValue[]> batch)
+        IReadOnlyList<DataValue[]> batch,
+        List<NpgsqlParameter>? parameters = null)
     {
+        // R7: the statement is built directly into a StringBuilder, appending each row's values
+        // in place — no intermediate string per value, no Join, no ToString chain.
         var sql = new StringBuilder();
-        sql.Append($"INSERT INTO {tableName} ({columnList}) VALUES ");
+        sql.Append("INSERT INTO ").Append(tableName).Append(" (").Append(columnList).Append(") VALUES ");
 
         for (var r = 0; r < batch.Count; r++)
         {
@@ -1328,7 +1423,9 @@ public sealed class PostgreSqlWriter : IDatabaseWriter
                 sql.Append(", ");
             }
 
-            sql.Append('(').Append(BuildRowValues(targets, batch[r])).Append(')');
+            sql.Append('(');
+            AppendRowValues(sql, targets, batch[r], parameters);
+            sql.Append(')');
         }
 
         sql.Append(';');
@@ -1336,22 +1433,39 @@ public sealed class PostgreSqlWriter : IDatabaseWriter
     }
 
     /// <summary>
-    /// Renders one stored row as the values of an <c>INSERT</c>.
+    /// Appends one stored row's values directly into the statement's <see cref="StringBuilder"/>,
+    /// avoiding the intermediate string array and <c>string.Join</c> the original design used.
     /// </summary>
     /// <remarks>
+    /// <para>
     /// A token is the text the engine's own output function produced, so it is handed back through the
     /// same type's input function by casting the literal — <c>'12.50'::numeric(10,2)</c>. A literal is
     /// used rather than a bound parameter because the types here are the source's own: an enum, a
     /// domain, a composite. PostgreSQL reads a literal in such a type directly, while a parameter
     /// arrives already typed as text and no cast from text to a user-defined type exists. It is the
     /// mechanism the copy pipeline's <c>INSERT</c> path uses, for the same reason.
+    /// </para>
+    /// <para>
+    /// A value stored out-of-band is the exception to that rule, and the reason the rule was never meant for
+    /// it: its bytes were never rendered as text by anything. Handing them back as a <c>bytea</c> parameter over
+    /// a stream keeps them out of the statement text entirely — no hex inside SQL, no whole value as one string
+    /// on either side (design §5, §6.9) — and a <c>bytea</c> is a built-in type, so a typed parameter reads it
+    /// correctly, which is precisely the case the literal rule exists to cover for user-defined types.
+    /// </para>
     /// </remarks>
-    internal static string BuildRowValues(IReadOnlyList<RowTarget> targets, DataValue[] row)
+    internal static void AppendRowValues(
+        StringBuilder sql,
+        IReadOnlyList<RowTarget> targets,
+        DataValue[] row,
+        List<NpgsqlParameter>? parameters = null)
     {
-        var values = new string[targets.Count];
-
         for (var i = 0; i < targets.Count; i++)
         {
+            if (i > 0)
+            {
+                sql.Append(", ");
+            }
+
             var target = targets[i];
 
             // A row shorter than the columns recorded for the table means the catalog's data and its
@@ -1365,24 +1479,56 @@ public sealed class PostgreSqlWriter : IDatabaseWriter
             }
 
             var value = row[target.RowIndex];
-            values[i] = value.IsNull || value.Value is null
-                ? "NULL"
-                : $"'{value.Value.Replace("'", "''")}'::{target.Type}";
-        }
+            if (value.Binary is { } payload)
+            {
+                if (parameters is null)
+                {
+                    throw new InvalidOperationException(
+                        $"The value of column \"{target.Column}\" is stored as bytes outside the row file, " +
+                        "so it can only be written as a parameter, and no parameter list was given.");
+                }
 
-        return string.Join(", ", values);
+                // One parameter per value, so the placeholder names count the payloads the batch holds.
+                var name = $"blob{parameters.Count}";
+                parameters.Add(
+                    new NpgsqlParameter(name, NpgsqlDbType.Bytea)
+                    {
+                        Value = payload.OpenRead(),
+                    });
+                sql.Append('@').Append(name);
+            }
+            else if (value.IsNull || value.Value is null)
+            {
+                sql.Append("NULL");
+            }
+            else
+            {
+                sql.Append('\'');
+                sql.Append(value.Value.Replace("'", "''"));
+                sql.Append("'::");
+                sql.Append(target.Type);
+            }
+        }
     }
 
     /// <summary>
     /// Writes one batch in its own transaction.
     /// </summary>
     /// <remarks>
+    /// <para>
     /// Both settings are local to the batch because the statement is built per batch. The time zone
     /// matters because a <c>timestamptz</c> was exported as the UTC rendering of the instant it held, so
     /// reading that text back as an instant needs a session that names UTC — a target configured for
     /// another zone would otherwise move every timestamp by the difference. Quoting the stored text as a
     /// literal needs <c>standard_conforming_strings</c> on, the setting that makes a backslash an
     /// ordinary character; with it off, a value ending in a backslash would eat the closing quote.
+    /// </para>
+    /// <para>
+    /// A stored binary value is not in that text at all: it is one parameter over its own stream, which the
+    /// server reads while the statement runs. Npgsql closes nothing it was handed, so the batch releases the
+    /// streams it opened — which is also what keeps the table's payloads bounded to one batch instead of
+    /// accumulating for the whole import.
+    /// </para>
     /// </remarks>
     private static async Task<long> InsertBatchAsync(
         NpgsqlConnection connection,
@@ -1392,7 +1538,8 @@ public sealed class PostgreSqlWriter : IDatabaseWriter
         List<DataValue[]> batch,
         CancellationToken ct)
     {
-        var sql = BuildInsertStatement(tableName, columnList, targets, batch);
+        var parameters = new List<NpgsqlParameter>();
+        var sql = BuildInsertStatement(tableName, columnList, targets, batch, parameters);
 
         await using var transaction = await connection.BeginTransactionAsync(ct);
         try
@@ -1418,6 +1565,11 @@ public sealed class PostgreSqlWriter : IDatabaseWriter
                     CommandTimeout = 300,
                 })
             {
+                foreach (var parameter in parameters)
+                {
+                    insert.Parameters.Add(parameter);
+                }
+
                 await insert.ExecuteNonQueryAsync(ct);
             }
 
@@ -1427,6 +1579,16 @@ public sealed class PostgreSqlWriter : IDatabaseWriter
         {
             await transaction.RollbackAsync(CancellationToken.None);
             throw;
+        }
+        finally
+        {
+            foreach (var parameter in parameters)
+            {
+                if (parameter.Value is Stream stream)
+                {
+                    await stream.DisposeAsync();
+                }
+            }
         }
 
         return batch.Count;

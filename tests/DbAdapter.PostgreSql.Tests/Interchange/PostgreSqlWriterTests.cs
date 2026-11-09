@@ -1,3 +1,5 @@
+using System.Text;
+
 using CanonicalModel.Interchange;
 
 using DbAdapter.Definitions;
@@ -8,9 +10,13 @@ using FluentAssertions;
 
 using Microsoft.Extensions.Logging.Abstractions;
 
+using Npgsql;
+using NpgsqlTypes;
+
 using NSubstitute;
 
 using Models = CanonicalModel.Models;
+using Task = System.Threading.Tasks.Task;
 
 namespace DbAdapter.PostgreSql.Tests;
 
@@ -1143,7 +1149,7 @@ public class PostgreSqlWriterTests
     }
 
     [Fact]
-    public void BuildRowValues_PlainText_WritesEachTokenAsALiteralOfItsOwnType()
+    public void AppendRowValues_PlainText_WritesEachTokenAsALiteralOfItsOwnType()
     {
         var targets = PostgreSqlWriter.BuildRowTargets(
         [
@@ -1158,12 +1164,13 @@ public class PostgreSqlWriterTests
             DataValue.FromText(ELogicalType.Integer32, "42"),
         };
 
-        PostgreSqlWriter.BuildRowValues(targets, row)
-            .Should().Be("'O''Reilly'::text, NULL, '42'::integer");
+        var sb = new System.Text.StringBuilder();
+        PostgreSqlWriter.AppendRowValues(sb, targets, row);
+        sb.ToString().Should().Be("'O''Reilly'::text, NULL, '42'::integer");
     }
 
     [Fact]
-    public void BuildRowValues_SkipsTheGeneratedColumnItCannotWrite()
+    public void AppendRowValues_SkipsTheGeneratedColumnItCannotWrite()
     {
         var targets = PostgreSqlWriter.BuildRowTargets(
         [
@@ -1176,11 +1183,13 @@ public class PostgreSqlWriterTests
             DataValue.FromText(ELogicalType.String, "seven"),
         };
 
-        PostgreSqlWriter.BuildRowValues(targets, row).Should().Be("'7'::integer");
+        var sb = new System.Text.StringBuilder();
+        PostgreSqlWriter.AppendRowValues(sb, targets, row);
+        sb.ToString().Should().Be("'7'::integer");
     }
 
     [Fact]
-    public void BuildRowValues_RowShorterThanTheRecordedColumns_StopsRatherThanGuessingThePlace()
+    public void AppendRowValues_RowShorterThanTheRecordedColumns_StopsRatherThanGuessingThePlace()
     {
         var targets = PostgreSqlWriter.BuildRowTargets(
         [
@@ -1189,7 +1198,8 @@ public class PostgreSqlWriterTests
         ]);
         var row = new[] { DataValue.FromText(ELogicalType.Integer32, "7") };
 
-        var act = () => PostgreSqlWriter.BuildRowValues(targets, row);
+        var sb = new System.Text.StringBuilder();
+        var act = () => PostgreSqlWriter.AppendRowValues(sb, targets, row);
 
         act.Should().Throw<InvalidOperationException>().Which.Message
             .Should().Contain("note").And.Contain("1 value");
@@ -1220,6 +1230,111 @@ public class PostgreSqlWriterTests
             .Be(
                 "INSERT INTO \"sales\".\"orders\" (\"id\", \"note\") VALUES "
                 + "('7'::integer, 'a b'::text), ('8'::integer, NULL);");
+
+    [Fact]
+    public void AppendRowValues_ValueStoredAsAPayload_GoesOnTheWireAsAByteaStreamParameter()
+    {
+        // Design §5: a value the catalog keeps outside the row file is bound as a parameter over its
+        // payload, so its bytes never enter the statement text as hex and never become one string.
+        var bytes = new byte[] { 0x89, 0x50, 0x4E, 0x47, 0x01, 0x02, 0x03 };
+        var targets = PostgreSqlWriter.BuildRowTargets([StoredColumn("payload", "bytea", ordinal: 1)]);
+        var row = new[] { DataValue.FromPayload(ELogicalType.Binary, new StoredPayload(bytes)) };
+        var parameters = new List<NpgsqlParameter>();
+
+        var sb = new StringBuilder();
+        PostgreSqlWriter.AppendRowValues(sb, targets, row, parameters);
+
+        sb.ToString().Should().Be("@blob0");
+        parameters.Should().ContainSingle();
+        parameters[0].NpgsqlDbType.Should().Be(NpgsqlDbType.Bytea);
+        parameters[0].Value.Should().BeAssignableTo<Stream>();
+
+        using var stream = (Stream)parameters[0].Value!;
+        using var buffer = new MemoryStream();
+        stream.CopyTo(buffer);
+        buffer.ToArray().Should().Equal(bytes);
+    }
+
+    [Fact]
+    public void AppendRowValues_PayloadWithoutAParameterList_RefusesRatherThanLoseTheBytes()
+    {
+        // The bytes exist only in the payload; rendering the placeholder into a statement nobody will
+        // bind is how a value would silently arrive as nothing, so the call that cannot bind refuses.
+        var targets = PostgreSqlWriter.BuildRowTargets([StoredColumn("payload", "bytea", ordinal: 1)]);
+        var row = new[]
+        {
+            DataValue.FromPayload(ELogicalType.Binary, new StoredPayload([0x01, 0x02])),
+        };
+
+        var sb = new StringBuilder();
+        var act = () => PostgreSqlWriter.AppendRowValues(sb, targets, row);
+
+        act.Should().Throw<InvalidOperationException>().Which.Message
+            .Should().Contain("payload");
+    }
+
+    [Fact]
+    public void AppendRowValues_BinaryValueStoredInline_IsStillALiteralCast()
+    {
+        // The threshold decision belongs to the catalog; a value that stayed in the row file arrives as
+        // the text it was stored as, and the plugin has no reason to change how it is bound.
+        var targets = PostgreSqlWriter.BuildRowTargets([StoredColumn("payload", "bytea", ordinal: 1)]);
+        var row = new[] { DataValue.FromText(ELogicalType.Binary, "\\x4142") };
+
+        var sb = new StringBuilder();
+        PostgreSqlWriter.AppendRowValues(sb, targets, row);
+
+        sb.ToString().Should().Be("'\\x4142'::bytea");
+    }
+
+    [Fact]
+    public void BuildInsertStatement_PayloadsAcrossRows_NumberTheirParametersInStatementOrder()
+    {
+        var targets = PostgreSqlWriter.BuildRowTargets([StoredColumn("payload", "bytea", ordinal: 1)]);
+        var batch = new[]
+        {
+            new[] { DataValue.FromPayload(ELogicalType.Binary, new StoredPayload([0x01, 0x02])) },
+            new[] { DataValue.FromPayload(ELogicalType.Binary, new StoredPayload([0x03, 0x04])) },
+        };
+        var parameters = new List<NpgsqlParameter>();
+
+        var sql = PostgreSqlWriter.BuildInsertStatement(
+            "\"public\".\"images\"", "\"payload\"", targets, batch, parameters);
+
+        sql.Should().Be("INSERT INTO \"public\".\"images\" (\"payload\") VALUES (@blob0), (@blob1);");
+        parameters.Select(p => p.ParameterName).Should().Equal("blob0", "blob1");
+    }
+
+    [Fact]
+    public void BuildInsertStatement_AValueOfAMegabyte_CostsTheStatementTextNothingButItsPlaceholder()
+    {
+        // The batch budget R7 measures is statement text. A payload's bytes travel as parameter data, so
+        // a megabyte-sized value cannot inflate the measured statement the way its hex rendering would
+        // have — which is what keeps a large-value batch from being split to pieces by the budget.
+        var payload = new byte[1024 * 1024];
+        var targets = PostgreSqlWriter.BuildRowTargets([StoredColumn("payload", "bytea", ordinal: 1)]);
+        var batch = new[]
+        {
+            new[] { DataValue.FromPayload(ELogicalType.Binary, new StoredPayload(payload)) },
+        };
+        var parameters = new List<NpgsqlParameter>();
+
+        var sql = PostgreSqlWriter.BuildInsertStatement(
+            "\"public\".\"images\"", "\"payload\"", targets, batch, parameters);
+
+        sql.Should().HaveLength("INSERT INTO \"public\".\"images\" (\"payload\") VALUES (@blob0);".Length);
+        sql.Should().NotContain("\\x", "the bytes never become hex inside the statement text");
+    }
+
+    /// <summary>
+    /// A binary value held outside the row file, as the interchange reader hands one over.
+    /// </summary>
+    private sealed class StoredPayload(byte[] bytes) : IBinaryPayload
+    {
+        public long Length => bytes.LongLength;
+
+        public Stream OpenRead() => new MemoryStream(bytes, writable: false);
+    }
 
     [Fact]
     public async Task WriteTableRowsAsync_CatalogRecordingNoWritableColumn_Refuses()

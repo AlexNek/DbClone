@@ -86,6 +86,12 @@ public sealed class RowBatch : IAsyncDisposable
 /// <summary>
 /// A single data value in the interchange model.
 /// </summary>
+/// <remarks>
+/// A value travels one of two ways. Text arrives in <see cref="Value"/> exactly as the source rendered it.
+/// A large binary value arrives in <see cref="Binary"/> instead, as bytes held outside the row file, so it
+/// never becomes one string and never has to be re-parsed as text on the far side. The two are mutually
+/// exclusive: a value that carries no payload is either null or the text in <see cref="Value"/>.
+/// </remarks>
 public sealed record DataValue
 {
     /// <summary>Gets the logical type.</summary>
@@ -97,9 +103,18 @@ public sealed record DataValue
     /// <summary>Gets whether this value is null.</summary>
     public bool IsNull { get; init; }
 
+    /// <summary>
+    /// Gets the out-of-band bytes, when the value was stored as a payload rather than as text.
+    /// </summary>
+    public IBinaryPayload? Binary { get; init; }
+
     /// <summary>Creates a null value.</summary>
     public static DataValue Null(ELogicalType type) => new() { LogicalType = type, IsNull = true };
 
     /// <summary>Creates a text value.</summary>
     public static DataValue FromText(ELogicalType type, string text) => new() { LogicalType = type, Value = text, IsNull = false };
+
+    /// <summary>Creates a value that carries its bytes out-of-band instead of as text.</summary>
+    public static DataValue FromPayload(ELogicalType type, IBinaryPayload payload) =>
+        new() { LogicalType = type, Binary = payload, IsNull = false };
 }

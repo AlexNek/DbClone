@@ -317,7 +317,9 @@ public sealed class SnapshotImporter
 
             // The stored row is positional text, so the columns travel with it: the writer needs them
             // to know which value answers which column, what type to read it as, and which columns the
-            // server computes for itself.
+            // server computes for itself. A Binary value stored out-of-band arrives here as a range
+            // payload, already validated by the format layer — the bytes are never rebuilt as text on the
+            // way to the target (design §5, §6.9).
             var rows = catalogReader.ReadRowsAsync(schemaName, table.Name, ct);
             var applied = await writer.WriteTableRowsAsync(tableRef, table.Columns, rows, ct);
             totalRows += applied;

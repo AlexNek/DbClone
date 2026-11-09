@@ -24,7 +24,9 @@ Both operations need a connection that names a **specific database**. A connecti
 3. In the folder browser, choose where catalogs live. The folder is created if it does not exist and becomes the starting point next time.
 4. DbClone writes the catalog into a subfolder named by the [subfolder pattern](#store-restore-options) and logs the full path.
 
-The store runs in the order the format defines: schemas, tables and columns, views, routines, sequences, extensions, the dependency edges between objects, row-level security content, the PostgreSQL-only objects, then the table rows. Rows stream from the server with a cursor, so a large table does not have to fit in memory. When the files are written, the catalog is re-read and checked against its own index before the operation reports success.
+The store runs in the order the format defines: schemas, tables and columns, views, routines, sequences, extensions, the dependency edges between objects, row-level security content, the PostgreSQL-only objects, then the table rows. Rows stream from the server with a cursor and are written one at a time to disk, so a large table does not have to fit in memory. The `ChunkBytes` and `RowsPerChunk` settings decide where a table's rows are split into chunk files — they are not a limit on how much is held while the table is written.
+
+Binary values (`bytea` columns) are always stored in individual files under the table's `blobs/` directory, regardless of size. The CSV row contains only a reference (`@blob:<path>:0:<length>`), never a hex payload. Each non-NULL value gets one file named from the CSV chunk, encoded column name, row index and detected format; NULL values create no file. The detected format (JPEG, PNG, PDF, etc.) is derived from the bytes themselves and recorded in the file name, never from a `content_type` column. This makes every value directly addressable and avoids a shared container or binary data in CSV. When the files are written, the catalog is re-read and checked against its own index before the operation reports success.
 
 | Result you see | Meaning |
 |----------------|---------|
@@ -53,7 +55,13 @@ The store runs in the order the format defines: schemas, tables and columns, vie
 │   └── security.json      row-level security policies (only when the source had any)
 ├── native/                objects only PostgreSQL understands, as their original SQL
 │   └── postgresql.json
-└── data/<table id>/       table.json (column list, row count) + chunk-000000.ndjson …
+└── data/<schema>/<table>/  table.json (column list, row count, bounded maps) + checksums.sha256
+    ├── data.00001.csv       UTF-8 CSV with a complete header and streaming rows
+    ├── data.00002.csv       additional chunks when the table exceeds limits
+    └── blobs/                one file per non-NULL binary value
+        ├── data.00001.image_data.000000.png   row 0's detected PNG
+        ├── data.00001.image_data.000001.jpg   row 1's detected JPEG
+        └── data.00001.image_data.000002.bin   an unrecognized binary value
 ```
 
 Restore checks every file against the checksums in `manifest.json` before it touches the database, so a partially copied or edited folder is caught at that point rather than applied broken. Treat the folder the way you would treat a database dump: it holds your data and your schema as plain text.
@@ -106,17 +114,17 @@ The preserved PostgreSQL-only statements are applied only when the target report
 | **Include table data** | Off stores the schema only, and restoring such a catalog writes the structure and no rows. On stores the rows and the restore writes them back |
 | **Pack catalog after store (.rdbx.zip)** | No archive is produced today — the option is remembered but has no effect |
 
-These values live in `settings.json` under `StoreRestore` and have no entry in the popup:
+These values live in `settings.json` under `StoreRestore`:
 
-| Setting | Default | Effect today |
-|---------|---------|--------------|
-| `ChunkBytes` | 8388608 | Not applied — chunk size is fixed in the catalog writer |
-| `RowsPerChunk` | 50000 | Not applied — rows per chunk is fixed in the catalog writer |
-| `SnapshotConsistency` | `consistent` | Not passed to the product; the row read always uses a consistent snapshot, while the schema read runs on its own short transaction |
-| `UnsupportedFeaturePolicy` | `fail` | Not passed to the product; an unsupported object always stops the restore |
+| Setting | Default | Effect |
+|---------|---------|--------|
+| `ChunkBytes` | 8388608 (8 MiB) | Maximum byte size per chunk file; the catalog writer honours this limit when splitting table rows across chunk files |
+| `RowsPerChunk` | 50000 | Maximum row count per chunk file; the 1 000 000-row Excel ceiling is enforced on top of this setting |
+| `SnapshotConsistency` | `consistent` | The row read uses a consistent snapshot across all tables when set to `consistent`, or read-committed isolation when set to `readCommitted` |
+| `UnsupportedFeaturePolicy` | `fail` | When `fail`, an unsupported object stops the restore before any write; when `warn`, the restore skips it and records an issue |
 
-!!! warning "Table selection does not narrow a catalog"
-    A [table selection](connections/table-selection.md) is reported in the log when Store starts, but it is not applied: the catalog captures the whole database. Unchecking tables changes Copy and Compare, not Store.
+!!! note "Table selection narrows a catalog"
+    A [table selection](connections/table-selection.md) is applied end-to-end: the catalog captures only the tables the selection includes, and the log names the excluded tables when Store starts.
 
 ## See also
 

@@ -62,4 +62,5 @@ public sealed class StoreRestoreOptions
 
     /// <summary>Whether to pack the catalog into a .rdbx.zip after a successful store.</summary>
     public bool PackAfterStore { get; set; } = true;
+
 }

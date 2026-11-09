@@ -30,8 +30,11 @@ public sealed class NativeObjectReader
             return [];
         }
 
-        var json = await File.ReadAllTextAsync(filePath, System.Text.Encoding.UTF8, ct);
-        var objects = JsonSerializer.Deserialize<List<NativeObjectDefinition>>(json, CatalogJson.ReaderOptions);
+        // Read from the file's stream, so the document's text is never assembled into one string (R4). A
+        // stream that begins with the older writer's byte-order mark is stepped past by JsonFile.
+        await using var stream = await JsonFile.OpenReadAsync(filePath, ct);
+        var objects = await JsonSerializer.DeserializeAsync<List<NativeObjectDefinition>>(
+            stream, CatalogJson.ReaderOptions, ct);
         return objects ?? [];
     }
 

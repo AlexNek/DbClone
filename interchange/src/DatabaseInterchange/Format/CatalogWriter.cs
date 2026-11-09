@@ -22,6 +22,7 @@ public sealed class CatalogWriter : IAsyncDisposable
     private readonly string _sourceDialect;
     private readonly List<ManifestFileEntry> _fileEntries = [];
     private readonly List<string> _sections = [];
+    private readonly List<CatalogTableFolder> _tableFolders = [];
     private int _totalTables;
     private int _totalColumns;
     private long _totalRows;
@@ -91,12 +92,17 @@ public sealed class CatalogWriter : IAsyncDisposable
     }
 
     /// <summary>
-    /// Writes a schema section to the catalog.
+    /// Writes a schema section to the catalog using streaming JSON serialization.
     /// </summary>
     /// <typeparam name="T">The type of objects in the section.</typeparam>
     /// <param name="sectionName">The section name (e.g., "schemas", "tables").</param>
     /// <param name="objects">The objects to write.</param>
     /// <param name="ct">Cancellation token.</param>
+    /// <remarks>
+    /// Each object is serialized directly to the file stream via <see cref="System.Text.Json.Utf8JsonWriter"/>,
+    /// avoiding the intermediate string allocation that <c>JsonSerializer.Serialize(graph)</c> → <c>WriteAllTextAsync</c>
+    /// would require. This satisfies R4: sections stream, one object at a time.
+    /// </remarks>
     public async Task WriteSectionAsync<T>(
         string sectionName,
         IReadOnlyList<T> objects,
@@ -105,15 +111,51 @@ public sealed class CatalogWriter : IAsyncDisposable
         ObjectDisposedException.ThrowIf(_disposed, this);
         ArgumentException.ThrowIfNullOrWhiteSpace(sectionName);
 
-        var section = new SectionFile<T>
-        {
-            Section = sectionName,
-            FormatVersion = InterchangeFormat.Version,
-            Count = objects.Count,
-            Objects = objects.OrderBy(o => o.Ref.Value).ToList(),
-        };
+        var fileName = $"{sectionName}.json";
+        var filePath = Path.Combine(_catalogPath, InterchangeFormat.SchemaDirectory, fileName);
+        var relativePath = $"{InterchangeFormat.SchemaDirectory}/{fileName}";
 
-        await WriteSectionFileAsync(sectionName, section, ct);
+        // Stream the section directly to disk: header, sorted objects, footer.
+        var sorted = objects.OrderBy(o => o.Ref.Value).ToList();
+        await using (var stream = new FileStream(filePath, FileMode.Create, FileAccess.Write, FileShare.None))
+        {
+            await using var writer = new System.Text.Json.Utf8JsonWriter(stream, new JsonWriterOptions
+            {
+                Indented = true,
+                Encoder = CatalogJson.WriterOptions.Encoder,
+            });
+
+            writer.WriteStartObject();
+            writer.WriteString("section", sectionName);
+            writer.WriteNumber("formatVersion", InterchangeFormat.Version);
+            writer.WriteNumber("count", sorted.Count);
+
+            writer.WritePropertyName("objects");
+            writer.WriteStartArray();
+            foreach (var obj in sorted)
+            {
+                JsonSerializer.Serialize(writer, obj, CatalogJson.WriterOptions);
+            }
+            writer.WriteEndArray();
+
+            writer.WriteEndObject();
+            await writer.FlushAsync(ct);
+        }
+
+        var fileInfo = new FileInfo(filePath);
+        var hash = await ComputeSha256Async(filePath, ct);
+
+        _fileEntries.Add(new ManifestFileEntry
+        {
+            Path = relativePath,
+            Bytes = fileInfo.Length,
+            Sha256 = hash,
+        });
+
+        if (!_sections.Contains(sectionName))
+        {
+            _sections.Add(sectionName);
+        }
 
         if (sectionName == "tables")
         {
@@ -139,6 +181,8 @@ public sealed class CatalogWriter : IAsyncDisposable
     /// back with no new reader API.
     /// Order is the writer's choice, so the triple is sorted — a catalog whose edges came out in
     /// source order would not be byte-stable across two runs of the same database state.
+    /// <para>Streaming: each relationship is serialized directly to the file stream via
+    /// <see cref="System.Text.Json.Utf8JsonWriter"/>, avoiding the intermediate string allocation.</para>
     /// </remarks>
     public async Task<int> WriteRelationshipsAsync(
         IReadOnlyList<Relationship> relationships,
@@ -155,15 +199,51 @@ public sealed class CatalogWriter : IAsyncDisposable
             .ThenBy(r => r.DependentRef.Value)
             .ToList();
 
-        var section = new SectionFile<Relationship>
-        {
-            Section = sectionName,
-            FormatVersion = InterchangeFormat.Version,
-            Count = ordered.Count,
-            Objects = ordered,
-        };
+        var fileName = $"{sectionName}.json";
+        var filePath = Path.Combine(_catalogPath, InterchangeFormat.SchemaDirectory, fileName);
+        var relativePath = $"{InterchangeFormat.SchemaDirectory}/{fileName}";
 
-        await WriteSectionFileAsync(sectionName, section, ct);
+        // Stream the section directly to disk.
+        await using (var stream = new FileStream(filePath, FileMode.Create, FileAccess.Write, FileShare.None))
+        {
+            await using var writer = new System.Text.Json.Utf8JsonWriter(stream, new JsonWriterOptions
+            {
+                Indented = true,
+                Encoder = CatalogJson.WriterOptions.Encoder,
+            });
+
+            writer.WriteStartObject();
+            writer.WriteString("section", sectionName);
+            writer.WriteNumber("formatVersion", InterchangeFormat.Version);
+            writer.WriteNumber("count", ordered.Count);
+
+            writer.WritePropertyName("objects");
+            writer.WriteStartArray();
+            foreach (var rel in ordered)
+            {
+                JsonSerializer.Serialize(writer, rel, CatalogJson.WriterOptions);
+            }
+            writer.WriteEndArray();
+
+            writer.WriteEndObject();
+            await writer.FlushAsync(ct);
+        }
+
+        var fileInfo = new FileInfo(filePath);
+        var hash = await ComputeSha256Async(filePath, ct);
+
+        _fileEntries.Add(new ManifestFileEntry
+        {
+            Path = relativePath,
+            Bytes = fileInfo.Length,
+            Sha256 = hash,
+        });
+
+        if (!_sections.Contains(sectionName))
+        {
+            _sections.Add(sectionName);
+        }
+
         return ordered.Count;
     }
 
@@ -181,6 +261,8 @@ public sealed class CatalogWriter : IAsyncDisposable
     /// Skipping an empty section is deliberate. Roles and grants are not part of the metadata this
     /// block can read, so a file of three empty lists would state that the source has no roles — a
     /// claim nobody checked. An absent section says the true thing: nothing was captured.
+    /// <para>Streaming: the security object is serialized directly to the file stream via
+    /// <see cref="System.Text.Json.Utf8JsonWriter"/>, avoiding the intermediate string allocation.</para>
     /// </remarks>
     public async Task<bool> WriteSecurityAsync(
         SecuritySection? security,
@@ -198,32 +280,29 @@ public sealed class CatalogWriter : IAsyncDisposable
 
         const string sectionName = "security";
 
-        var section = new SecuritySectionFile
-        {
-            Section = sectionName,
-            FormatVersion = InterchangeFormat.Version,
-            Object = security,
-        };
-
-        await WriteSectionFileAsync(sectionName, section, ct);
-        return true;
-    }
-
-    /// <summary>
-    /// Writes one section file under <c>schema/</c>, records its size and hash in the manifest, and
-    /// declares the section in the index.
-    /// </summary>
-    private async Task WriteSectionFileAsync(
-        string sectionName,
-        object section,
-        CancellationToken ct)
-    {
         var fileName = $"{sectionName}.json";
         var filePath = Path.Combine(_catalogPath, InterchangeFormat.SchemaDirectory, fileName);
         var relativePath = $"{InterchangeFormat.SchemaDirectory}/{fileName}";
 
-        var json = JsonSerializer.Serialize(section, CatalogJson.WriterOptions);
-        await File.WriteAllTextAsync(filePath, json, Encoding.UTF8, ct);
+        // Stream the section directly to disk.
+        await using (var stream = new FileStream(filePath, FileMode.Create, FileAccess.Write, FileShare.None))
+        {
+            await using var writer = new System.Text.Json.Utf8JsonWriter(stream, new JsonWriterOptions
+            {
+                Indented = true,
+                Encoder = CatalogJson.WriterOptions.Encoder,
+            });
+
+            writer.WriteStartObject();
+            writer.WriteString("section", sectionName);
+            writer.WriteNumber("formatVersion", InterchangeFormat.Version);
+
+            writer.WritePropertyName("object");
+            JsonSerializer.Serialize(writer, security, CatalogJson.WriterOptions);
+
+            writer.WriteEndObject();
+            await writer.FlushAsync(ct);
+        }
 
         var fileInfo = new FileInfo(filePath);
         var hash = await ComputeSha256Async(filePath, ct);
@@ -239,6 +318,8 @@ public sealed class CatalogWriter : IAsyncDisposable
         {
             _sections.Add(sectionName);
         }
+
+        return true;
     }
 
     /// <summary>
@@ -296,11 +377,14 @@ public sealed class CatalogWriter : IAsyncDisposable
         ArgumentNullException.ThrowIfNull(model);
 
         var serializer = new DirectCatalogSerializer();
-        var json = serializer.Serialize(model);
         var filePath = Path.Combine(_catalogPath, InterchangeFormat.SchemaDirectory, "model.json");
         var relativePath = $"{InterchangeFormat.SchemaDirectory}/model.json";
 
-        await File.WriteAllTextAsync(filePath, json, Encoding.UTF8, ct);
+        await using (var stream = new FileStream(filePath, FileMode.Create, FileAccess.Write, FileShare.None))
+        {
+            await serializer.SerializeAsync(stream, model, ct);
+            await stream.FlushAsync(ct);
+        }
 
         var fileInfo = new FileInfo(filePath);
         var hash = await ComputeSha256Async(filePath, ct);
@@ -328,118 +412,194 @@ public sealed class CatalogWriter : IAsyncDisposable
     /// <param name="table">The table definition.</param>
     /// <param name="schemaName">The name of the schema owning the table, as captured.</param>
     /// <param name="rows">The rows to write.</param>
+    /// <param name="options">Export options that control chunk size and row limits. When null, built-in defaults apply.</param>
     /// <param name="ct">Cancellation token.</param>
+    /// <param name="resolvedTableName">
+    /// The pre-resolved table folder name (after collision detection via
+    /// <see cref="NameEncoder.ResolveCollisions"/>). When null, the name is derived from
+    /// <see cref="NameEncoder.EncodeSegment"/> alone — which is the collision-prone path.
+    /// </param>
     /// <returns>The number of rows written.</returns>
+    /// <remarks>
+    /// <para>Write-through: each row is serialized once and written immediately via
+    /// <see cref="CsvRowWriter"/>. No chunk accumulation in memory.</para>
+    /// <para>Collision detection: when <paramref name="resolvedTableName"/> is provided, the
+    /// writer verifies that the target directory does not already exist for a different table.
+    /// A collision is a fatal export error — it is better to fail than to silently overwrite.
+    /// </para>
+    /// <para>The folder the rows land in is recorded in <c>catalog.json</c> with the table's own
+    /// name beside it. A resolved name cannot be re-derived by a reader: the discriminator tail comes
+    /// from the sibling list this export saw, so the answer is written down once here rather than
+    /// guessed at restore time.</para>
+    /// </remarks>
     public async Task<long> WriteTableAsync(
         CanonicalModel.Interchange.TableDefinition table,
         string schemaName,
         IAsyncEnumerable<DataValue[]> rows,
-        CancellationToken ct = default)
+        ExportOptions? options = null,
+        CancellationToken ct = default,
+        string? resolvedTableName = null)
     {
         ObjectDisposedException.ThrowIf(_disposed, this);
         ArgumentNullException.ThrowIfNull(table);
 
         var encodedSchema = NameEncoder.EncodeSegment(table.Ref.SchemaName() ?? schemaName);
-        var encodedTable = NameEncoder.EncodeSegment(table.Name);
+        var encodedTable = resolvedTableName ?? NameEncoder.EncodeSegment(table.Name);
         var tableDir = Path.Combine(_catalogPath, InterchangeFormat.DataDirectory, encodedSchema, encodedTable);
+
+        // Collision detection: when the caller resolved names across siblings, a directory that
+        // already exists means two different tables mapped to one folder — the §2.4 data loss.
+        // This is fatal: we refuse to overwrite rather than silently losing a table.
+        if (resolvedTableName is not null && Directory.Exists(tableDir))
+        {
+            throw new InvalidOperationException(
+                $"Table folder collision detected: schema={schemaName}, resolvedName={encodedTable}, " +
+                $"table={table.Name}, path={tableDir}. Another table already claimed this folder.");
+        }
+
         Directory.CreateDirectory(tableDir);
 
-        var chunkIndex = 0;
         var rowCount = 0L;
-        var chunkRows = new List<DataValue[]>();
-        var chunkList = new List<TableChunkInfo>();
-        var chunkBytes = 0;
-        const int maxChunkBytes = 32 * 1024 * 1024; // 32 MiB
-        const int maxRowsPerChunk = 100_000;
+        var columnNames = table.Columns.Select(c => c.Name).ToList();
 
-        await foreach (var row in rows.WithCancellation(ct))
+        // Container families are named by the column's resolved segment, the same rule a table folder
+        // gets: two columns differing only by case produce two segments and so two distinct families,
+        // never two streams onto one physical file (design §3).
+        IReadOnlyList<string> columnSegments = columnNames.Count == 0
+            ? []
+            : ResolveColumnSegments(table, schemaName, columnNames);
+
+        await using (var rowWriter = new CsvRowWriter(tableDir, options, columnNames, columnSegments))
         {
-            chunkRows.Add(row);
-            rowCount++;
-
-            var rowJson = JsonSerializer.Serialize(row.Select(r => r.IsNull ? null : r.Value), CatalogJson.RowWriterOptions);
-            chunkBytes += Encoding.UTF8.GetByteCount(rowJson) + 1; // +1 for newline
-
-            if (chunkBytes >= maxChunkBytes || chunkRows.Count >= maxRowsPerChunk)
+            await foreach (var row in rows.WithCancellation(ct))
             {
-                var chunkInfo = await FlushChunkAsync(tableDir, chunkIndex, chunkRows, ct);
-                chunkList.Add(chunkInfo);
-                chunkIndex++;
-                chunkRows.Clear();
-                chunkBytes = 0;
+                await rowWriter.WriteRowAsync(row, ct);
+                rowCount++;
             }
-        }
 
-        // Flush remaining rows
-        if (chunkRows.Count > 0)
-        {
-            var chunkInfo = await FlushChunkAsync(tableDir, chunkIndex, chunkRows, ct);
-            chunkList.Add(chunkInfo);
-            chunkIndex++;
-        }
+            await rowWriter.FinishAsync(ct);
 
-        _totalRows += rowCount;
-        _totalChunks += chunkIndex;
+            _totalRows += rowCount;
+            _totalChunks += rowWriter.Chunks.Count;
 
-        // Write table.json
-        var tableManifest = new TableManifest
-        {
-            Id = table.Ref.Value,
-            Schema = schemaName,
-            Name = table.Name,
-            Columns = table.Columns.Select(c => new TableManifestColumn
+            // Blob containers are listed in the table folder's own checksums.sha256 and nowhere else:
+            // adding them to manifest.json would put an array that grows with the data back into the
+            // file every reader loads whole (design §8).
+
+            // Write checksums.sha256 — the authoritative per-file list for this table folder.
+            // Phase 4B: replaces the inline chunks[] array in table.json.
+            await WriteChecksumsFileAsync(tableDir, rowWriter, encodedSchema, encodedTable, ct);
+
+            // Write table.json — scalars and bounded maps only, no chunks[] array
+            var tableManifest = new TableManifest
             {
-                Name = c.Name,
-                LogicalType = c.LogicalType.ToString(),
-            }).ToList(),
-            RowCount = rowCount,
-            RowOrder = table.RowOrder.ToString(),
-            Chunks = chunkList,
-        };
+                Id = table.Ref.Value,
+                Schema = schemaName,
+                Name = table.Name,
+                Columns = table.Columns.Select(c => new TableManifestColumn
+                {
+                    Name = c.Name,
+                    LogicalType = c.LogicalType.ToString(),
+                }).ToList(),
+                RowCount = rowCount,
+                RowOrder = table.RowOrder.ToString(),
+                ChunkCount = rowWriter.Chunks.Count,
+                ChunkBytes = options?.ChunkBytes ?? 32 * 1024 * 1024,
+                MaxRowsPerChunk = options?.MaxRowsPerChunk ?? 100_000,
+                BlobFormatCounts = rowWriter.BlobFormatCounts,
+            };
 
-        var tableJson = JsonSerializer.Serialize(tableManifest, CatalogJson.WriterOptions);
-        var tableManifestPath = Path.Combine(tableDir, "table.json");
-        await File.WriteAllTextAsync(tableManifestPath, tableJson, Encoding.UTF8, ct);
+            var tableManifestPath = Path.Combine(tableDir, "table.json");
+            await WriteJsonFileAsync(tableManifestPath, tableManifest, ct);
 
-        var fileInfo = new FileInfo(tableManifestPath);
-        var hash = await ComputeSha256Async(tableManifestPath, ct);
-        _fileEntries.Add(new ManifestFileEntry
+            var fileInfo = new FileInfo(tableManifestPath);
+            var hash = await ComputeSha256Async(tableManifestPath, ct);
+            _fileEntries.Add(new ManifestFileEntry
+            {
+                Path = $"{InterchangeFormat.DataDirectory}/{encodedSchema}/{encodedTable}/table.json",
+                Bytes = fileInfo.Length,
+                Sha256 = hash,
+            });
+        }
+
+        _tableFolders.Add(new CatalogTableFolder
         {
-            Path = $"{InterchangeFormat.DataDirectory}/{encodedSchema}/{encodedTable}/table.json",
-            Bytes = fileInfo.Length,
-            Sha256 = hash,
+            Schema = schemaName,
+            Table = table.Name,
+            Folder = $"{encodedSchema}/{encodedTable}",
         });
 
         return rowCount;
     }
 
-    private static async Task<TableChunkInfo> FlushChunkAsync(
-        string tableDir,
-        int index,
-        List<DataValue[]> rows,
-        CancellationToken ct)
+    /// <summary>
+    /// Resolves each column's container path segment over the table's own sibling list.
+    /// </summary>
+    private static IReadOnlyList<string> ResolveColumnSegments(
+        CanonicalModel.Interchange.TableDefinition table,
+        string schemaName,
+        IReadOnlyList<string> columnNames)
     {
-        var chunkPath = Path.Combine(tableDir, $"chunk-{index:D6}.ndjson");
-        var sb = new StringBuilder();
-
-        foreach (var row in rows)
+        var refByName = new Dictionary<string, ObjectRef>(columnNames.Count, StringComparer.Ordinal);
+        foreach (var column in table.Columns)
         {
-            var json = JsonSerializer.Serialize(row.Select(r => r.IsNull ? null : r.Value), CatalogJson.RowWriterOptions);
-            sb.AppendLine(json);
+            // A duplicated name is the same column seen twice; the first reference answers for it.
+            refByName.TryAdd(column.Name, column.Ref);
         }
 
-        await File.WriteAllTextAsync(chunkPath, sb.ToString(), Encoding.UTF8, ct);
+        var resolved = NameEncoder.ResolveCollisions(
+            columnNames,
+            name => refByName.TryGetValue(name, out var columnRef)
+                ? columnRef
+                : ObjectRef.Column(schemaName, table.Name, name));
 
-        var fileInfo = new FileInfo(chunkPath);
-        var hash = await ComputeSha256Async(chunkPath, ct);
+        return columnNames.Select(name => resolved[name]).ToList();
+    }
 
-        return new TableChunkInfo
+    /// <summary>
+    /// Writes the <c>checksums.sha256</c> file for a table folder. The file contains one line
+    /// per data file (row chunks and blob containers) with its relative path and SHA-256 hash.
+    /// </summary>
+    /// <remarks>
+    /// Phase 4B: This file is the authoritative per-file list for restore. The reader discovers
+    /// chunk files by parsing this file rather than reading a <c>chunks[]</c> array from <c>table.json</c>.
+    /// </remarks>
+    private async Task WriteChecksumsFileAsync(
+        string tableDir,
+        CsvRowWriter rowWriter,
+        string encodedSchema,
+        string encodedTable,
+        CancellationToken ct)
+    {
+        var lines = new List<string>();
+
+        // Add chunk files
+        foreach (var chunk in rowWriter.Chunks)
         {
-            File = $"chunk-{index:D6}.ndjson",
+            lines.Add($"{chunk.File}\t{chunk.Sha256}");
+        }
+
+        // Add blob container files
+        foreach (var blobContainer in rowWriter.BlobContainers)
+        {
+            lines.Add($"blobs/{blobContainer.FileName}\t{blobContainer.Sha256}");
+        }
+
+        // Sort by path for deterministic output
+        lines.Sort(StringComparer.Ordinal);
+
+        var checksumsPath = Path.Combine(tableDir, "checksums.sha256");
+        await File.WriteAllLinesAsync(checksumsPath, lines, Encoding.UTF8, ct);
+
+        // Add checksums file to the manifest
+        var fileInfo = new FileInfo(checksumsPath);
+        var hash = await ComputeSha256Async(checksumsPath, ct);
+        _fileEntries.Add(new ManifestFileEntry
+        {
+            Path = $"{InterchangeFormat.DataDirectory}/{encodedSchema}/{encodedTable}/checksums.sha256",
             Bytes = fileInfo.Length,
-            Rows = rows.Count,
             Sha256 = hash,
-        };
+        });
     }
 
     /// <summary>
@@ -456,11 +616,11 @@ public sealed class CatalogWriter : IAsyncDisposable
             FormatVersion = InterchangeFormat.Version,
             Sections = _sections,
             TableCount = _totalTables,
+            TableFolders = [.. _tableFolders],
         };
 
-        var catalogJson = JsonSerializer.Serialize(catalog, CatalogJson.WriterOptions);
         var catalogPath = Path.Combine(_catalogPath, InterchangeFormat.CatalogFileName);
-        await File.WriteAllTextAsync(catalogPath, catalogJson, Encoding.UTF8, ct);
+        await WriteJsonFileAsync(catalogPath, catalog, ct);
 
         var catalogFileInfo = new FileInfo(catalogPath);
         var catalogHash = await ComputeSha256Async(catalogPath, ct);
@@ -478,11 +638,9 @@ public sealed class CatalogWriter : IAsyncDisposable
             Producer = _producer,
         };
 
-        var exportJson = JsonSerializer.Serialize(export, CatalogJson.WriterOptions);
-        await File.WriteAllTextAsync(
+        await WriteJsonFileAsync(
             Path.Combine(_catalogPath, InterchangeFormat.ExportFileName),
-            exportJson,
-            Encoding.UTF8,
+            export,
             ct);
 
         // Write manifest.json last
@@ -495,6 +653,7 @@ public sealed class CatalogWriter : IAsyncDisposable
             ModelFormat = _modelFormat,
             SourceDialect = _sourceDialect,
             Sections = _sections,
+            Data = new ManifestData { Encoding = "csv" },
             Counts = new ManifestCounts
             {
                 Tables = _totalTables,
@@ -505,12 +664,26 @@ public sealed class CatalogWriter : IAsyncDisposable
             Files = _fileEntries.OrderBy(f => f.Path, StringComparer.Ordinal).ToList(),
         };
 
-        var manifestJson = JsonSerializer.Serialize(manifest, CatalogJson.WriterOptions);
-        await File.WriteAllTextAsync(
+        await WriteJsonFileAsync(
             Path.Combine(_catalogPath, InterchangeFormat.ManifestFileName),
-            manifestJson,
-            Encoding.UTF8,
+            manifest,
             ct);
+    }
+
+    /// <summary>
+    /// Serializes one catalog document straight to its file stream.
+    /// </summary>
+    /// <remarks>
+    /// Part A/R4 forbids a stored document from ever being one <see cref="string"/>: writing through
+    /// <c>JsonSerializer.SerializeAsync</c> over the file's stream emits the document into that stream's own
+    /// buffer instead of building the text in memory and copying it over, which is what the
+    /// <c>Serialize</c> → <c>WriteAllTextAsync</c> chain did.
+    /// </remarks>
+    private static async Task WriteJsonFileAsync<T>(string path, T document, CancellationToken ct)
+    {
+        await using var stream = new FileStream(path, FileMode.Create, FileAccess.Write, FileShare.None);
+        await JsonSerializer.SerializeAsync(stream, document, CatalogJson.WriterOptions, ct);
+        await stream.FlushAsync(ct);
     }
 
     /// <inheritdoc />
@@ -526,17 +699,6 @@ public sealed class CatalogWriter : IAsyncDisposable
         var hash = await SHA256.HashDataAsync(stream, ct);
         return Convert.ToHexStringLower(hash);
     }
-}
-
-/// <summary>
-/// A section file in the catalog.
-/// </summary>
-internal sealed record SectionFile<T>
-{
-    public string Section { get; init; } = string.Empty;
-    public int FormatVersion { get; init; }
-    public int Count { get; init; }
-    public IReadOnlyList<T> Objects { get; init; } = [];
 }
 
 /// <summary>
@@ -557,6 +719,14 @@ public sealed record CatalogIndex
     public int FormatVersion { get; init; }
     public IReadOnlyList<string> Sections { get; init; } = [];
     public int TableCount { get; init; }
+
+    /// <summary>
+    /// Gets the data folder each table's rows were written to, keyed by the schema and table names the
+    /// catalog itself states. Written once at export, consulted at restore: a folder name produced by
+    /// collision resolution is not re-derivable from a name, so it is recorded rather than recomputed.
+    /// Empty in a catalog written before this rule, whose folders the reader derives as it always did.
+    /// </summary>
+    public IReadOnlyList<CatalogTableFolder> TableFolders { get; init; } = [];
 }
 
 /// <summary>
@@ -571,6 +741,11 @@ internal sealed record ExportMetadata
 /// <summary>
 /// Table manifest (table.json) structure.
 /// </summary>
+/// <remarks>
+/// <para>Phase 4B: The manifest no longer carries a per-chunk array (which would grow with the database).
+/// Instead, it holds scalars and bounded maps only. The authoritative per-file list lives in
+/// <c>checksums.sha256</c> within the table folder.</para>
+/// </remarks>
 internal sealed record TableManifest
 {
     public string Id { get; init; } = string.Empty;
@@ -579,7 +754,23 @@ internal sealed record TableManifest
     public IReadOnlyList<TableManifestColumn> Columns { get; init; } = [];
     public long RowCount { get; init; }
     public string RowOrder { get; init; } = string.Empty;
-    public IReadOnlyList<TableChunkInfo> Chunks { get; init; } = [];
+
+    /// <summary>Gets the number of chunk files (discovered via checksums.sha256 at restore).</summary>
+    public int ChunkCount { get; init; }
+
+    /// <summary>Gets the chunk size setting that produced this layout.</summary>
+    public int ChunkBytes { get; init; }
+
+    /// <summary>Gets the maximum rows per chunk setting that produced this layout.</summary>
+    public int MaxRowsPerChunk { get; init; }
+
+    /// <summary>
+    /// Gets the per-Binary-column format count maps. Keyed by column name, each value maps
+    /// format suffix (e.g. "jpg", "png", "bin") to count of values stored in containers.
+    /// Bounded by the naming table size, not by the row count.
+    /// </summary>
+    public IReadOnlyDictionary<string, IReadOnlyDictionary<string, int>> BlobFormatCounts { get; init; } =
+        new Dictionary<string, IReadOnlyDictionary<string, int>>();
 }
 
 /// <summary>

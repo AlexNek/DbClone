@@ -72,7 +72,7 @@ public sealed record ManifestCounts
 public sealed record ManifestData
 {
     /// <summary>Gets or sets the row encoding format.</summary>
-    public string Encoding { get; init; } = "ndjson";
+    public string Encoding { get; init; } = "csv";
 
     /// <summary>Gets or sets the default chunk size in bytes.</summary>
     public int DefaultChunkBytes { get; init; } = 32 * 1024 * 1024;

@@ -163,11 +163,53 @@ public sealed class CatalogWriterTests : IDisposable
         var dataDir = Path.Combine(_catalogPath, InterchangeFormat.DataDirectory, "public", "orders");
         Directory.Exists(dataDir).Should().BeTrue();
         File.Exists(Path.Combine(dataDir, "table.json")).Should().BeTrue();
-        File.Exists(Path.Combine(dataDir, "chunk-000000.ndjson")).Should().BeTrue();
+        var rowFile = Path.Combine(dataDir, "data.00001.csv");
+        File.Exists(rowFile).Should().BeTrue();
+        File.ReadAllBytes(rowFile).Take(3).Should().Equal(0xEF, 0xBB, 0xBF);
+        File.ReadAllText(rowFile).Should().StartWith("id\n");
 
         await using var reader = await CatalogReader.OpenAsync(_catalogPath);
+        reader.Manifest.MinimumReader.Should().Be(InterchangeFormat.MinimumReader);
+        reader.Manifest.Data.Encoding.Should().Be("csv");
         reader.Manifest.Counts.Rows.Should().Be(3);
         reader.Manifest.Counts.Chunks.Should().Be(1);
+    }
+
+    [Fact]
+    public async Task Reader_and_verifier_refuse_legacy_ndjson_catalogs()
+    {
+        await using (var writer = await CatalogWriter.CreateAsync(
+                         _catalogPath, producer: "DbClone-test", sourceDialect: "postgresql"))
+        {
+            await writer.CompleteAsync();
+        }
+
+        var manifestPath = Path.Combine(_catalogPath, InterchangeFormat.ManifestFileName);
+        var manifest = System.Text.Json.Nodes.JsonNode.Parse(await File.ReadAllTextAsync(manifestPath))!
+            .AsObject();
+        manifest["formatVersion"] = 1;
+        manifest["minimumReader"] = 1;
+        manifest["data"]!["encoding"] = "ndjson";
+        await File.WriteAllTextAsync(
+            manifestPath,
+            manifest.ToJsonString(new System.Text.Json.JsonSerializerOptions { WriteIndented = true }));
+
+        var open = () => CatalogReader.OpenAsync(_catalogPath);
+        await open.Should().ThrowAsync<InvalidOperationException>()
+            .WithMessage("*version 1*");
+
+        var verification = await new CatalogVerifier().VerifyAsync(_catalogPath);
+        verification.IsValid.Should().BeFalse();
+        verification.Issues.Should().Contain(issue => issue.Contains("legacy NDJSON"));
+
+        manifest["formatVersion"] = InterchangeFormat.Version;
+        manifest["minimumReader"] = InterchangeFormat.MinimumReader;
+        await File.WriteAllTextAsync(
+            manifestPath,
+            manifest.ToJsonString(new System.Text.Json.JsonSerializerOptions { WriteIndented = true }));
+
+        await open.Should().ThrowAsync<InvalidOperationException>()
+            .WithMessage("*legacy NDJSON*");
     }
 
     [Fact]
@@ -210,6 +252,99 @@ public sealed class CatalogWriterTests : IDisposable
         first.Value.Should().StartWith("table:");
     }
 
+    [Fact]
+    public async Task WriteTableAsync_respects_MaxRowsPerChunk_from_options()
+    {
+        // Arrange — 25 rows with a 10-row limit should produce 3 chunk files.
+        var schemaRef = ObjectRef.Schema("public");
+        var tableRef = ObjectRef.Table("public", "numbers");
+        var table = new TableDefinition
+        {
+            Ref = tableRef,
+            Name = "numbers",
+            SchemaRef = schemaRef,
+            Columns =
+            [
+                new ColumnDefinition
+                {
+                    Ref = ObjectRef.Column("public", "numbers", "numbers_value"),
+                    Name = "value",
+                    TableRef = tableRef,
+                    Ordinal = 0,
+                    LogicalType = ELogicalType.Integer32,
+                },
+            ],
+        };
+
+        var options = new ExportOptions { MaxRowsPerChunk = 10 };
+
+        // Act
+        long written;
+        await using (var writer = await CatalogWriter.CreateAsync(
+                         _catalogPath, producer: "DbClone-test", sourceDialect: "postgresql"))
+        {
+            await writer.WriteSectionAsync("tables", [table]);
+            written = await writer.WriteTableAsync(table, "public", TwentyFiveRows(), options);
+            await writer.CompleteAsync();
+        }
+
+        // Assert
+        written.Should().Be(25);
+        var dataDir = Path.Combine(_catalogPath, InterchangeFormat.DataDirectory, "public", "numbers");
+        var chunkFiles = Directory.GetFiles(dataDir, "data.*.csv");
+        chunkFiles.Should().HaveCount(3, "25 rows at 10 per chunk = ceil(25/10) = 3 chunks");
+    }
+
+    [Fact]
+    public async Task WriteTableAsync_with_default_options_uses_builtin_limits()
+    {
+        // Arrange — 3 rows with default options (100k limit) should produce 1 chunk file.
+        var schemaRef = ObjectRef.Schema("public");
+        var tableRef = ObjectRef.Table("public", "small");
+        var table = new TableDefinition
+        {
+            Ref = tableRef,
+            Name = "small",
+            SchemaRef = schemaRef,
+            Columns =
+            [
+                new ColumnDefinition
+                {
+                    Ref = ObjectRef.Column("public", "small", "small_id"),
+                    Name = "id",
+                    TableRef = tableRef,
+                    Ordinal = 0,
+                    LogicalType = ELogicalType.Decimal,
+                },
+            ],
+        };
+
+        // Act — no options passed (null default)
+        long written;
+        await using (var writer = await CatalogWriter.CreateAsync(
+                         _catalogPath, producer: "DbClone-test", sourceDialect: "postgresql"))
+        {
+            await writer.WriteSectionAsync("tables", [table]);
+            written = await writer.WriteTableAsync(table, "public", ThreeRows());
+            await writer.CompleteAsync();
+        }
+
+        // Assert
+        written.Should().Be(3);
+        var dataDir = Path.Combine(_catalogPath, InterchangeFormat.DataDirectory, "public", "small");
+        Directory.GetFiles(dataDir, "data.*.csv").Should().HaveCount(1);
+    }
+
+    private static async IAsyncEnumerable<DataValue[]> TwentyFiveRows()
+    {
+        for (var i = 1; i <= 25; i++)
+        {
+            yield return [DataValue.FromText(ELogicalType.Integer32, i.ToString())];
+        }
+
+        await Task.CompletedTask;
+    }
+
     private static async IAsyncEnumerable<DataValue[]> ThreeRows()
     {
         for (var i = 1; i <= 3; i++)
@@ -218,5 +353,263 @@ public sealed class CatalogWriterTests : IDisposable
         }
 
         await Task.CompletedTask;
+    }
+
+    [Fact]
+    public async Task WriteTableAsync_streaming_round_trips_through_CatalogReader()
+    {
+        // Arrange — rows with nulls, embedded newlines, and values that cross chunk boundaries.
+        var schemaRef = ObjectRef.Schema("public");
+        var tableRef = ObjectRef.Table("public", "mixed");
+        var table = new TableDefinition
+        {
+            Ref = tableRef,
+            Name = "mixed",
+            SchemaRef = schemaRef,
+            Columns =
+            [
+                new ColumnDefinition
+                {
+                    Ref = ObjectRef.Column("public", "mixed", "mixed_id"),
+                    Name = "id",
+                    TableRef = tableRef,
+                    Ordinal = 0,
+                    LogicalType = ELogicalType.Integer32,
+                },
+                new ColumnDefinition
+                {
+                    Ref = ObjectRef.Column("public", "mixed", "mixed_text"),
+                    Name = "text",
+                    TableRef = tableRef,
+                    Ordinal = 1,
+                    LogicalType = ELogicalType.String,
+                    Nullable = true,
+                },
+            ],
+        };
+
+        // Act — write with MaxRowsPerChunk=5 to force multiple chunks, then read back.
+        var options = new ExportOptions { MaxRowsPerChunk = 5 };
+        await using (var writer = await CatalogWriter.CreateAsync(
+                         _catalogPath, producer: "DbClone-test", sourceDialect: "postgresql"))
+        {
+            await writer.WriteSectionAsync("tables", [table]);
+            await writer.WriteTableAsync(table, "public", MixedRows(), options);
+            await writer.CompleteAsync();
+        }
+
+        await using var reader = await CatalogReader.OpenAsync(_catalogPath);
+        var readRows = new List<DataValue[]>();
+        await foreach (var row in reader.ReadRowsAsync("public", "mixed"))
+        {
+            readRows.Add(row);
+        }
+
+        // Assert
+        readRows.Should().HaveCount(12);
+        readRows[0][0].Value.Should().Be("1");
+        readRows[0][1].IsNull.Should().BeFalse();
+        readRows[1][1].IsNull.Should().BeTrue("row 2 has a null text value");
+        readRows[2][1].Value.Should().Contain("\n", "embedded newline must survive the round-trip");
+
+        // Multiple chunk files were created and all rows are accounted for
+        var dataDir = Path.Combine(_catalogPath, InterchangeFormat.DataDirectory, "public", "mixed");
+        Directory.GetFiles(dataDir, "data.*.csv").Should().HaveCount(3,
+            "12 rows at 5 per chunk = ceil(12/5) = 3 chunks");
+    }
+
+    private static async IAsyncEnumerable<DataValue[]> MixedRows()
+    {
+        // 12 rows: normal, null, embedded newline, then 9 more to cross chunk boundaries.
+        yield return new[]
+        {
+            DataValue.FromText(ELogicalType.Integer32, "1"),
+            DataValue.FromText(ELogicalType.String, "hello"),
+        };
+        yield return new[]
+        {
+            DataValue.FromText(ELogicalType.Integer32, "2"),
+            DataValue.Null(ELogicalType.String),
+        };
+        yield return new[]
+        {
+            DataValue.FromText(ELogicalType.Integer32, "3"),
+            DataValue.FromText(ELogicalType.String, "line1\nline2"),
+        };
+        for (var i = 4; i <= 12; i++)
+        {
+            yield return new[]
+            {
+                DataValue.FromText(ELogicalType.Integer32, i.ToString()),
+                DataValue.FromText(ELogicalType.String, $"row-{i}"),
+            };
+        }
+
+        await Task.CompletedTask;
+    }
+
+    [Fact]
+    public async Task WriteTableAsync_with_resolvedTableName_detects_collision()
+    {
+        // Arrange — write one table with a resolved name, then try to write another with the
+        // same resolved name. The second write must fail (the §2.4 data-loss fix).
+        var schemaRef = ObjectRef.Schema("public");
+        var table1 = new TableDefinition
+        {
+            Ref = ObjectRef.Table("public", "first"),
+            Name = "first",
+            SchemaRef = schemaRef,
+            Columns = [new ColumnDefinition
+            {
+                Ref = ObjectRef.Column("public", "first", "first_id"),
+                Name = "id", TableRef = ObjectRef.Table("public", "first"),
+                Ordinal = 0, LogicalType = ELogicalType.Integer32,
+            }],
+        };
+
+        await using var writer = await CatalogWriter.CreateAsync(
+            _catalogPath, producer: "DbClone-test", sourceDialect: "postgresql");
+        await writer.WriteSectionAsync("tables", [table1]);
+
+        var emptyRows = EmptyRows();
+        await writer.WriteTableAsync(table1, "public", emptyRows, resolvedTableName: "first");
+
+        // Act — a second table claiming the same resolved folder name must throw.
+        var table2 = new TableDefinition
+        {
+            Ref = ObjectRef.Table("public", "second"),
+            Name = "second",
+            SchemaRef = schemaRef,
+            Columns = [new ColumnDefinition
+            {
+                Ref = ObjectRef.Column("public", "second", "second_id"),
+                Name = "id", TableRef = ObjectRef.Table("public", "second"),
+                Ordinal = 0, LogicalType = ELogicalType.Integer32,
+            }],
+        };
+
+        var act = async () => await writer.WriteTableAsync(
+            table2, "public", EmptyRows(), resolvedTableName: "first");
+
+        // Assert
+        await act.Should().ThrowAsync<InvalidOperationException>()
+            .WithMessage("*collision*");
+    }
+
+    [Fact]
+    public async Task WriteTableAsync_two_resolved_names_produce_two_folders()
+    {
+        // Arrange — two tables with distinct resolved names produce two separate folders.
+        var schemaRef = ObjectRef.Schema("public");
+        var table1 = new TableDefinition
+        {
+            Ref = ObjectRef.Table("public", "MixedCase"),
+            Name = "MixedCase",
+            SchemaRef = schemaRef,
+            Columns = [new ColumnDefinition
+            {
+                Ref = ObjectRef.Column("public", "MixedCase", "mixedcase_id"),
+                Name = "id", TableRef = ObjectRef.Table("public", "MixedCase"),
+                Ordinal = 0, LogicalType = ELogicalType.Integer32,
+            }],
+        };
+        var table2 = new TableDefinition
+        {
+            Ref = ObjectRef.Table("public", "mixedcase"),
+            Name = "mixedcase",
+            SchemaRef = schemaRef,
+            Columns = [new ColumnDefinition
+            {
+                Ref = ObjectRef.Column("public", "mixedcase", "mixedcase_id"),
+                Name = "id", TableRef = ObjectRef.Table("public", "mixedcase"),
+                Ordinal = 0, LogicalType = ELogicalType.Integer32,
+            }],
+        };
+
+        // Act
+        await using var writer = await CatalogWriter.CreateAsync(
+            _catalogPath, producer: "DbClone-test", sourceDialect: "postgresql");
+        await writer.WriteSectionAsync("tables", [table1, table2]);
+        await writer.WriteTableAsync(table1, "public", EmptyRows(), resolvedTableName: "MixedCase");
+        await writer.WriteTableAsync(table2, "public", EmptyRows(), resolvedTableName: "mixedcase~abc123");
+        await writer.CompleteAsync();
+
+        // Assert — both folders exist side by side
+        var schemaDir = Path.Combine(_catalogPath, InterchangeFormat.DataDirectory, "public");
+        Directory.GetDirectories(schemaDir).Should().HaveCount(2,
+            "two tables with case-colliding names produce two distinct folders");
+    }
+
+    [Fact]
+    public async Task WriteTableAsync_caseCollidingResolvedNames_readBackReturnsEachTablesOwnRows()
+    {
+        // Two folders existing side by side is only half of the fix: the reader has to know which one a
+        // name answers. A resolved folder carries a discriminator derived from the sibling list the export
+        // saw, so recomputing it from the name sends the loser's read to the winner's chunk files — the
+        // §2.4 loss re-appearing as a restore that silently inserts the wrong table's rows.
+        var upper = SingleColumnTable("MixedCase");
+        var lower = SingleColumnTable("mixedcase");
+
+        await using (var writer = await CatalogWriter.CreateAsync(
+                         _catalogPath, producer: "DbClone-test", sourceDialect: "postgresql"))
+        {
+            await writer.WriteSectionAsync("tables", [upper, lower]);
+            await writer.WriteTableAsync(upper, "public", OneRowWithId(1), resolvedTableName: "MixedCase");
+            await writer.WriteTableAsync(lower, "public", OneRowWithId(2), resolvedTableName: "mixedcase~abc123");
+            await writer.CompleteAsync();
+        }
+
+        await using var reader = await CatalogReader.OpenAsync(_catalogPath);
+        var upperIds = await IdsAsync(reader, "MixedCase");
+        var lowerIds = await IdsAsync(reader, "mixedcase");
+
+        upperIds.Should().Equal("1");
+        lowerIds.Should().Equal(new[] { "2" },
+            "the folder a resolved name wrote into is read from the catalog, not guessed");
+    }
+
+    private static TableDefinition SingleColumnTable(string name)
+    {
+        var tableRef = ObjectRef.Table("public", name);
+        return new TableDefinition
+        {
+            Ref = tableRef,
+            Name = name,
+            SchemaRef = ObjectRef.Schema("public"),
+            Columns =
+            [
+                new ColumnDefinition
+                {
+                    Ref = ObjectRef.Column("public", name, $"{name}_id"),
+                    Name = "id",
+                    TableRef = tableRef,
+                    Ordinal = 0,
+                    LogicalType = ELogicalType.Integer32,
+                },
+            ],
+        };
+    }
+
+    private static async IAsyncEnumerable<DataValue[]> OneRowWithId(int id)
+    {
+        await Task.CompletedTask;
+        yield return [DataValue.FromText(ELogicalType.Integer32, id.ToString())];
+    }
+
+    private static async Task<List<string>> IdsAsync(CatalogReader reader, string tableName)
+    {
+        var ids = new List<string>();
+        await foreach (var row in reader.ReadRowsAsync("public", tableName))
+        {
+            ids.Add(row[0].Value!);
+        }
+
+        return ids;
+    }
+
+    private static async IAsyncEnumerable<DataValue[]> EmptyRows()
+    {
+        await Task.CompletedTask;
+        yield break;
     }
 }

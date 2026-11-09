@@ -11,7 +11,10 @@ using DbClone.Application.Interfaces;
 using DbClone.UI.Models;
 using DbClone.UI.Services;
 using DbClone.UI.Settings;
-using DbClone.UI.ViewModels.Workspaces.StoreRestore;
+using DbClone.UI.StoreRestore.Workflows;
+using DbClone.UI.StoreRestore.Handlers;
+using DbClone.UI.StoreRestore.Services;
+using DbClone.UI.StoreRestore.Validators;
 
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
@@ -51,6 +54,15 @@ public sealed partial class MainViewModel : ObservableObject
     private readonly ISettingsService _settingsService;
 
     private readonly ITableSelectionService _tableSelectionService;
+
+    // ── Store/Restore workflow dependencies ──────────────────────────────────────
+    private readonly IWorkflowService<StoreRequest, StoreResult> _storeWorkflow;
+    private readonly IWorkflowService<RestoreRequest, RestoreResult> _restoreWorkflow;
+    private readonly IWorkflowResultHandler _resultHandler;
+    private readonly IWorkflowValidator _storeValidator;
+    private readonly ICatalogPathResolver _storePathResolver;
+    private readonly IDialogService _storeDialogService;
+    private CancellationTokenSource? _storeCts;
 
     /// <summary>The three workflow components behind their common contract.</summary>
     private readonly IWorkflowViewModel[] _workflows;
@@ -93,11 +105,14 @@ public sealed partial class MainViewModel : ObservableObject
     /// <summary>Copy workflow state for XAML bindings (banner, objects strip, status bar).</summary>
     public WorkflowState CopyState => Copy.State;
 
-    /// <summary>Store/Restore workspace for XAML bindings (commands, direction).</summary>
-    public StoreRestoreViewModel StoreRestore { get; private set; }
+    /// <summary>Store/Restore workflow state for XAML bindings (banner, objects strip, status bar).</summary>
+    public WorkflowState StoreRestoreState { get; } = new();
 
-    /// <summary>Store/Restore workflow state for XAML bindings.</summary>
-    public WorkflowState StoreRestoreState => StoreRestore.State;
+    [ObservableProperty]
+    private bool _isStoreRunning;
+
+    [ObservableProperty]
+    private bool _isStorePaused;
 
     public LogPaneViewModel Log { get; }
 
@@ -218,14 +233,13 @@ public sealed partial class MainViewModel : ObservableObject
             Settings,
             Context);
 
-        StoreRestore = new StoreRestoreViewModel(
-            interchangeService,
-            serviceProvider.GetRequiredService<IDialogService>(),
-            tableSelectionService,
-            settingsPersister,
-            Settings,
-            Context,
-            serviceProvider.GetRequiredService<ILogger<StoreRestoreViewModel>>());
+        // Store/Restore workflow dependencies
+        _storeWorkflow = serviceProvider.GetRequiredService<IWorkflowService<StoreRequest, StoreResult>>();
+        _restoreWorkflow = serviceProvider.GetRequiredService<IWorkflowService<RestoreRequest, RestoreResult>>();
+        _resultHandler = serviceProvider.GetRequiredService<IWorkflowResultHandler>();
+        _storeValidator = serviceProvider.GetRequiredService<IWorkflowValidator>();
+        _storePathResolver = serviceProvider.GetRequiredService<ICatalogPathResolver>();
+        _storeDialogService = serviceProvider.GetRequiredService<IDialogService>();
 
         _workflows = [Copy, Compare];
 
@@ -240,8 +254,8 @@ public sealed partial class MainViewModel : ObservableObject
         // Store/Restore elapsed time is routed separately (not a mode-bound workflow)
         stateManager.ElapsedTimeUpdated += elapsed =>
         {
-            if (StoreRestore.IsRunning)
-                StoreRestore.State.ElapsedTime = elapsed;
+            if (IsStoreRunning)
+                StoreRestoreState.ElapsedTime = elapsed;
         };
 
         Log = new LogPaneViewModel(new Dictionary<EWorkspaceMode, WorkflowState>
@@ -267,7 +281,6 @@ public sealed partial class MainViewModel : ObservableObject
         Toolbar = new ToolbarViewModel(
             Copy,
             Compare,
-            StoreRestore,
             Log,
             Settings,
             connectionStore,
@@ -365,6 +378,103 @@ public sealed partial class MainViewModel : ObservableObject
         settingsPersister.Resume();
     }
 
+    // ── Store/Restore commands ──────────────────────────────────────────────────
+
+    [RelayCommand]
+    private async Task StartStoreAsync()
+    {
+        var settingsPersister = new SettingsPersistenceManager(_settingsService, Settings);
+        settingsPersister.SaveNow();
+
+        if (!_storeValidator.ValidateSourceConnection(Context.Source, StoreRestoreState)) return;
+
+        var catalogPath = _storePathResolver.PromptForStoreCatalogPath(_storeDialogService, Settings, Context.Source.DatabaseName);
+        if (catalogPath is null) return;
+
+        if (!_storeValidator.EnsureDirectoryExists(catalogPath, StoreRestoreState)) return;
+
+        await ExecuteStoreWorkflowAsync("Store", ct => RunStoreAsync(catalogPath, ct));
+    }
+
+    [RelayCommand]
+    private async Task StartRestoreAsync()
+    {
+        var settingsPersister = new SettingsPersistenceManager(_settingsService, Settings);
+        settingsPersister.SaveNow();
+
+        if (!_storeValidator.ValidateDestinationConnection(Context.Destination, StoreRestoreState)) return;
+
+        var catalogPath = _storePathResolver.PromptForRestoreCatalogPath(_storeDialogService, Settings);
+        if (catalogPath is null) return;
+
+        if (!_storeValidator.ValidateDirectoryExists(catalogPath, StoreRestoreState)) return;
+
+        await ExecuteStoreWorkflowAsync("Restore", ct => RunRestoreAsync(catalogPath, ct));
+    }
+
+    private async Task ExecuteStoreWorkflowAsync(string operationName, Func<CancellationToken, Task> executor)
+    {
+        _storeCts = new CancellationTokenSource();
+        Context.IsBusy = true;
+        IsStoreRunning = true;
+        StoreRestoreState.BeginNewRun();
+
+        try
+        {
+            await executor(_storeCts.Token);
+        }
+        catch (OperationCanceledException)
+        {
+            _resultHandler.HandleCancellation(StoreRestoreState, operationName);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "{Operation} failed", operationName);
+            _resultHandler.HandleError(StoreRestoreState, operationName, ex.Message);
+        }
+        finally
+        {
+            Context.IsBusy = false;
+            IsStoreRunning = false;
+            IsStorePaused = false;
+            _storeCts?.Dispose();
+            _storeCts = null;
+        }
+    }
+
+    private async Task RunStoreAsync(string catalogPath, CancellationToken ct)
+    {
+        var options = Settings.StoreRestore;
+        var connection = ConnectionInfoFactory.FromViewModel(Context.Source);
+
+        var request = new StoreRequest(
+            Connection: connection,
+            CatalogPath: catalogPath,
+            ChunkBytes: options.ChunkBytes,
+            RowsPerChunk: options.RowsPerChunk,
+            IncludeData: options.IncludeData,
+            SnapshotConsistency: options.SnapshotConsistency,
+            UnsupportedFeaturePolicy: options.UnsupportedFeaturePolicy,
+            PackAfterStore: options.PackAfterStore,
+            TableSelection: _tableSelectionService.OperationSpec);
+
+        var result = await _storeWorkflow.ExecuteAsync(request, ct);
+        _resultHandler.HandleStoreResult(StoreRestoreState, result);
+    }
+
+    private async Task RunRestoreAsync(string catalogPath, CancellationToken ct)
+    {
+        var connection = ConnectionInfoFactory.FromViewModel(Context.Destination);
+
+        var request = new RestoreRequest(
+            Connection: connection,
+            CatalogPath: catalogPath,
+            UnsupportedFeaturePolicy: Settings.StoreRestore.UnsupportedFeaturePolicy);
+
+        var result = await _restoreWorkflow.ExecuteAsync(request, ct);
+        _resultHandler.HandleRestoreResult(StoreRestoreState, result);
+    }
+
     // ── Private helpers ─────────────────────────────────────────────────────────
 
     private void RunAndLogFailures(Task task, string operation)
@@ -403,7 +513,7 @@ public sealed partial class MainViewModel : ObservableObject
             {
                 Copy.State.ClearResultDisplay();
                 Compare.State.ClearResultDisplay();
-                StoreRestore.State.ClearResultDisplay();
+                StoreRestoreState.ClearResultDisplay();
             }
         }
     }
@@ -451,8 +561,16 @@ public sealed partial class MainViewModel : ObservableObject
     }
 
     [RelayCommand]
-    private void PauseActiveOperation() =>
+    private void PauseActiveOperation()
+    {
+        if (IsStoreRunning)
+        {
+            IsStorePaused = !IsStorePaused;
+            StoreRestoreState.Log(IsStorePaused ? "Operation paused" : "Operation resumed");
+            return;
+        }
         _workflows.FirstOrDefault(w => w.IsRunning)?.PauseCommand.Execute(null);
+    }
 
     private void RefreshSavedConnectionLists()
     {
@@ -501,8 +619,16 @@ public sealed partial class MainViewModel : ObservableObject
     }
 
     [RelayCommand]
-    private void StopActiveOperation() =>
+    private void StopActiveOperation()
+    {
+        if (IsStoreRunning && _storeCts is { IsCancellationRequested: false })
+        {
+            StoreRestoreState.Log("Stop requested — cancelling operation...");
+            _storeCts.Cancel();
+            return;
+        }
         _workflows.FirstOrDefault(w => w.IsRunning)?.StopCommand.Execute(null);
+    }
 
     private void SyncConnectionsToSettings()
     {

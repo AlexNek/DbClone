@@ -368,8 +368,8 @@
             <!--  ═══ Store/Restore controls (always visible, enabled when running) ═══  -->
             <ui:Button
                 AutomationProperties.Name="Pause Store/Restore"
-                Command="{Binding StoreRestore.PauseCommand}"
-                IsEnabled="{Binding StoreRestore.IsRunning}"
+                Command="{Binding DataContext.PauseActiveOperationCommand, RelativeSource={RelativeSource AncestorType=Window}}"
+                IsEnabled="{Binding DataContext.IsStoreRunning, RelativeSource={RelativeSource AncestorType=Window}}"
                 Style="{StaticResource CommandBarButtonStyle}"
                 ToolTip="Pause/Resume Store/Restore (Ctrl+P)">
                 <ui:Button.Icon>
@@ -378,8 +378,8 @@
             </ui:Button>
             <ui:Button
                 AutomationProperties.Name="Stop Store/Restore"
-                Command="{Binding StoreRestore.StopCommand}"
-                IsEnabled="{Binding StoreRestore.IsRunning}"
+                Command="{Binding DataContext.StopActiveOperationCommand, RelativeSource={RelativeSource AncestorType=Window}}"
+                IsEnabled="{Binding DataContext.IsStoreRunning, RelativeSource={RelativeSource AncestorType=Window}}"
                 Style="{StaticResource CommandBarButtonStyle}"
                 ToolTip="Stop Store/Restore (Escape)">
                 <ui:Button.Icon>

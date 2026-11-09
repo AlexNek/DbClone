@@ -8,7 +8,6 @@ using DbClone.Application.Interfaces;
 using DbClone.UI.Models;
 using DbClone.UI.Services;
 using DbClone.UI.Settings;
-using DbClone.UI.ViewModels.Workspaces.StoreRestore;
 
 using Microsoft.Extensions.Logging;
 
@@ -60,9 +59,6 @@ public sealed partial class ToolbarViewModel : ObservableObject
     /// <summary>Copy VM reference for XAML command bindings.</summary>
     public CopyOperationViewModel Copy { get; }
 
-    /// <summary>Store/Restore VM reference for XAML command bindings.</summary>
-    public StoreRestoreViewModel StoreRestore { get; }
-
     /// <summary>Log VM reference for XAML command bindings.</summary>
     public LogPaneViewModel Log { get; }
 
@@ -79,7 +75,6 @@ public sealed partial class ToolbarViewModel : ObservableObject
     public ToolbarViewModel(
         CopyOperationViewModel copy,
         CompareViewModel compare,
-        StoreRestoreViewModel storeRestore,
         LogPaneViewModel log,
         UserSettings settings,
         IConnectionStore connectionStore,
@@ -99,7 +94,6 @@ public sealed partial class ToolbarViewModel : ObservableObject
     {
         Copy = copy;
         Compare = compare;
-        StoreRestore = storeRestore;
         Log = log;
         Settings = settings;
         _connectionStore = connectionStore;

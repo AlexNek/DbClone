@@ -1,6 +1,6 @@
 using System.Security.Cryptography;
-using System.Text;
-using System.Text.Json;
+
+using CanonicalModel.Interchange;
 
 namespace DatabaseInterchange.Format;
 
@@ -42,8 +42,7 @@ public sealed class CatalogVerifier
         ManifestFile? manifest;
         try
         {
-            var json = await File.ReadAllTextAsync(manifestPath, Encoding.UTF8, ct);
-            manifest = JsonSerializer.Deserialize<ManifestFile>(json, CatalogJson.ReaderOptions);
+            manifest = await JsonFile.ReadDocumentAsync<ManifestFile>(manifestPath, ct);
             if (manifest is null)
             {
                 issues.Add("Failed to deserialize manifest.");
@@ -56,7 +55,21 @@ public sealed class CatalogVerifier
             return new CatalogVerificationResult { IsValid = false, Issues = issues };
         }
 
-        // Version gate
+        // Version and row-format gate
+        if (manifest.FormatVersion < InterchangeFormat.Version)
+        {
+            issues.Add(
+                $"This catalog was written by interchange format version {manifest.FormatVersion}, " +
+                "which this version cannot read. Re-export the database.");
+        }
+
+        if (string.Equals(manifest.Data.Encoding, "ndjson", StringComparison.OrdinalIgnoreCase))
+        {
+            issues.Add(
+                "This catalog uses the legacy NDJSON row format, which this version cannot read. " +
+                "Re-export the database.");
+        }
+
         if (manifest.FormatVersion > InterchangeFormat.Version)
         {
             issues.Add($"Catalog format version {manifest.FormatVersion} is newer than supported version {InterchangeFormat.Version}.");
@@ -108,8 +121,7 @@ public sealed class CatalogVerifier
             CatalogIndex? catalogIndex;
             try
             {
-                var indexJson = await File.ReadAllTextAsync(catalogIndexPath, Encoding.UTF8, ct);
-                catalogIndex = JsonSerializer.Deserialize<CatalogIndex>(indexJson, CatalogJson.ReaderOptions);
+                catalogIndex = await JsonFile.ReadDocumentAsync<CatalogIndex>(catalogIndexPath, ct);
             }
             catch
             {
@@ -129,17 +141,87 @@ public sealed class CatalogVerifier
 
                 // Verify table count matches (data/<schema>/<table>/ structure)
                 var dataDir = Path.Combine(catalogPath, InterchangeFormat.DataDirectory);
-                var actualTableCount = 0;
+                var tableFolderPaths = new List<string>();
+                var tableFolders = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
                 if (Directory.Exists(dataDir))
                 {
                     foreach (var parentDir in Directory.GetDirectories(dataDir))
                     {
-                        actualTableCount += Directory.GetDirectories(parentDir).Length;
+                        var schemaName = Path.GetFileName(parentDir);
+                        foreach (var tableDir in Directory.GetDirectories(parentDir))
+                        {
+                            // Record the relative path (schema/table) for cross-checking
+                            var relativePath = $"{schemaName}/{Path.GetFileName(tableDir)}";
+                            tableFolderPaths.Add(relativePath);
+                            tableFolders.Add(relativePath);
+                        }
                     }
                 }
-                if (actualTableCount != catalogIndex.TableCount)
+                if (tableFolderPaths.Count != catalogIndex.TableCount)
                 {
-                    issues.Add($"Table count mismatch: catalog index says {catalogIndex.TableCount}, found {actualTableCount} table directories.");
+                    issues.Add($"Table count mismatch: catalog index says {catalogIndex.TableCount}, found {tableFolderPaths.Count} table directories.");
+                }
+
+                // Tenth integrity check: cross-reference tables section with data folders.
+                // Every table in the section has exactly one folder and every folder is claimed by exactly one
+                // table — this catches the §2.4 silent data loss where case-colliding names map to one folder.
+                //
+                // The folder a table should own is the one catalog.json records for it, not one recomputed from
+                // its name: a collision-suffixed folder is not re-derivable, and the earlier prefix match let
+                // table "images" be satisfied by another table's "images-2" folder while hiding a folder that
+                // belonged to nobody. Both halves are now set equality.
+                var recordedFolders = new Dictionary<(string Schema, string Table), string>(catalogIndex.TableFolders.Count);
+                foreach (var entry in catalogIndex.TableFolders)
+                {
+                    recordedFolders[(entry.Schema, entry.Table)] = entry.Folder;
+                }
+
+                var tablesSectionPath = Path.Combine(schemaDir, "tables.json");
+                if (File.Exists(tablesSectionPath) && (tableFolders.Count > 0 || catalogIndex.TableCount > 0))
+                {
+                    var claimed = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+                    try
+                    {
+                        await foreach (var table in JsonFile.ReadObjectsAsync<TableDefinition>(tablesSectionPath, "objects", ct))
+                        {
+                            var schemaName = table.Ref.SchemaName() ?? "";
+                            var folder = recordedFolders.TryGetValue((schemaName, table.Name), out var recorded)
+                                ? recorded
+                                : $"{NameEncoder.EncodeSegment(schemaName)}/{NameEncoder.EncodeSegment(table.Name)}";
+
+                            claimed.Add(folder);
+                            if (!tableFolders.Contains(folder))
+                            {
+                                issues.Add($"Table '{schemaName}.{table.Name}' is in the catalog but has no data folder.");
+                            }
+                        }
+                    }
+                    catch (Exception ex)
+                    {
+                        issues.Add($"Error reading tables section for integrity check: {ex.Message}");
+                    }
+
+                    foreach (var folder in tableFolderPaths)
+                    {
+                        if (!claimed.Contains(folder))
+                        {
+                            issues.Add($"Data folder '{folder}' exists but no table in the catalog claims it.");
+                        }
+                    }
+                }
+
+                // The other half of the tenth check: every stored data file of a folder — row chunk or blob
+                // container — appears in that folder's checksums.sha256, and nothing sits in the folder that the
+                // list does not name. The chain manifest → checksums → files only holds if the list is exactly
+                // the set of data files, and the containers left the manifest deliberately (design §8).
+                foreach (var folder in tableFolderPaths)
+                {
+                    ct.ThrowIfCancellationRequested();
+                    await VerifyChecksumsMembershipAsync(
+                        Path.Combine(dataDir, folder.Replace('/', Path.DirectorySeparatorChar)),
+                        folder,
+                        issues,
+                        ct);
                 }
             }
         }
@@ -151,6 +233,67 @@ public sealed class CatalogVerifier
             IsValid = issues.Count == 0,
             Issues = issues,
         };
+    }
+
+    /// <summary>
+    /// Compares the data files stored in one table folder with the list its <c>checksums.sha256</c> names.
+    /// </summary>
+    /// <remarks>
+    /// The folder's own two metadata files (<c>table.json</c> and <c>checksums.sha256</c> itself) are excluded:
+    /// they are accounted for by <c>manifest.json</c>, which the caller has already checked.
+    /// </remarks>
+    private static async Task VerifyChecksumsMembershipAsync(
+        string tableDir,
+        string folder,
+        List<string> issues,
+        CancellationToken ct)
+    {
+        var checksumsPath = Path.Combine(tableDir, "checksums.sha256");
+        if (!File.Exists(checksumsPath))
+        {
+            // A folder written before the per-file list existed has nothing to compare against, and the reader
+            // still handles it by enumerating the directory — so this stays silent instead of failing a catalog
+            // the product can read.
+            return;
+        }
+
+        var listed = new HashSet<string>(StringComparer.Ordinal);
+        await foreach (var line in File.ReadLinesAsync(checksumsPath, ct))
+        {
+            var tab = line.IndexOf('\t');
+            if (tab > 0)
+            {
+                listed.Add(line[..tab].Replace('\\', '/'));
+            }
+        }
+
+        var stored = new HashSet<string>(StringComparer.Ordinal);
+        foreach (var filePath in Directory.EnumerateFiles(tableDir, "*", SearchOption.AllDirectories))
+        {
+            var relative = Path.GetRelativePath(tableDir, filePath).Replace(Path.DirectorySeparatorChar, '/');
+            if (relative is "checksums.sha256" or "table.json")
+            {
+                continue;
+            }
+
+            stored.Add(relative);
+        }
+
+        foreach (var path in listed)
+        {
+            if (!stored.Contains(path))
+            {
+                issues.Add($"File '{folder}/{path}' is listed in checksums.sha256 but is not in the folder.");
+            }
+        }
+
+        foreach (var path in stored)
+        {
+            if (!listed.Contains(path))
+            {
+                issues.Add($"File '{folder}/{path}' is stored in the catalog but is not listed in checksums.sha256.");
+            }
+        }
     }
 
     private static async Task<string> ComputeSha256Async(string filePath, CancellationToken ct)

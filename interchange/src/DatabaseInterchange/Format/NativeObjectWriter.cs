@@ -32,8 +32,21 @@ public sealed class NativeObjectWriter
         Directory.CreateDirectory(nativeDir);
 
         var filePath = Path.Combine(nativeDir, $"{dialect}.json");
-        var json = JsonSerializer.Serialize(objects, CatalogJson.WriterOptions);
-        await File.WriteAllTextAsync(filePath, json, System.Text.Encoding.UTF8, ct);
+
+        // The document goes into the file's own stream instead of being serialized to a string and written
+        // out, which is the rule part A/R4 states for every catalog file. The native file is the one shape
+        // the format keeps as a bare array rather than a section, so it is written in one call — but still
+        // never as one assembled string.
+        await using (var stream = new FileStream(
+                         filePath,
+                         FileMode.Create,
+                         FileAccess.Write,
+                         FileShare.None,
+                         4096,
+                         FileOptions.Asynchronous | FileOptions.SequentialScan))
+        {
+            await JsonSerializer.SerializeAsync(stream, objects, CatalogJson.WriterOptions, ct);
+        }
 
         return filePath;
     }

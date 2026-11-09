@@ -25,11 +25,11 @@
             Modifiers="Control+Shift" />
         <KeyBinding
             Key="S"
-            Command="{Binding StoreRestore.StartStoreCommand}"
+            Command="{Binding StartStoreCommand}"
             Modifiers="Control+Shift" />
         <KeyBinding
             Key="R"
-            Command="{Binding StoreRestore.StartRestoreCommand}"
+            Command="{Binding StartRestoreCommand}"
             Modifiers="Control+Shift" />
         <KeyBinding Key="Escape" Command="{Binding StopActiveOperationCommand}" />
         <KeyBinding
@@ -82,7 +82,7 @@
                     <Style TargetType="ui:InfoBar">
                         <Setter Property="DataContext" Value="{Binding DataContext.ActiveState, RelativeSource={RelativeSource AncestorType=Window}}" />
                         <Style.Triggers>
-                            <DataTrigger Binding="{Binding DataContext.StoreRestore.IsRunning, RelativeSource={RelativeSource AncestorType=Window}}" Value="True">
+                            <DataTrigger Binding="{Binding DataContext.IsStoreRunning, RelativeSource={RelativeSource AncestorType=Window}}" Value="True">
                                 <Setter Property="DataContext" Value="{Binding DataContext.StoreRestoreState, RelativeSource={RelativeSource AncestorType=Window}}" />
                             </DataTrigger>
                         </Style.Triggers>
@@ -231,7 +231,7 @@
                             <ui:Button
                                 Margin="0,8,0,0"
                                 HorizontalAlignment="Center"
-                                Command="{Binding DataContext.StoreRestore.StartStoreCommand, RelativeSource={RelativeSource AncestorType=Window}}"
+                                Command="{Binding DataContext.StartStoreCommand, RelativeSource={RelativeSource AncestorType=Window}}"
                                 Style="{StaticResource CommandBarPrimaryButtonStyle}"
                                 ToolTip="Store database to catalog (Ctrl+Shift+S)">
                                 <ui:Button.Content>
@@ -268,7 +268,7 @@
                             <ui:Button
                                 Margin="0,8,0,0"
                                 HorizontalAlignment="Center"
-                                Command="{Binding DataContext.StoreRestore.StartRestoreCommand, RelativeSource={RelativeSource AncestorType=Window}}"
+                                Command="{Binding DataContext.StartRestoreCommand, RelativeSource={RelativeSource AncestorType=Window}}"
                                 Style="{StaticResource CommandBarPrimaryButtonStyle}"
                                 ToolTip="Restore catalog to database (Ctrl+Shift+R)">
                                 <ui:Button.Content>
@@ -290,8 +290,8 @@
                                     <DataTrigger Binding="{Binding DataContext.Toolbar.SelectedMode, RelativeSource={RelativeSource AncestorType=Window}}" Value="Compare">
                                         <Setter Property="DataContext" Value="{Binding DataContext.Compare, RelativeSource={RelativeSource AncestorType=Window}}" />
                                     </DataTrigger>
-                                    <DataTrigger Binding="{Binding DataContext.StoreRestore.IsRunning, RelativeSource={RelativeSource AncestorType=Window}}" Value="True">
-                                        <Setter Property="DataContext" Value="{Binding DataContext.StoreRestore, RelativeSource={RelativeSource AncestorType=Window}}" />
+                                    <DataTrigger Binding="{Binding DataContext.IsStoreRunning, RelativeSource={RelativeSource AncestorType=Window}}" Value="True">
+                                        <Setter Property="DataContext" Value="{Binding DataContext.StoreRestoreState, RelativeSource={RelativeSource AncestorType=Window}}" />
                                     </DataTrigger>
                                 </Style.Triggers>
                             </Style>

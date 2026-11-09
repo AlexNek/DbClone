@@ -140,6 +140,59 @@ The `[Unreleased]` section must always describe the **final user-facing state re
 - CHANGELOG.md must exist in the repo root (the release workflow reads it at checkout path)
 - If no matching version section is found, the workflow falls back to `[Unreleased]`; if that's empty too, it links to CHANGELOG.md on GitHub
 
+## SOLID Principles and Clean Code (MANDATORY)
+
+This project requires strict adherence to SOLID principles. No "big ball of mud" monolithic classes are acceptable.
+
+### Single Responsibility Principle (SRP)
+
+- **Each class must have ONE responsibility and ONE reason to change.**
+- ViewModels must NOT implement multiple workflows directly — they orchestrate separate handler classes instead.
+- A ViewModel exceeding ~200 lines or handling 3+ distinct workflows is a design smell requiring refactoring.
+- Progress reporting, result formatting, path resolution, and workflow execution are separate concerns belonging in separate classes.
+
+### Open/Closed Principle (OCP)
+
+- **New workflows must be added by creating new classes, not by modifying existing ViewModels.**
+- Extension points must be designed upfront (interfaces, handler registration) so features plug in without editing core files.
+
+### Dependency Inversion Principle (DIP)
+
+- ViewModels depend on abstractions (interfaces), never on concrete infrastructure types.
+- File system access (`Directory.Exists`, `Directory.CreateDirectory`) must go through an abstraction, not be called directly from ViewModels.
+- Settings persistence must be accessed via interface (`ISettingsPersistenceManager`), not concrete class.
+
+### Workflow Architecture Pattern
+
+```
+ViewModel (orchestrator, thin coordinator)
+    ↓ delegates to
+Handler classes (one per workflow)
+    ↓ use
+Services (interfaces, injected)
+```
+
+- One orchestrator ViewModel per workspace (thin coordinator)
+- One handler class per workflow (e.g., `StoreWorkflowHandler`, `RestoreWorkflowHandler`, `BlobExtractionWorkflowHandler`)
+- Handler classes receive dependencies via constructor injection
+- ViewModel delegates to handlers; handlers return results; ViewModel formats for UI
+
+### Code Size Guidelines
+
+| Type | Preferred | Maximum before refactoring |
+|------|-----------|---------------------------|
+| ViewModels | ≤200 lines | 300 lines |
+| Handler/Service classes | Single responsibility, focused API | — |
+| Methods | ≤30 lines | 50 lines |
+
+### Forbidden Patterns
+
+- ❌ A ViewModel that directly implements 3+ workflows (store, restore, extract, etc.)
+- ❌ `System.IO.Directory.*` or `System.IO.File.*` calls in ViewModels — use an abstraction
+- ❌ Concrete infrastructure dependencies in ViewModels (e.g., `SettingsPersistenceManager` instead of `ISettingsPersistenceManager`)
+- ❌ Progress reporter factory methods in ViewModels — move to a dedicated factory or handler
+- ❌ Result formatting methods (`ReportXxxResult`) in ViewModels — move to a dedicated presenter/formatter class
+
 ## Edit discipline (MANDATORY)
 
 - Make surgical edits only: change exactly what the task requires.

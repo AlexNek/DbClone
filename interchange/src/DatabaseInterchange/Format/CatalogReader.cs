@@ -1,6 +1,4 @@
 using System.Security.Cryptography;
-using System.Text;
-using System.Text.Json;
 using CanonicalModel.Interchange;
 using DbAdapter.Definitions;
 
@@ -14,6 +12,7 @@ public sealed class CatalogReader : IAsyncDisposable
     private readonly string _catalogPath;
     private ManifestFile? _manifest;
     private CatalogIndex? _catalogIndex;
+    private Dictionary<(string Schema, string Table), string>? _tableFolders;
     private bool _disposed;
 
     private CatalogReader(string catalogPath)
@@ -61,11 +60,21 @@ public sealed class CatalogReader : IAsyncDisposable
             throw new InvalidOperationException($"Manifest file not found: {manifestPath}");
         }
 
-        var json = await File.ReadAllTextAsync(manifestPath, Encoding.UTF8, ct);
-        _manifest = JsonSerializer.Deserialize<ManifestFile>(json, CatalogJson.ReaderOptions)
+        _manifest = await JsonFile.ReadDocumentAsync<ManifestFile>(manifestPath, ct)
             ?? throw new InvalidOperationException("Failed to deserialize manifest.");
 
-        // Version gate
+        if (_manifest.FormatVersion < InterchangeFormat.Version)
+        {
+            throw new InvalidOperationException(
+                $"This catalog was written by interchange format version {_manifest.FormatVersion}, which this version cannot read. Re-export the database.");
+        }
+
+        if (string.Equals(_manifest.Data.Encoding, "ndjson", StringComparison.OrdinalIgnoreCase))
+        {
+            throw new InvalidOperationException(
+                "This catalog uses the legacy NDJSON row format, which this version cannot read. Re-export the database.");
+        }
+
         if (_manifest.FormatVersion > InterchangeFormat.Version)
         {
             throw new InvalidOperationException(
@@ -87,18 +96,22 @@ public sealed class CatalogReader : IAsyncDisposable
             throw new InvalidOperationException($"Catalog index file not found: {catalogPath}");
         }
 
-        var json = await File.ReadAllTextAsync(catalogPath, Encoding.UTF8, ct);
-        _catalogIndex = JsonSerializer.Deserialize<CatalogIndex>(json, CatalogJson.ReaderOptions)
+        _catalogIndex = await JsonFile.ReadDocumentAsync<CatalogIndex>(catalogPath, ct)
             ?? throw new InvalidOperationException("Failed to deserialize catalog index.");
     }
 
     /// <summary>
-    /// Reads a schema section from the catalog.
+    /// Reads a schema section from the catalog using streaming JSON deserialization.
     /// </summary>
     /// <typeparam name="T">The type of objects in the section.</typeparam>
     /// <param name="sectionName">The section name.</param>
     /// <param name="ct">Cancellation token.</param>
     /// <returns>The objects in the section.</returns>
+    /// <remarks>
+    /// The section is enumerated one object at a time from the file's own stream, so a section holding a
+    /// million columns is parsed a column at a time and the file's text is never held whole. The returned
+    /// list is what the public contract promises; it is not how the file was read.
+    /// </remarks>
     public async Task<IReadOnlyList<T>> ReadSectionAsync<T>(string sectionName, CancellationToken ct = default)
     {
         ObjectDisposedException.ThrowIf(_disposed, this);
@@ -110,13 +123,17 @@ public sealed class CatalogReader : IAsyncDisposable
             return [];
         }
 
-        var json = await File.ReadAllTextAsync(filePath, Encoding.UTF8, ct);
-        var section = JsonSerializer.Deserialize<SectionFile<T>>(json, CatalogJson.ReaderOptions);
-        return section?.Objects ?? [];
+        var objects = new List<T>();
+        await foreach (var obj in JsonFile.ReadObjectsAsync<T>(filePath, "objects", ct))
+        {
+            objects.Add(obj);
+        }
+
+        return objects;
     }
 
     /// <summary>
-    /// Reads the security section from the catalog.
+    /// Reads the security section from the catalog using streaming JSON deserialization.
     /// </summary>
     /// <param name="ct">Cancellation token.</param>
     /// <returns>
@@ -125,10 +142,14 @@ public sealed class CatalogReader : IAsyncDisposable
     /// the producer captured no security at all, while a section holding empty lists means it
     /// captured the kinds it could and found nothing of a kind it did look for.
     /// </returns>
+    /// <remarks>
+    /// Security is one compound object rather than an array, so the file is read as one document over its
+    /// stream — the intermediate <see cref="string"/> the older text read produced is never built.
+    /// </remarks>
     public async Task<SecuritySection?> ReadSecurityAsync(CancellationToken ct = default)
     {
         ObjectDisposedException.ThrowIf(_disposed, this);
-
+    
         var filePath = Path.Combine(
             _catalogPath,
             InterchangeFormat.SchemaDirectory,
@@ -137,9 +158,8 @@ public sealed class CatalogReader : IAsyncDisposable
         {
             return null;
         }
-
-        var json = await File.ReadAllTextAsync(filePath, Encoding.UTF8, ct);
-        var section = JsonSerializer.Deserialize<SecuritySectionFile>(json, CatalogJson.ReaderOptions);
+    
+        var section = await JsonFile.ReadDocumentAsync<SecuritySectionFile>(filePath, ct);
         return section?.Object;
     }
 
@@ -165,9 +185,9 @@ public sealed class CatalogReader : IAsyncDisposable
             return null;
         }
 
-        var json = await File.ReadAllTextAsync(filePath, Encoding.UTF8, ct);
+        await using var stream = await JsonFile.OpenReadAsync(filePath, ct);
         var serializer = new DirectCatalogSerializer();
-        return serializer.Deserialize(json);
+        return await serializer.DeserializeAsync(stream, ct);
     }
 
     /// <summary>
@@ -188,6 +208,16 @@ public sealed class CatalogReader : IAsyncDisposable
     /// <param name="tableName">The table's name.</param>
     /// <param name="ct">Cancellation token.</param>
     /// <returns>An async enumerable of rows.</returns>
+    /// <remarks>
+    /// <para>Rows are streamed one record at a time through <see cref="CsvRowReader"/>; the reader never
+    /// holds the whole chunk file in memory. Each decoded field goes through
+    /// <see cref="BinaryFieldGrammar"/>, so a blob reference is validated and turned into a range payload at
+    /// the moment it is read — the row that reaches the caller already carries bytes-or-a-pointer decided by
+    /// the column's own logical type.</para>
+    /// <para>Phase 4B: Chunk files are discovered via <c>checksums.sha256</c> rather than from a
+    /// <c>chunks[]</c> array in <c>table.json</c>. This keeps the manifest bounded in size regardless
+    /// of how many chunks the table has.</para>
+    /// </remarks>
     public async IAsyncEnumerable<DataValue[]> ReadRowsAsync(
         string schemaName,
         string tableName,
@@ -197,63 +227,110 @@ public sealed class CatalogReader : IAsyncDisposable
         ArgumentException.ThrowIfNullOrWhiteSpace(schemaName);
         ArgumentException.ThrowIfNullOrWhiteSpace(tableName);
 
-        var encodedSchema = NameEncoder.EncodeSegment(schemaName);
-        var encodedTable = NameEncoder.EncodeSegment(tableName);
-        var tableDir = Path.Combine(_catalogPath, InterchangeFormat.DataDirectory, encodedSchema, encodedTable);
-        if (!Directory.Exists(tableDir))
+        var tableDir = ResolveTableDirectory(schemaName, tableName);
+        if (tableDir is null)
         {
             yield break;
         }
 
-        // Read table.json for chunk list
+        // Read table.json for column metadata
         var tableManifestPath = Path.Combine(tableDir, "table.json");
         if (!File.Exists(tableManifestPath))
         {
             yield break;
         }
 
-        var tableJson = await File.ReadAllTextAsync(tableManifestPath, Encoding.UTF8, ct);
-        var tableManifest = JsonSerializer.Deserialize<TableManifest>(tableJson, CatalogJson.ReaderOptions);
+        var tableManifest = await JsonFile.ReadDocumentAsync<TableManifest>(tableManifestPath, ct);
         if (tableManifest is null)
         {
             yield break;
         }
 
-        // Read each chunk in order
-        foreach (var chunk in tableManifest.Chunks)
+        // The column types come from the manifest and are parsed once for the table: the grammar needs the
+        // type of the column each field belongs to, and re-parsing the same name for every row of every
+        // chunk is work the layout already answered.
+        var columnTypes = new List<ELogicalType>(tableManifest.Columns.Count);
+        foreach (var column in tableManifest.Columns)
+        {
+            columnTypes.Add(Enum.Parse<ELogicalType>(column.LogicalType, ignoreCase: true));
+        }
+
+        // Discover chunk files from checksums.sha256 (Phase 4B)
+        var chunkFiles = await DiscoverChunkFilesAsync(tableDir, ct);
+
+        // One grammar per table: it owns the container reader the references of this folder resolve against.
+        await using var grammar = new BinaryFieldGrammar(tableDir);
+
+        // Read each chunk in order through the streaming row reader
+        foreach (var chunkFile in chunkFiles)
         {
             ct.ThrowIfCancellationRequested();
 
-            var chunkPath = Path.Combine(tableDir, chunk.File);
+            var chunkPath = Path.Combine(tableDir, chunkFile);
             if (!File.Exists(chunkPath))
             {
                 continue;
             }
 
-            await using var stream = File.OpenRead(chunkPath);
-            using var reader = new StreamReader(stream, Encoding.UTF8);
+            await using var rowReader = new CsvRowReader(
+                chunkPath,
+                grammar,
+                columnTypes,
+                tableManifest.Columns.Select(column => column.Name).ToList());
 
-            string? line;
-            while ((line = await reader.ReadLineAsync(ct)) is not null)
+            DataValue[]? row;
+            while ((row = await rowReader.ReadRecordAsync(ct)) is not null)
             {
-                if (string.IsNullOrWhiteSpace(line))
-                {
-                    continue;
-                }
-
-                var values = JsonSerializer.Deserialize<string?[]>(line, CatalogJson.ReaderOptions);
-                if (values is not null)
-                {
-                    yield return values.Select((v, i) =>
-                    {
-                        var logicalType = i < tableManifest.Columns.Count
-                            ? Enum.Parse<ELogicalType>(tableManifest.Columns[i].LogicalType, ignoreCase: true)
-                            : ELogicalType.Unknown;
-                        return v is null ? DataValue.Null(logicalType) : DataValue.FromText(logicalType, v);
-                    }).ToArray();
-                }
+                yield return row;
             }
         }
+    }
+
+    /// <summary>
+    /// Discovers chunk files from the <c>checksums.sha256</c> file in the table directory.
+    /// </summary>
+    /// <remarks>
+    /// Phase 4B: The checksums file is the authoritative per-file list. Chunk files are identified
+    /// by their canonical <c>data.NNNNN.csv</c> name and returned in sorted order.
+    /// </remarks>
+    /// <param name="tableDir">The table's data directory.</param>
+    /// <param name="ct">Cancellation token.</param>
+    /// <returns>Chunk file names in order.</returns>
+    private static async Task<IReadOnlyList<string>> DiscoverChunkFilesAsync(string tableDir, CancellationToken ct)
+    {
+        var checksumsPath = Path.Combine(tableDir, "checksums.sha256");
+        if (!File.Exists(checksumsPath))
+        {
+            // A v2 catalog is expected to have checksums, but keep the directory fallback for
+            // incomplete catalogs so verification can report the missing file separately.
+            return Directory.GetFiles(tableDir, "data.*.csv")
+                .Select(Path.GetFileName)
+                .Where(f => f is not null)
+                .Select(f => f!)
+                .OrderBy(f => f, StringComparer.Ordinal)
+                .ToList();
+        }
+
+        var chunkFiles = new List<string>();
+        var lines = await File.ReadAllLinesAsync(checksumsPath, ct);
+        foreach (var line in lines)
+        {
+            // Format: <relative-path>\t<sha256>
+            var tabIdx = line.IndexOf('\t');
+            if (tabIdx <= 0) continue;
+
+            var relativePath = line[..tabIdx];
+            // CSV chunk files are at the table folder root and use the canonical data.NNNNN.csv name.
+            if (!relativePath.Contains('/')
+                && relativePath.StartsWith("data.", StringComparison.Ordinal)
+                && relativePath.EndsWith(".csv", StringComparison.Ordinal))
+            {
+                chunkFiles.Add(relativePath);
+            }
+        }
+
+        chunkFiles.Sort(StringComparer.Ordinal);
+        return chunkFiles;
     }
 
     /// <summary>
@@ -264,29 +341,92 @@ public sealed class CatalogReader : IAsyncDisposable
     /// <param name="ct">Cancellation token.</param>
     /// <returns>The count the table's manifest states, or <see langword="null"/> when the catalog holds
     /// no data folder for the table — which is what an export run without data writes.</returns>
+    /// <exception cref="InterchangeFormatException">
+    /// <c>catalog.json</c> names a folder for the table that the catalog does not contain.
+    /// </exception>
     public async Task<long?> ReadTableRowCountAsync(string schemaName, string tableName, CancellationToken ct = default)
     {
         ObjectDisposedException.ThrowIf(_disposed, this);
         ArgumentException.ThrowIfNullOrWhiteSpace(schemaName);
         ArgumentException.ThrowIfNullOrWhiteSpace(tableName);
 
-        var encodedSchema = NameEncoder.EncodeSegment(schemaName);
-        var encodedTable = NameEncoder.EncodeSegment(tableName);
-        var tableManifestPath = Path.Combine(
-            _catalogPath,
-            InterchangeFormat.DataDirectory,
-            encodedSchema,
-            encodedTable,
-            "table.json");
+        var tableDir = ResolveTableDirectory(schemaName, tableName);
+        if (tableDir is null)
+        {
+            return null;
+        }
+
+        var tableManifestPath = Path.Combine(tableDir, "table.json");
         if (!File.Exists(tableManifestPath))
         {
             return null;
         }
 
-        var tableJson = await File.ReadAllTextAsync(tableManifestPath, Encoding.UTF8, ct);
-        var tableManifest = JsonSerializer.Deserialize<TableManifest>(tableJson, CatalogJson.ReaderOptions);
-
+        var tableManifest = await JsonFile.ReadDocumentAsync<TableManifest>(tableManifestPath, ct);
         return tableManifest?.RowCount;
+    }
+
+    /// <summary>
+    /// Resolves the folder a table's rows were written to.
+    /// </summary>
+    /// <remarks>
+    /// <para>The folder is read from <c>catalog.json</c> rather than recomputed from the names. A folder name
+    /// produced by collision resolution carries a discriminator tail derived from the sibling list the export
+    /// saw, so asking <see cref="NameEncoder.EncodeSegment"/> again answers a different folder: on a
+    /// case-insensitive filesystem the loser's plain name resolves onto the winner's directory, and the restore
+    /// would re-insert the winner's rows while reading the winner's count and calling that a pass.</para>
+    /// <para>The two absent cases stay distinct. A recorded folder that is not on disk is a catalog that
+    /// contradicts itself, so it fails. A table with no entry at all is what a catalog written before folders
+    /// were recorded, or an export run without data, looks like — the name is then derived the way it always
+    /// was, and a missing folder means this table simply has no rows here.</para>
+    /// </remarks>
+    /// <param name="schemaName">The table's schema name.</param>
+    /// <param name="tableName">The table's name.</param>
+    /// <returns>The absolute folder path, or <see langword="null"/> when the catalog holds no data for the
+    /// table.</returns>
+    private string? ResolveTableDirectory(string schemaName, string tableName)
+    {
+        var dataRoot = Path.Combine(_catalogPath, InterchangeFormat.DataDirectory);
+
+        if (TableFolders().TryGetValue((schemaName, tableName), out var recorded))
+        {
+            var recordedDir = Path.Combine(dataRoot, recorded.Replace('/', Path.DirectorySeparatorChar));
+            if (!Directory.Exists(recordedDir))
+            {
+                throw new InterchangeFormatException(
+                    $"catalog.json records the data folder \"{recorded}\" for the table " +
+                    $"\"{schemaName}\".\"{tableName}\", but the catalog holds no such folder.");
+            }
+
+            return recordedDir;
+        }
+
+        var derived = Path.Combine(
+            dataRoot,
+            NameEncoder.EncodeSegment(schemaName),
+            NameEncoder.EncodeSegment(tableName));
+        return Directory.Exists(derived) ? derived : null;
+    }
+
+    /// <summary>
+    /// Builds the table-to-folder map <c>catalog.json</c> carries, once per reader.
+    /// </summary>
+    private Dictionary<(string Schema, string Table), string> TableFolders()
+    {
+        if (_tableFolders is not null)
+        {
+            return _tableFolders;
+        }
+
+        IReadOnlyList<CatalogTableFolder> folders = _catalogIndex?.TableFolders ?? [];
+        var map = new Dictionary<(string, string), string>(folders.Count);
+        foreach (var entry in folders)
+        {
+            map[(entry.Schema, entry.Table)] = entry.Folder;
+        }
+
+        _tableFolders = map;
+        return map;
     }
 
     /// <summary>

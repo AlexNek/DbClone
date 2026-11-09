@@ -6,10 +6,15 @@ namespace DatabaseInterchange.Format;
 public static class InterchangeFormat
 {
     /// <summary>The current format version.</summary>
-    public const int Version = 1;
+    /// <remarks>
+    /// <para>Version 3: Every non-NULL binary value is stored in its own blob file and the CSV carries only a reference.</para>
+    /// <para>Version 1: Initial format with streaming row files and chunk-based storage.</para>
+    /// </remarks>
+    public const int Version = 3;
 
     /// <summary>The minimum reader version that can read this format.</summary>
-    public const int MinimumReader = 1;
+    /// <remarks>Version 3 is the per-value blob-file format and requires a version 3 reader.</remarks>
+    public const int MinimumReader = 3;
 
     /// <summary>The directory suffix for catalog archives.</summary>
     public const string DirectorySuffix = ".rdbx";

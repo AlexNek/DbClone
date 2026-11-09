@@ -44,6 +44,12 @@ public sealed class SnapshotImporterTests : IDisposable
 
     private static readonly ObjectRef MoodTypeRef = ObjectRef.Type("public", "mood");
 
+    /// <summary>
+    /// The signature-prefixed bytes the container fixture stores: long enough to cross the threshold the
+    /// catalog is written under, so the value leaves the row file.
+    /// </summary>
+    private static readonly byte[] PngValue = BuildPngValue();
+
     private readonly string _catalogPath = Path.Combine(
         Path.GetTempPath(),
         "DbInterchangeImportTests_" + Guid.NewGuid().ToString("N"));
@@ -196,6 +202,27 @@ public sealed class SnapshotImporterTests : IDisposable
             .Select(c => c.Name)
             .Should().Equal("id", "name");
         result.RowsImported.Should().Be(2);
+    }
+
+    [Fact]
+    public async Task ImportAsync_AValueStoredInAContainer_ReachesTheWriterAsAPayloadAndNotAsRebuiltHex()
+    {
+        // Arrange
+        await WriteCatalogWithContainerData();
+        var writer = new RecordingWriter();
+
+        // Act
+        await Import(writer);
+
+        // Assert
+        // Design §5/§6.9: the importer's job ends at handing the value over. Turning the range back into a
+        // hex literal here would put the whole value in memory as text and hand the writer SQL to embed it
+        // in — the exact failure part B exists to remove, so it is the importer half that has to be pinned.
+        var value = writer.Rows.Single()[1];
+        value.Binary.Should().NotBeNull("a container value travels as bytes");
+        value.Value.Should().BeNull("and never as a hex token the writer would have to decode");
+        value.Binary!.Length.Should().Be(PngValue.Length);
+        (await ReadAllAsync(value.Binary)).Should().BeEquivalentTo(PngValue);
     }
 
     [Fact]
@@ -423,6 +450,86 @@ public sealed class SnapshotImporterTests : IDisposable
     }
 
     /// <summary>
+    /// A catalog whose data folder holds one table with a <see cref="ELogicalType.Binary"/> column and one
+    /// value large enough to have earned a container, which is what lets a test watch a payload cross the
+    /// writer boundary rather than only the row count.
+    /// </summary>
+    private async Task WriteCatalogWithContainerData()
+    {
+        var tableRef = ObjectRef.Table("public", "images");
+        var images = new TableDefinition
+        {
+            Ref = tableRef,
+            Name = "images",
+            SchemaRef = PublicRef,
+            Columns =
+            [
+                new ColumnDefinition
+                {
+                    Ref = ObjectRef.Column("public", "images", "images_id"),
+                    Name = "id",
+                    TableRef = tableRef,
+                    Ordinal = 1,
+                    LogicalType = ELogicalType.Integer32,
+                    NativeType = new NativeType("integer"),
+                },
+                new ColumnDefinition
+                {
+                    Ref = ObjectRef.Column("public", "images", "images_data"),
+                    Name = "data",
+                    TableRef = tableRef,
+                    Ordinal = 2,
+                    LogicalType = ELogicalType.Binary,
+                    NativeType = new NativeType("bytea"),
+                },
+            ],
+        };
+
+        await using var catalog = await CatalogWriter.CreateAsync(
+            _catalogPath,
+            producer: "DbClone-test",
+            sourceDialect: "postgresql");
+
+        await catalog.WriteSectionAsync(
+            "schemas",
+            new List<SchemaDefinition> { new() { Ref = PublicRef, Name = "public" } });
+        await catalog.WriteSectionAsync("tables", new List<TableDefinition> { images });
+        await catalog.WriteTableAsync(
+            images,
+            "public",
+            ContainerRows(),
+            new ExportOptions());
+        await catalog.CompleteAsync();
+    }
+
+    private static async IAsyncEnumerable<DataValue[]> ContainerRows()
+    {
+        yield return new[]
+        {
+            DataValue.FromText(ELogicalType.Integer32, "1"),
+            DataValue.FromText(ELogicalType.Binary, "\\x" + Convert.ToHexString(PngValue)),
+        };
+
+        await Task.CompletedTask;
+    }
+
+    private static byte[] BuildPngValue()
+    {
+        byte[] signature = [0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A];
+        var bytes = new byte[64];
+        signature.CopyTo(bytes, 0);
+        return bytes;
+    }
+
+    private static async Task<byte[]> ReadAllAsync(IBinaryPayload payload)
+    {
+        await using var stream = payload.OpenRead();
+        using var buffer = new MemoryStream();
+        await stream.CopyToAsync(buffer);
+        return buffer.ToArray();
+    }
+
+    /// <summary>
     /// The rows the catalog's data folder holds for <c>public.customers</c>: positional text, one token
     /// per recorded column, in the order the columns were recorded.
     /// </summary>
@@ -482,6 +589,12 @@ public sealed class SnapshotImporterTests : IDisposable
 
         public List<TableRef> RowTargets { get; } = [];
 
+        /// <summary>
+        /// Every value the importer handed over, in row order. A test that only reads the counts cannot see
+        /// what shape a value arrived in, which is what the payload rules turn on.
+        /// </summary>
+        public List<DataValue[]> Rows { get; } = [];
+
         public Dictionary<TableRef, IReadOnlyList<ColumnDefinition>> RowColumns { get; } = [];
 
         public TargetExpectation? Expectation { get; private set; }
@@ -515,8 +628,9 @@ public sealed class SnapshotImporterTests : IDisposable
             // The rows are counted as they pass, the way a writer must count them to report what it
             // applied. What the test reads afterwards is the importer's accumulation of those counts.
             var applied = 0L;
-            await foreach (var _ in rows.WithCancellation(ct))
+            await foreach (var row in rows.WithCancellation(ct))
             {
+                Rows.Add(row);
                 applied++;
             }
 

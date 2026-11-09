@@ -191,6 +191,16 @@ public sealed class CsvFieldTests
     // Unicode and large values.
 
     [Fact]
+    public void Encode_ControlCharacter_QuotesAndRoundTrips()
+    {
+        var value = "before\u0001after";
+        var encoded = CsvField.Encode(value);
+
+        encoded.Should().Be("\"before\u0001after\"");
+        CsvField.Decode(encoded).Should().Be(value);
+    }
+
+    [Fact]
     public void Encode_Emoji_NoQuoting()
     {
         CsvField.Encode("😀").Should().Be("😀");

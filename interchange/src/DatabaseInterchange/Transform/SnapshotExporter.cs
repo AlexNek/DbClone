@@ -189,6 +189,33 @@ public sealed class SnapshotExporter
             // the schema section: the table points at it by id.
             var schemaNames = snapshot.Schemas.ToDictionary(s => s.Ref, s => s.Name);
 
+            // Resolve table folder names per schema BEFORE writing any data. This is the fix for
+            // the §2.4 silent table loss: on a case-folding filesystem, MixedCase and mixedcase
+            // would map to the same directory, and the second write would overwrite the first.
+            // ResolveCollisions gives the loser a discriminator suffix so both survive.
+            var resolvedTableNames = new Dictionary<TableRef, string>();
+            var tablesBySchema = snapshot.Tables
+                .GroupBy(t => t.SchemaRef)
+                .ToDictionary(g => g.Key, g => g.ToList());
+
+            foreach (var (schemaRef, tables) in tablesBySchema)
+            {
+                if (!schemaNames.TryGetValue(schemaRef, out var schemaName))
+                {
+                    continue;
+                }
+
+                var rawNames = tables.Select(t => t.Name).ToList();
+                var resolved = NameEncoder.ResolveCollisions(
+                    rawNames,
+                    name => CanonicalModel.Interchange.ObjectRef.Table(schemaName, name));
+
+                foreach (var (rawName, encodedName) in resolved)
+                {
+                    resolvedTableNames[new TableRef(schemaName, rawName)] = encodedName;
+                }
+            }
+
             foreach (var table in snapshot.Tables)
             {
                 ct.ThrowIfCancellationRequested();
@@ -198,12 +225,34 @@ public sealed class SnapshotExporter
                     : throw new InvalidOperationException(
                         $"Table {table.Name} references schema {table.SchemaRef}, which is not in the captured schema section.");
                 var tableRef = new TableRef(schemaName, table.Name);
+
+                // When the caller named specific tables, skip the rest.
+                if (request.Options.Tables.Count > 0
+                    && !request.Options.Tables.Any(t =>
+                        string.Equals(t.Schema, schemaName, StringComparison.Ordinal)
+                        && string.Equals(t.Name, table.Name, StringComparison.Ordinal)))
+                {
+                    tablesProcessed++;
+                    continue;
+                }
+
+                // Skip tables the caller excluded.
+                if (request.Options.ExcludedTables.Contains(tableRef))
+                {
+                    tablesProcessed++;
+                    continue;
+                }
+
                 var rowOrder = table.RowOrder;
 
                 _logger.LogInformation("Exporting table {Table} with row order {RowOrder}", tableRef, rowOrder);
 
                 var rows = reader.ReadTableRowsAsync(tableRef, rowOrder, ct);
-                var rowCount = await writer.WriteTableAsync(table, schemaName, rows, ct);
+
+                // Pass the pre-resolved folder name so the writer can detect collisions.
+                resolvedTableNames.TryGetValue(tableRef, out var resolvedName);
+                var rowCount = await writer.WriteTableAsync(
+                    table, schemaName, rows, request.Options, ct, resolvedTableName: resolvedName);
                 totalRows += rowCount;
                 tablesProcessed++;
 

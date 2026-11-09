@@ -171,6 +171,62 @@ public static class CsvField
     }
 
     /// <summary>
+    /// Encodes a single value and writes it directly to a <see cref="TextWriter"/>, avoiding
+    /// the intermediate <see cref="string"/> allocation that <see cref="Encode"/> requires.
+    /// </summary>
+    /// <param name="writer">The text writer to write to.</param>
+    /// <param name="value">
+    /// The value to encode. <see langword="null"/> represents a SQL NULL (writes <c>\N</c>).
+    /// </param>
+    public static void WriteTo(TextWriter writer, string? value)
+    {
+        if (value is null)
+        {
+            writer.Write(NullToken);
+            return;
+        }
+
+        if (NeedsQuoting(value))
+        {
+            writer.Write('"');
+            foreach (var c in value)
+            {
+                if (c == '"')
+                {
+                    writer.Write('"');
+                    writer.Write('"');
+                }
+                else
+                {
+                    writer.Write(c);
+                }
+            }
+            writer.Write('"');
+        }
+        else
+        {
+            writer.Write(value);
+        }
+    }
+
+    /// <summary>
+    /// Writes a complete CSV record (one line) directly to a <see cref="TextWriter"/>, using
+    /// the encoding rules. The record is terminated with LF.
+    /// </summary>
+    /// <param name="writer">The text writer to write to.</param>
+    /// <param name="values">The field values (null = NULL).</param>
+    public static void WriteRecordTo(TextWriter writer, IReadOnlyList<string?> values)
+    {
+        for (var i = 0; i < values.Count; i++)
+        {
+            if (i > 0) writer.Write(',');
+            WriteTo(writer, values[i]);
+        }
+
+        writer.Write('\n');
+    }
+
+    /// <summary>
     /// Returns whether the value must be wrapped in double quotes per the CSV contract.
     /// </summary>
     private static bool NeedsQuoting(string value)
@@ -182,7 +238,8 @@ public static class CsvField
 
         foreach (var c in value)
         {
-            if (c == '"' || c == ',' || c == '\r' || c == '\n')
+            if (c == '"' || c == ',' || c == '\r' || c == '\n'
+                || (c < ' ' && c != '\t'))
             {
                 return true;
             }

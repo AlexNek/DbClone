@@ -55,4 +55,37 @@ public interface IInterchangeService
     Task<string?> PackAsync(
         string catalogPath,
         CancellationToken cancellationToken);
+
+    /// <summary>
+    /// Extracts binary values from a catalog table to individual files.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// The extractor reads chunk files and blob containers, writing each binary value to a separate
+    /// file named <c>&lt;table&gt;_&lt;row-index&gt;.&lt;suffix&gt;</c>. The suffix comes from the
+    /// detected format in the blob container name (for references) or from the magic bytes (for inline values).
+    /// </para>
+    /// </remarks>
+    /// <param name="request">The extraction request.</param>
+    /// <param name="progress">Optional progress reporter.</param>
+    /// <param name="cancellationToken">Cancellation token.</param>
+    /// <returns>The extraction result.</returns>
+    Task<BlobExtractionResult> ExtractBlobsAsync(
+        BlobExtractionRequest request,
+        IProgress<BlobExtractionProgressView>? progress,
+        CancellationToken cancellationToken);
+
+    /// <summary>
+    /// Scans the catalog for all tables with binary columns and extracts their blobs.
+    /// </summary>
+    /// <param name="catalogPath">Path to the catalog root directory.</param>
+    /// <param name="outputDirectory">Directory where extracted files will be written.</param>
+    /// <param name="progress">Optional progress reporter.</param>
+    /// <param name="cancellationToken">Cancellation token.</param>
+    /// <returns>The aggregated extraction result.</returns>
+    Task<BlobExtractionResult> ExtractAllBlobsAsync(
+        string catalogPath,
+        string outputDirectory,
+        IProgress<BlobExtractionProgressView>? progress,
+        CancellationToken cancellationToken);
 }
