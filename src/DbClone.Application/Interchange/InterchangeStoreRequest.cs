@@ -16,5 +16,4 @@ public sealed record InterchangeStoreRequest(
     bool IncludeData,
     string SnapshotConsistency,
     string UnsupportedFeaturePolicy,
-    bool PackAfterStore,
     bool VerifyAfterStore);

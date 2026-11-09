@@ -190,16 +190,21 @@ public sealed class PostgreSqlAdapter : IDatabaseAdapter
         ICopyPipeline pipeline = new CopyPipeline(stages, loggerFactory.CreateLogger<CopyPipeline>());
         ICopyEngine copyEngine = new PgCopyEngine(pipeline, loggerFactory.CreateLogger<PgCopyEngine>());
 
-        var connectionStringService = new PgConnectionStringService();
+        // The port a connection text does not carry comes from the engine's own data, not
+        // from a literal: defaults.port of the base platform file answers every format that
+        // has to fill one in.
+        var defaultPort = platformResolver.GetConnectionDefaults(null).Port;
+
+        var connectionStringService = new PgConnectionStringService(defaultPort);
         IReadOnlyList<IConnectionTextFormat> formats =
         [
-            new PostgreSqlSupabaseEnvFormat(),
-            new PostgreSqlSupabaseFormat(),
-            new PostgreSqlUriFormat(),
-            new PostgreSqlJdbcFormat(),
-            new PostgreSqlNpgsqlFormat(),
-            new PostgreSqlLibpqFormat(),
-            new PostgreSqlEnvVarFormat(),
+            new PostgreSqlSupabaseEnvFormat(defaultPort),
+            new PostgreSqlSupabaseFormat(defaultPort),
+            new PostgreSqlUriFormat(defaultPort),
+            new PostgreSqlJdbcFormat(defaultPort),
+            new PostgreSqlNpgsqlFormat(defaultPort),
+            new PostgreSqlLibpqFormat(defaultPort),
+            new PostgreSqlEnvVarFormat(defaultPort),
             new PostgreSqlSqlAlchemyFormat(),
             new PostgreSqlPrismaFormat(),
             new PostgreSqlNodeFormat(),

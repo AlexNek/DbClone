@@ -11,6 +11,16 @@ namespace DbAdapter.PostgreSql.Formats;
 /// </summary>
 public sealed class PostgreSqlNpgsqlFormat : IConnectionTextFormat
 {
+    private const string DefaultHost = "localhost";
+
+    private readonly int _defaultPort;
+
+    /// <summary>
+    /// Initializes a new instance. <paramref name="defaultPort"/> is the engine default as
+    /// the platform data defines it (defaults.port of the base engine file).
+    /// </summary>
+    public PostgreSqlNpgsqlFormat(int defaultPort) => _defaultPort = defaultPort;
+
     public int DetectionPriority => 30;
 
     public string DisplayName => "Npgsql / .NET";
@@ -90,10 +100,14 @@ public sealed class PostgreSqlNpgsqlFormat : IConnectionTextFormat
         // not defaults added by NpgsqlConnectionStringBuilder.
         var inputKeys = ParseInputKeys(text);
 
-        // Use actual parsed values for keys that succeeded, -1/empty for keys that were
-        // not present (either missing or rejected as invalid).
-        var hasHost = inputKeys.Contains("Host") || inputKeys.Contains("Server");
-        var hasPort = inputKeys.Contains("Port");
+        // Use actual parsed values for keys that succeeded, empty for keys that were
+        // not present (either missing or rejected as invalid). A Host or Port the text does
+        // not carry a usable value for falls back to a default and is marked for the import
+        // service, so the dialog can warn rather than disable Import with nothing to say.
+        var hasHost = (inputKeys.Contains("Host") || inputKeys.Contains("Server"))
+                      && !string.IsNullOrEmpty(builder.Host);
+        var hasPort = inputKeys.Contains("Port")
+                      && !invalidKeys.Any(k => k.Equals("Port", StringComparison.OrdinalIgnoreCase));
         var hasUsername = inputKeys.Contains("Username") || inputKeys.Contains("User Id");
 
         var options = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
@@ -117,9 +131,20 @@ public sealed class PostgreSqlNpgsqlFormat : IConnectionTextFormat
         foreach (var key in invalidKeys)
             options[$"_invalid:{key}"] = string.Empty;
 
+        // Cloud dashboards (Neon, Supabase) publish key-value strings with no Port key; the
+        // builder also drops a Port value it cannot hold. Either way the engine default was
+        // used, so record it — otherwise the builder's own default would arrive unmarked.
+        if (!hasPort)
+            options["_defaulted:Port"] = _defaultPort.ToString();
+
+        // A string with no Host key, or with an empty one, is taken as the local server —
+        // the same assumption the libpq and environment-variable formats already make.
+        if (!hasHost)
+            options["_defaulted:Host"] = DefaultHost;
+
         return new ConnectionStringFields(
-            Host: hasHost ? builder.Host ?? "localhost" : string.Empty,
-            Port: hasPort ? builder.Port : -1,
+            Host: hasHost ? builder.Host! : DefaultHost,
+            Port: hasPort ? builder.Port : _defaultPort,
             Database: builder.Database ?? string.Empty,
             Username: hasUsername ? builder.Username ?? string.Empty : string.Empty,
             Password: builder.Password ?? string.Empty,

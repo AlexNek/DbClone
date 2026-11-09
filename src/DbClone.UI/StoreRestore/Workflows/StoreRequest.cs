@@ -14,5 +14,4 @@ public sealed record StoreRequest(
     bool IncludeData,
     string SnapshotConsistency,
     string UnsupportedFeaturePolicy,
-    bool PackAfterStore,
     TableSelectionSpec? TableSelection);

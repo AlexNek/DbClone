@@ -52,7 +52,7 @@ The interchange product (DatabaseInterchange) is complete on its own. DbClone co
 2. **UI talks to Application, not to the product.** The UI sees `IInterchangeService` and app DTOs only. It does not reference the interchange projects, cannot parse a catalog, and cannot construct a model.
 3. **`App.xaml.cs`** is the one place that calls `services.AddInterchangeServices()`. When the product arrives, it will also construct the exchange runtime over the adapter already held there.
 4. **No engine mapping in DbClone.** The app contains no metadata-to-model conversion, no DDL generation, no value encoding for the catalog. If a change here would require writing those, it belongs in the product.
-5. **Settings are app preferences.** Chunk size, pack-after-store, restore mode and the unsupported-object policy live in `StoreRestoreOptions` on `UserSettings`, not in the product.
+5. **Settings are app preferences.** Chunk size, restore mode and the unsupported-object policy live in `StoreRestoreOptions` on `UserSettings`, not in the product.
 
 ## Forbidden in DbAdapter.PostgreSql (the engine block)
 

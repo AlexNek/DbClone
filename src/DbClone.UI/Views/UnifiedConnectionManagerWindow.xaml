@@ -86,6 +86,26 @@
                                    Width="64"/>
                     </StackPanel>
 
+                    <!-- What an import from file/clipboard assumed, or why it imported nothing -->
+                    <TextBlock DockPanel.Dock="Bottom"
+                               Text="{Binding ImportMessage}"
+                               FontSize="11" TextWrapping="Wrap"
+                               Margin="0,6,0,0">
+                        <TextBlock.Style>
+                            <Style TargetType="TextBlock">
+                                <Setter Property="Visibility" Value="Visible"/>
+                                <Style.Triggers>
+                                    <DataTrigger Binding="{Binding ImportMessage}" Value="{x:Null}">
+                                        <Setter Property="Visibility" Value="Collapsed"/>
+                                    </DataTrigger>
+                                    <DataTrigger Binding="{Binding ImportMessage}" Value="">
+                                        <Setter Property="Visibility" Value="Collapsed"/>
+                                    </DataTrigger>
+                                </Style.Triggers>
+                            </Style>
+                        </TextBlock.Style>
+                    </TextBlock>
+
                     <ListBox x:Name="ConnectionsList"
                              ItemsSource="{Binding FilteredConnections}"
                              SelectedItem="{Binding SelectedConnection}"

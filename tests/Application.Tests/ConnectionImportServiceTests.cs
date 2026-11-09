@@ -215,6 +215,67 @@ public class ConnectionImportServiceTests
     }
 
     [Fact]
+    public void Import_NpgsqlWithoutPortKey_AppliesDefaultPortAndWarns()
+    {
+        // Arrange — a Neon-style key-value string that carries no Port key
+        var service = CreateServiceWithRealFormats();
+        var input = "Host=test.example.com;Database=testdb;Username=test_user;Password=pass";
+
+        // Act
+        var result = service.Import(input);
+
+        // Assert
+        result.Success.Should().BeTrue();
+        result.Connection!.Port.Should().Be(5432);
+        result.Warnings.Should().Contain(w =>
+            w.Level == EWarningLevel.Warning
+            && w.ParameterName == "Port"
+            && w.Message.Contains("Port is not specified"));
+        result.Connection.Options.Should().NotContainKey("_defaulted:Port");
+    }
+
+    [Fact]
+    public void Import_NpgsqlWithoutHostKey_AppliesLocalhostAndWarns()
+    {
+        // Arrange — a string that names no server; the import must say what it assumed,
+        // never hand back an empty host that disables the dialog with nothing to show
+        var service = CreateServiceWithRealFormats();
+        var input = "Database=testdb;Username=test_user;Password=pass";
+
+        // Act
+        var result = service.Import(input);
+
+        // Assert
+        result.Success.Should().BeTrue();
+        result.Connection!.Host.Should().Be("localhost");
+        result.Warnings.Should().Contain(w =>
+            w.Level == EWarningLevel.Warning
+            && w.ParameterName == "Host"
+            && w.Message.Contains("Host is not specified"));
+        result.Connection.Options.Should().NotContainKey("_defaulted:Host");
+    }
+
+    [Fact]
+    public void Import_PortOutsideTcpRange_WarnsAndKeepsTheGivenValue()
+    {
+        // Arrange — no server can listen on this port, but the text did say it
+        var service = CreateServiceWithRealFormats();
+        var input =
+            "Host=test.example.com;Port=70000;Database=testdb;Username=test_user;Password=pass";
+
+        // Act
+        var result = service.Import(input);
+
+        // Assert
+        result.Success.Should().BeTrue();
+        result.Connection!.Port.Should().Be(70000);
+        result.Warnings.Should().Contain(w =>
+            w.Level == EWarningLevel.Warning
+            && w.ParameterName == "Port"
+            && w.Message.Contains("outside the range"));
+    }
+
+    [Fact]
     public void Import_UriWithSpecialCharsInPassword_ParsesCorrectly()
     {
         // Arrange
@@ -274,13 +335,19 @@ public class ConnectionImportServiceTests
         params IConnectionTextFormat[] formats) =>
         new(formats, NullLogger<ConnectionImportService>.Instance);
 
-    private static ConnectionImportService CreateServiceWithRealFormats() =>
-        new(
-                [
-                    new PostgreSqlUriFormat(),
-                    new PostgreSqlNpgsqlFormat(),
-                    new PostgreSqlJdbcFormat(),
-                    new PostgreSqlLibpqFormat(),
-                ],
+    private static ConnectionImportService CreateServiceWithRealFormats()
+    {
+        // The adapter hands its formats the port its platform data declares; the test
+        // composes the same pair.
+        const int engineDefaultPort = 5432;
+
+        return new ConnectionImportService(
+            [
+                new PostgreSqlUriFormat(engineDefaultPort),
+                new PostgreSqlNpgsqlFormat(engineDefaultPort),
+                new PostgreSqlJdbcFormat(engineDefaultPort),
+                new PostgreSqlLibpqFormat(engineDefaultPort),
+            ],
             NullLogger<ConnectionImportService>.Instance);
+    }
 }

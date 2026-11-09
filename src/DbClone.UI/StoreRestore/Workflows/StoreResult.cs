@@ -7,7 +7,6 @@ public sealed record StoreResult(
     bool Success,
     string Message,
     string? CatalogPath,
-    string? PackedZipPath,
     int TablesExported,
     long RowsExported,
     double ElapsedSeconds,

@@ -10,7 +10,14 @@ namespace DbAdapter.PostgreSql.Formats;
 /// </summary>
 public sealed class PostgreSqlSupabaseFormat : IConnectionTextFormat
 {
-    private readonly PostgreSqlUriFormat _uriFormat = new();
+    private readonly PostgreSqlUriFormat _uriFormat;
+
+    /// <summary>
+    /// Initializes a new instance. <paramref name="defaultPort"/> is the engine default as
+    /// the platform data defines it, forwarded to the URI format this one delegates to.
+    /// </summary>
+    public PostgreSqlSupabaseFormat(int defaultPort) =>
+        _uriFormat = new PostgreSqlUriFormat(defaultPort);
 
     public int DetectionPriority =>
         5; // must be lower than generic URI (10) so Supabase URIs are detected as Supabase

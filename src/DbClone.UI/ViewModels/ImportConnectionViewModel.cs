@@ -44,10 +44,10 @@ public sealed partial class ImportConnectionViewModel : ObservableObject
     [ObservableProperty]
     private string _selectedImportAs = NewConnectionOption;
 
-    public bool CanImport =>
-        IsDetected && Preview?.Success == true
-                   && !string.IsNullOrEmpty(Preview.Connection?.Host)
-                   && Preview.Connection?.Port > 0;
+    // Whether a format understood the text is all Import asks. A field the text left out
+    // already arrived with its default and a warning from the import service, so no missing
+    // value may disable the button with nothing to explain why.
+    public bool CanImport => IsDetected && Preview?.Success == true;
 
     /// <summary>Set to true when the user confirms the import (dialog result).</summary>
     public bool Confirmed { get; private set; }

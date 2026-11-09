@@ -13,6 +13,16 @@ public sealed class PostgreSqlJdbcFormat : IConnectionTextFormat
 {
     private const string Prefix = "jdbc:postgresql://";
 
+    private const string DefaultHost = "localhost";
+
+    private readonly int _defaultPort;
+
+    /// <summary>
+    /// Initializes a new instance. <paramref name="defaultPort"/> is the engine default as
+    /// the platform data defines it (defaults.port of the base engine file).
+    /// </summary>
+    public PostgreSqlJdbcFormat(int defaultPort) => _defaultPort = defaultPort;
+
     public int DetectionPriority => 20;
 
     public string DisplayName => "JDBC";
@@ -49,8 +59,11 @@ public sealed class PostgreSqlJdbcFormat : IConnectionTextFormat
         var uriPart = text["jdbc:".Length..]; // "postgresql://host:port/db?params"
         var uri = new Uri(uriPart);
 
-        var host = uri.Host;
-        var port = uri.Port > 0 ? uri.Port : 5432;
+        var hostRaw = uri.Host;
+        var hasHost = !string.IsNullOrEmpty(hostRaw);
+        var host = hasHost ? hostRaw : DefaultHost;
+        var hasPort = uri.Port > 0;
+        var port = hasPort ? uri.Port : _defaultPort;
 
         var database = string.Empty;
         if (!string.IsNullOrEmpty(uri.AbsolutePath) && uri.AbsolutePath != "/")
@@ -94,6 +107,13 @@ public sealed class PostgreSqlJdbcFormat : IConnectionTextFormat
             if (parts.Length > 1)
                 password = Uri.UnescapeDataString(parts[1]);
         }
+
+        // A JDBC URL with no port took the engine default, and one whose authority names no
+        // host took the local server; record either so the import service can say so.
+        if (!hasPort)
+            options["_defaulted:Port"] = _defaultPort.ToString();
+        if (!hasHost)
+            options["_defaulted:Host"] = DefaultHost;
 
         return new ConnectionStringFields(
             Host: host,

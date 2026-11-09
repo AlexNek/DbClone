@@ -33,7 +33,6 @@ public sealed class StoreWorkflowService : IWorkflowService<StoreRequest, StoreR
             IncludeData: request.IncludeData,
             SnapshotConsistency: request.SnapshotConsistency,
             UnsupportedFeaturePolicy: request.UnsupportedFeaturePolicy,
-            PackAfterStore: request.PackAfterStore,
             VerifyAfterStore: true);
 
         var result = await _interchangeService.StoreAsync(interchangeRequest, progress: null, ct);
@@ -48,7 +47,6 @@ public sealed class StoreWorkflowService : IWorkflowService<StoreRequest, StoreR
             Success: success,
             Message: BuildMessage(result),
             CatalogPath: result.CatalogPath ?? catalogPath,
-            PackedZipPath: result.PackedZipPath,
             TablesExported: result.TablesExported,
             RowsExported: result.RowsExported,
             ElapsedSeconds: result.Elapsed.TotalSeconds,

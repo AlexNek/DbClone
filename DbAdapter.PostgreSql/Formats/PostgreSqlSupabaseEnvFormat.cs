@@ -27,6 +27,14 @@ public sealed class PostgreSqlSupabaseEnvFormat : IConnectionTextFormat
         @"https?://([a-z0-9]+)\.supabase\.co",
         RegexOptions.IgnoreCase | RegexOptions.Compiled);
 
+    private readonly int _defaultPort;
+
+    /// <summary>
+    /// Initializes a new instance. <paramref name="defaultPort"/> is the engine default as
+    /// the platform data defines it (defaults.port of the base engine file).
+    /// </summary>
+    public PostgreSqlSupabaseEnvFormat(int defaultPort) => _defaultPort = defaultPort;
+
     public int DetectionPriority => 4;
 
     public string DisplayName => "Supabase (env)";
@@ -86,7 +94,7 @@ public sealed class PostgreSqlSupabaseEnvFormat : IConnectionTextFormat
 
         return new ConnectionStringFields(
             Host: $"db.{projectRef}.supabase.co",
-            Port: 5432,
+            Port: _defaultPort,
             Database: "postgres",
             Username: "postgres",
             Password: string.Empty, // not available from env — user must supply

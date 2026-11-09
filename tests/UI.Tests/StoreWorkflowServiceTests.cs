@@ -35,7 +35,6 @@ public sealed class StoreWorkflowServiceTests
             VerificationPassed: true,
             Issues: [],
             CatalogPath: catalogPath,
-            PackedZipPath: null,
             Elapsed: TimeSpan.Zero);
         interchange.StoreAsync(
                 Arg.Any<InterchangeStoreRequest>(),
@@ -60,7 +59,6 @@ public sealed class StoreWorkflowServiceTests
             IncludeData: true,
             SnapshotConsistency: "snapshot",
             UnsupportedFeaturePolicy: "warn",
-            PackAfterStore: false,
             TableSelection: TableSelectionSpec.All);
 
         var result = await service.ExecuteAsync(request, CancellationToken.None);

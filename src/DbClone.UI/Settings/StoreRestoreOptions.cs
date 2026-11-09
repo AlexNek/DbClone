@@ -60,7 +60,4 @@ public sealed class StoreRestoreOptions
     /// </summary>
     public string UnsupportedFeaturePolicy { get; set; } = "fail";
 
-    /// <summary>Whether to pack the catalog into a .rdbx.zip after a successful store.</summary>
-    public bool PackAfterStore { get; set; } = true;
-
 }

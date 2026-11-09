@@ -17,7 +17,7 @@ namespace DbClone.Application.Interchange;
 /// <summary>
 /// Default implementation of <see cref="IInterchangeService"/>.
 /// Builds a <see cref="DbAdapter.Definitions.DatabaseTarget"/> through <see cref="DatabaseTargetFactory"/>
-/// and delegates to the interchange product for export, import, inspection, verification, and packing.
+/// and delegates to the interchange product for export, import, inspection, and verification.
 /// </summary>
 public sealed class InterchangeService : IInterchangeService
 {
@@ -102,14 +102,6 @@ public sealed class InterchangeService : IInterchangeService
                 verificationPassed = verification.IsValid;
             }
 
-            // Pack if requested
-            string? packedZipPath = null;
-            if (request.PackAfterStore && result.Success)
-            {
-                // TODO: Implement CatalogArchiver.PackAsync when archive support is added
-                _logger.LogInformation("Pack after store requested but archive support not yet implemented.");
-            }
-
             var outcome = result.Success
                 ? (result.Issues.Count > 0 ? EStoreOutcome.CompletedWithIssues : EStoreOutcome.Success)
                 : EStoreOutcome.Failed;
@@ -127,7 +119,6 @@ public sealed class InterchangeService : IInterchangeService
                 VerificationPassed: verificationPassed,
                 Issues: result.Issues.Select(MapIssue).ToList(),
                 CatalogPath: result.CatalogDirectory,
-                PackedZipPath: packedZipPath,
                 Elapsed: sw.Elapsed);
         }
         catch (OperationCanceledException)
@@ -147,7 +138,6 @@ public sealed class InterchangeService : IInterchangeService
                 VerificationPassed: false,
                 Issues: [new InterchangeIssueView(EInterchangeSeverity.Warning, "Cancelled", "The operation was cancelled.", string.Empty, string.Empty)],
                 CatalogPath: null,
-                PackedZipPath: null,
                 Elapsed: sw.Elapsed);
         }
         catch (Exception ex)
@@ -167,7 +157,6 @@ public sealed class InterchangeService : IInterchangeService
                 VerificationPassed: false,
                 Issues: [new InterchangeIssueView(EInterchangeSeverity.Error, "ExportFailed", ex.Message, string.Empty, string.Empty)],
                 CatalogPath: null,
-                PackedZipPath: null,
                 Elapsed: sw.Elapsed);
         }
     }
@@ -373,23 +362,6 @@ public sealed class InterchangeService : IInterchangeService
                     issue,
                     string.Empty,
                     string.Empty)).ToList());
-    }
-
-    /// <inheritdoc />
-    public async Task<string?> PackAsync(
-        string catalogPath,
-        CancellationToken cancellationToken)
-    {
-        ArgumentException.ThrowIfNullOrWhiteSpace(catalogPath);
-
-        _logger.LogInformation("Pack started: catalog={CatalogPath}", catalogPath);
-
-        // TODO: Implement CatalogArchiver.PackAsync when archive support is added
-        await Task.CompletedTask;
-        cancellationToken.ThrowIfCancellationRequested();
-
-        _logger.LogWarning("Archive support not yet implemented.");
-        return null;
     }
 
     /// <inheritdoc />

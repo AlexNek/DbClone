@@ -455,7 +455,6 @@ public sealed partial class MainViewModel : ObservableObject
             IncludeData: options.IncludeData,
             SnapshotConsistency: options.SnapshotConsistency,
             UnsupportedFeaturePolicy: options.UnsupportedFeaturePolicy,
-            PackAfterStore: options.PackAfterStore,
             TableSelection: _tableSelectionService.OperationSpec);
 
         var result = await _storeWorkflow.ExecuteAsync(request, ct);

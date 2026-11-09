@@ -10,6 +10,8 @@ namespace DbAdapter.PostgreSql.Formats;
 /// </summary>
 public sealed class PostgreSqlEnvVarFormat : IConnectionTextFormat
 {
+    private const string DefaultHost = "localhost";
+
     private static readonly string[] KnownVarNames =
         [
             "DATABASE_URL=",
@@ -23,9 +25,23 @@ public sealed class PostgreSqlEnvVarFormat : IConnectionTextFormat
             "PGPASSWORD="
         ];
 
-    private readonly PostgreSqlNpgsqlFormat _npgsqlFormat = new();
+    private readonly PostgreSqlNpgsqlFormat _npgsqlFormat;
 
-    private readonly PostgreSqlUriFormat _uriFormat = new();
+    private readonly PostgreSqlUriFormat _uriFormat;
+
+    private readonly int _defaultPort;
+
+    /// <summary>
+    /// Initializes a new instance. <paramref name="defaultPort"/> is the engine default as
+    /// the platform data defines it (defaults.port of the base engine file); it is forwarded
+    /// to the formats this one delegates to.
+    /// </summary>
+    public PostgreSqlEnvVarFormat(int defaultPort)
+    {
+        _defaultPort = defaultPort;
+        _npgsqlFormat = new PostgreSqlNpgsqlFormat(defaultPort);
+        _uriFormat = new PostgreSqlUriFormat(defaultPort);
+    }
 
     public int DetectionPriority => 50;
 
@@ -60,11 +76,22 @@ public sealed class PostgreSqlEnvVarFormat : IConnectionTextFormat
 
         // Handle individual PG* env vars (multi-line or single line)
         var envVars = ParseEnvVars(text);
-        var host = envVars.GetValueOrDefault("PGHOST", "localhost");
-        var port = int.TryParse(envVars.GetValueOrDefault("PGPORT"), out var p) ? p : 5432;
+        var hostRaw = envVars.GetValueOrDefault("PGHOST");
+        var hasHost = !string.IsNullOrEmpty(hostRaw);
+        var host = hasHost ? hostRaw! : DefaultHost;
+        var hasPort = int.TryParse(envVars.GetValueOrDefault("PGPORT"), out var parsedPort);
+        var port = hasPort ? parsedPort : _defaultPort;
         var database = envVars.GetValueOrDefault("PGDATABASE", string.Empty);
         var username = envVars.GetValueOrDefault("PGUSER", "postgres");
         var password = envVars.GetValueOrDefault("PGPASSWORD");
+
+        // A block with no PGPORT took the engine default; a block with no usable PGHOST took
+        // the local server. Record either so the import service can say so.
+        var options = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+        if (!hasPort)
+            options["_defaulted:Port"] = _defaultPort.ToString();
+        if (!hasHost)
+            options["_defaulted:Host"] = DefaultHost;
 
         return new ConnectionStringFields(
             Host: host,
@@ -73,7 +100,8 @@ public sealed class PostgreSqlEnvVarFormat : IConnectionTextFormat
             Username: username,
             Password: password ?? string.Empty,
             SslMode: ESslMode.Prefer,
-            Provider: "postgresql");
+            Provider: "postgresql",
+            Options: options);
     }
 
     private static Dictionary<string, string> ParseEnvVars(string text)

@@ -112,9 +112,8 @@ The preserved PostgreSQL-only statements are applied only when the target report
 | **Catalog Location** | Root folder for catalogs, with **Browse…**. The last folder you picked is used as the starting point |
 | **Subfolder Pattern** | Folder name created under the root. `{Database}` is the source database name, `{timestamp}` is `yyyy-MM-dd_HH-mm`. Leave it empty to write straight into the root folder |
 | **Include table data** | Off stores the schema only, and restoring such a catalog writes the structure and no rows. On stores the rows and the restore writes them back |
-| **Pack catalog after store (.rdbx.zip)** | No archive is produced today — the option is remembered but has no effect |
 
-These values live in `settings.json` under `StoreRestore`:
+These values live in `settings.json` under `StoreRestore`. Catalogs are currently stored as directories. ZIP packaging is a separate planned feature and is not currently exposed as a Store option.
 
 | Setting | Default | Effect |
 |---------|---------|--------|

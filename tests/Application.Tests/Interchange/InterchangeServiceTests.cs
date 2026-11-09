@@ -60,7 +60,6 @@ public class InterchangeServiceTests
             IncludeData: true,
             SnapshotConsistency: "consistent",
             UnsupportedFeaturePolicy: "fail",
-            PackAfterStore: true,
             VerifyAfterStore: true);
 
         // Act
@@ -115,17 +114,6 @@ public class InterchangeServiceTests
     {
         // Act
         var act = () => _sut.VerifyAsync(@"C:\test\catalog.rdbx", CancellationToken.None);
-
-        // Assert
-        act.Should().ThrowAsync<NotSupportedException>()
-            .WithMessage("*DatabaseInterchange*not yet available*");
-    }
-
-    [Fact]
-    public void PackAsync_throws_NotSupportedException_until_product_arrives()
-    {
-        // Act
-        var act = () => _sut.PackAsync(@"C:\test\catalog.rdbx", CancellationToken.None);
 
         // Assert
         act.Should().ThrowAsync<NotSupportedException>()

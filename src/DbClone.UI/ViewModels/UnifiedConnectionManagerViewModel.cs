@@ -124,6 +124,13 @@ public sealed partial class UnifiedConnectionManagerViewModel : ObservableObject
     [ObservableProperty]
     private string? _groupValidationError;
 
+    /// <summary>
+    /// What a text/clipboard import had to assume, or why it imported nothing; null when the
+    /// import was complete. Shown under the connection list so an import never ends silently.
+    /// </summary>
+    [ObservableProperty]
+    private string? _importMessage;
+
     [ObservableProperty]
     private bool _isBrowsingDatabases;
 
@@ -427,26 +434,42 @@ public sealed partial class UnifiedConnectionManagerViewModel : ObservableObject
         return (connCount, groupCount);
     }
 
-    /// <summary>Imports a connection from raw text (used by Import from File / Clipboard).</summary>
+    /// <summary>Imports a connection from raw text (used by Import from File / Clipboard).
+    /// Whatever the import had to assume, or the reason it could not import at all, is put on
+    /// <see cref="ImportMessage"/> — the same report the import dialog shows.</summary>
     public void ImportFromText(string text)
     {
+        ImportMessage = null;
         if (string.IsNullOrWhiteSpace(text)) return;
 
+        ImportResult result;
         try
         {
-            var result = _importService.Import(text);
-            if (result.Success && result.Connection is not null)
-            {
-                var saved = MapToSavedConnection(result.Connection);
-                _connectionStore.Save(saved);
-                SelectedConnection = FilteredConnections.FirstOrDefault(c => c.Id == saved.Id);
-            }
+            result = _importService.Import(text);
         }
         catch
         {
-            // Silently ignore unrecognized content
+            ImportMessage = "No connection string was recognized in the text.";
+            return;
         }
+
+        var report = DescribeWarnings(result);
+
+        if (result.Success && result.Connection is not null)
+        {
+            var saved = MapToSavedConnection(result.Connection);
+            _connectionStore.Save(saved);
+            SelectedConnection = FilteredConnections.FirstOrDefault(c => c.Id == saved.Id);
+        }
+
+        ImportMessage = report;
     }
+
+    /// <summary>The warnings an import produced, as one line of status text, or null if none.</summary>
+    private static string? DescribeWarnings(ImportResult result) =>
+        result.Warnings.Count == 0
+            ? null
+            : string.Join(" ", result.Warnings.Select(w => w.Message));
 
     /// <summary>
     /// Checks whether a backup file is encrypted.
@@ -648,23 +671,7 @@ public sealed partial class UnifiedConnectionManagerViewModel : ObservableObject
     [RelayCommand]
     private void ImportFromClipboard()
     {
-        var text = System.Windows.Clipboard.GetText();
-        if (string.IsNullOrWhiteSpace(text)) return;
-
-        try
-        {
-            var result = _importService.Import(text);
-            if (result.Success && result.Connection is not null)
-            {
-                var saved = MapToSavedConnection(result.Connection);
-                _connectionStore.Save(saved);
-                SelectedConnection = FilteredConnections.FirstOrDefault(c => c.Id == saved.Id);
-            }
-        }
-        catch
-        {
-            // Silently ignore unrecognized clipboard content
-        }
+        ImportFromText(System.Windows.Clipboard.GetText());
     }
 
     private static bool IsPortValid(string portValue)

@@ -17,5 +17,4 @@ public sealed record InterchangeStoreResult(
     bool VerificationPassed,
     IReadOnlyList<InterchangeIssueView> Issues,
     string? CatalogPath,
-    string? PackedZipPath,
     TimeSpan Elapsed);

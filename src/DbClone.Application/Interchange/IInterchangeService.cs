@@ -49,14 +49,6 @@ public interface IInterchangeService
         CancellationToken cancellationToken);
 
     /// <summary>
-    /// Packs a catalog directory into a single <c>.rdbx.zip</c> file.
-    /// Returns the path to the ZIP, or <c>null</c> when packing is not applicable.
-    /// </summary>
-    Task<string?> PackAsync(
-        string catalogPath,
-        CancellationToken cancellationToken);
-
-    /// <summary>
     /// Extracts binary values from a catalog table to individual files.
     /// </summary>
     /// <remarks>

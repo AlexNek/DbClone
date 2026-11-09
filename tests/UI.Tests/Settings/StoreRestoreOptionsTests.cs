@@ -20,7 +20,6 @@ public class StoreRestoreOptionsTests
         options.IncludeData.Should().BeTrue();
         options.SnapshotConsistency.Should().Be("consistent");
         options.UnsupportedFeaturePolicy.Should().Be("fail");
-        options.PackAfterStore.Should().BeTrue();
     }
 
     [Fact]
