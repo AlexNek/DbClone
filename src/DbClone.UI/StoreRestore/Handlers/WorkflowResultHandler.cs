@@ -32,6 +32,10 @@ public sealed class WorkflowResultHandler : IWorkflowResultHandler
 
         if (!string.IsNullOrEmpty(result.CatalogPath))
             state.LogDetail($"Catalog: {result.CatalogPath}");
+        if (!string.IsNullOrEmpty(result.SummaryPath))
+            state.LogDetail($"Summary: {result.SummaryPath}");
+        else if (result.SummaryRequested)
+            state.LogWarning("Summary: not written");
         if (!result.VerificationPassed && result.Success)
             state.LogWarning("Catalog verification did not pass.");
     }

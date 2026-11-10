@@ -169,6 +169,37 @@ public class ArchitectureTests
             "no C# file under src may name the engine block or its adapter class (refactors/09 Phase 4)");
     }
 
+    /// <summary>Gets the regular expression matching a name of the interchange product assembly.</summary>
+    private static readonly Regex ProductAssemblyName = new(@"\bDatabaseInterchange\b", RegexOptions.Compiled);
+
+    /// <summary>Gets the text file types under the UI project worth scanning for an assembly name.</summary>
+    private static readonly string[] UiTextFilePatterns = ["*.cs", "*.xaml", "*.csproj"];
+
+    [Fact]
+    public void NoUiFileNamesTheProductAssembly()
+    {
+        // Arrange — the UI half of AC11. The interchange product is consumed through the application's
+        // Interchange/ facade; a UI that could name it could also start reading a catalog by itself.
+        var uiRoot = Path.Combine(RepoRoot, "src", "DbClone.UI");
+
+        // Act
+        var offenders = UiTextFilePatterns
+            .SelectMany(pattern => Directory.EnumerateFiles(uiRoot, pattern, SearchOption.AllDirectories))
+            .Where(file => !file.Contains($"{Path.DirectorySeparatorChar}bin{Path.DirectorySeparatorChar}")
+                           && !file.Contains($"{Path.DirectorySeparatorChar}obj{Path.DirectorySeparatorChar}"))
+            .Where(file => ProductAssemblyName.IsMatch(File.ReadAllText(file)))
+            .Select(file => Path.GetRelativePath(RepoRoot, file))
+            .ToList();
+
+        // Assert — a guard against this feature's own temptation, not a fix: the summary report adds a
+        // product-side artifact whose path the UI is shown, and the shortest wrong answer is to reference
+        // the product from the UI.
+        offenders.Should().BeEmpty("no file under DbClone.UI may name the interchange product");
+        ProjectReferencesOf("src/DbClone.UI/DbClone.UI.csproj").Should().NotContain(
+            reference => reference.EndsWith("DatabaseInterchange.csproj", StringComparison.Ordinal),
+            "the UI reaches the product only through DbClone.Application");
+    }
+
     [Fact]
     public void BlockProjectDoesNotReferenceApplication()
     {

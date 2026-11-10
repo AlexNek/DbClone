@@ -33,13 +33,14 @@ public sealed class StoreWorkflowService : IWorkflowService<StoreRequest, StoreR
             IncludeData: request.IncludeData,
             SnapshotConsistency: request.SnapshotConsistency,
             UnsupportedFeaturePolicy: request.UnsupportedFeaturePolicy,
-            VerifyAfterStore: true);
+            VerifyAfterStore: true,
+            IncludeSummaryReport: request.IncludeSummaryReport);
 
         var result = await _interchangeService.StoreAsync(interchangeRequest, progress: null, ct);
-        return MapResult(result, request.CatalogPath);
+        return MapResult(result, request.CatalogPath, request.IncludeSummaryReport);
     }
 
-    private static StoreResult MapResult(InterchangeStoreResult result, string catalogPath)
+    private static StoreResult MapResult(InterchangeStoreResult result, string catalogPath, bool summaryRequested)
     {
         var success = result.Outcome is EStoreOutcome.Success or EStoreOutcome.CompletedWithIssues;
 
@@ -51,15 +52,18 @@ public sealed class StoreWorkflowService : IWorkflowService<StoreRequest, StoreR
             RowsExported: result.RowsExported,
             ElapsedSeconds: result.Elapsed.TotalSeconds,
             HasIssues: result.Outcome == EStoreOutcome.CompletedWithIssues,
-            VerificationPassed: result.VerificationPassed);
+            VerificationPassed: result.VerificationPassed,
+            SummaryPath: result.SummaryPath,
+            SummaryRequested: summaryRequested);
     }
 
     private static string BuildMessage(InterchangeStoreResult result)
     {
+        var summary = string.IsNullOrEmpty(result.SummaryPath) ? string.Empty : ", summary written";
         return result.Outcome switch
         {
-            EStoreOutcome.Success => $"Store succeeded: {result.TablesExported} tables, {result.RowsExported:N0} rows",
-            EStoreOutcome.CompletedWithIssues => $"Store completed with issues: {result.TablesExported} tables",
+            EStoreOutcome.Success => $"Store succeeded: {result.TablesExported} tables, {result.RowsExported:N0} rows{summary}",
+            EStoreOutcome.CompletedWithIssues => $"Store completed with issues: {result.TablesExported} tables{summary}",
             EStoreOutcome.Incomplete => "Store incomplete — catalog not usable",
             EStoreOutcome.Failed => "Store failed",
             _ => "Unknown outcome"

@@ -1,6 +1,7 @@
 using CanonicalModel.Interchange;
 using DbAdapter.Definitions;
 using DatabaseInterchange.Format;
+using DatabaseInterchange.Report;
 
 using Microsoft.Extensions.Logging;
 
@@ -46,6 +47,28 @@ public sealed record ExportResult
 
     /// <summary>Gets the total number of rows exported.</summary>
     public long RowCount { get; init; }
+
+    /// <summary>Gets the data bytes of the catalog: row chunks plus blob containers (D3, FR3).</summary>
+    public long DataBytes { get; init; }
+
+    /// <summary>Gets the metadata bytes of the catalog, the two root JSON files included (D3, FR3).</summary>
+    public long MetadataBytes { get; init; }
+
+    /// <summary>Gets the size of the catalog artifact: data plus metadata (D3). Excludes <c>summary.md</c>.</summary>
+    public long CatalogBytes { get; init; }
+
+    /// <summary>Gets the number of row-chunk files written.</summary>
+    public int TotalChunks { get; init; }
+
+    /// <summary>Gets the schema sections the writer finished with, in the order it wrote them (D3).</summary>
+    public IReadOnlyList<string> SectionNames { get; init; } = [];
+
+    /// <summary>
+    /// Gets the report's path relative to <see cref="CatalogDirectory"/>, or <see langword="null"/> when
+    /// the option was off, the write failed, or the user cancelled during that stage — in which case the
+    /// rest of this result still describes the finished catalog (D4.2).
+    /// </summary>
+    public string? ReportRelativePath { get; init; }
 }
 
 /// <summary>
@@ -76,6 +99,12 @@ public sealed class SnapshotExporter
 {
     private readonly IDatabaseAdapter _adapter;
     private readonly ILogger<SnapshotExporter> _logger;
+
+    // The report pipeline is composed here rather than injected: the product uses no container, and all
+    // three collaborators are internal to it, so a consumer of the package never sees these types (D2).
+    private readonly CatalogStatisticsBuilder _statisticsBuilder = new();
+    private readonly RelationGraphBuilder _relationBuilder = new();
+    private readonly CatalogReportWriter _reportWriter = new();
 
     /// <summary>
     /// Initializes a new instance of the <see cref="SnapshotExporter"/> class.
@@ -272,23 +301,54 @@ public sealed class SnapshotExporter
                 });
             }
 
-            progress?.Report(new InterchangeProgress { Stage = "Completing", Percentage = 95 });
-
-            await writer.CompleteAsync(ct);
-
-            return new ExportResult
-            {
-                Success = true,
-                CatalogDirectory = request.CatalogDirectory,
-                ConsistencyUsed = request.Options.RequestedConsistency,
-                TablesWithSourceOrder = tablesWithSourceOrder,
-                TableCount = totalTables,
-                RowCount = totalRows,
-            };
+            return await CompleteAndReportAsync(
+                request, snapshot, writer, tablesWithSourceOrder, totalRows, progress, ct);
         }
 
+        return await CompleteAndReportAsync(
+            request, snapshot, writer, [], rowCount: 0, progress, ct);
+    }
+
+    /// <summary>
+    /// Closes the catalog, writes the summary if it was asked for, and builds the result from the numbers
+    /// the writer finished with (D4).
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// The order is the point of the method: <c>manifest.json</c> is closed before the report is touched,
+    /// so the report cannot perturb the catalog's content identity and can state the totals the writer
+    /// actually reached. That line is also the cancellation boundary of D4.2 — a cancel before it makes the
+    /// store genuinely incomplete and propagates; a cancel after it stops only the report, because the
+    /// artifact on disk is finished, verifiable and restorable.
+    /// </para>
+    /// <para>
+    /// The progress frames stay monotone on both paths: <c>Completing / 95</c>, then <c>Writing summary</c>
+    /// at 96 when the report runs, then <c>Complete / 100</c> last. Nothing is reported after the summary.
+    /// </para>
+    /// <para>
+    /// <paramref name="sourceOrderTables"/> are the tables actually written in source order. The schema-only
+    /// path has none, because it wrote no rows: the request's default row order would name tables the
+    /// catalog never captured.
+    /// </para>
+    /// </remarks>
+    private async Task<ExportResult> CompleteAndReportAsync(
+        ExportRequest request,
+        InterchangeSnapshot snapshot,
+        CatalogWriter writer,
+        IReadOnlyList<TableRef> sourceOrderTables,
+        long rowCount,
+        IProgress<InterchangeProgress>? progress,
+        CancellationToken ct)
+    {
         progress?.Report(new InterchangeProgress { Stage = "Completing", Percentage = 95 });
         await writer.CompleteAsync(ct);
+
+        var statistics = BuildStatistics(request, snapshot, writer, sourceOrderTables);
+
+        // A report-write failure lands here as one warning issue and never fails the store (FR13);
+        // a cancellation in this stage is a stop, not a failure, and adds no issue (D4.2).
+        var issues = new List<InterchangeIssue>();
+        var reportPath = await WriteCatalogReportAsync(request, snapshot, statistics, issues, progress, ct);
 
         progress?.Report(new InterchangeProgress { Stage = "Complete", Percentage = 100 });
 
@@ -297,7 +357,73 @@ public sealed class SnapshotExporter
             Success = true,
             CatalogDirectory = request.CatalogDirectory,
             ConsistencyUsed = request.Options.RequestedConsistency,
+            TablesWithSourceOrder = sourceOrderTables,
             TableCount = snapshot.Tables.Count,
+            RowCount = rowCount,
+            DataBytes = statistics.DataBytes,
+            MetadataBytes = statistics.MetadataBytes,
+            CatalogBytes = statistics.CatalogBytes,
+            TotalChunks = (int)statistics.ChunkFiles,
+            SectionNames = statistics.SectionNames,
+            Issues = issues,
+            ReportRelativePath = reportPath,
         };
     }
+
+    /// <summary>
+    /// Writes <c>summary.md</c> into the catalog root when the caller asked for it (D4).
+    /// </summary>
+    /// <returns>
+    /// The report's relative path, or <see langword="null"/> when the option is off, the write failed, or
+    /// the stage was cancelled.
+    /// </returns>
+    private async Task<string?> WriteCatalogReportAsync(
+        ExportRequest request,
+        InterchangeSnapshot snapshot,
+        CatalogStatistics statistics,
+        IList<InterchangeIssue> issues,
+        IProgress<InterchangeProgress>? progress,
+        CancellationToken ct)
+    {
+        if (!request.Options.IncludeCatalogReport)
+        {
+            return null;
+        }
+
+        // A large catalog must not look finished while it is still working (D4.1).
+        progress?.Report(new InterchangeProgress { Stage = "Writing summary", Percentage = 96 });
+
+        return await _reportWriter.WriteAsync(
+            request.CatalogDirectory,
+            statistics,
+            _relationBuilder.Build(snapshot),
+            issues,
+            ct);
+    }
+
+    /// <summary>
+    /// Joins the captured model with the writer's own measurements (D3) into the report's statistics.
+    /// </summary>
+    /// <remarks>
+    /// Built whether or not the report is requested, because the three byte measures of FR3 and the real
+    /// counters of FR12 are the writer's facts and the result must carry them either way. Composing them
+    /// here rather than re-adding them in the result is what keeps the report and the result stating the
+    /// same numbers.
+    /// </remarks>
+    private CatalogStatistics BuildStatistics(
+        ExportRequest request,
+        InterchangeSnapshot snapshot,
+        CatalogWriter writer,
+        IReadOnlyList<TableRef> sourceOrderTables) =>
+        _statisticsBuilder.Build(
+            snapshot,
+            writer.TableStatistics,
+            writer.MetadataFileSizes,
+            writer.RootJsonBytes,
+            writer.SectionNames,
+            writer.ExportedAt,
+            _adapter.Info.Dialect,
+            ReportText.Words(request.Options.RequestedConsistency.ToString()),
+            request.Options.ExcludedTables.Count,
+            sourceOrderTables);
 }

@@ -7,6 +7,10 @@ namespace DbClone.Application.Interchange;
 /// Application-level request to store (export) a database into a catalog.
 /// The wrapper translates this into the product's own request type.
 /// </summary>
+/// <remarks>
+/// <c>IncludeSummaryReport</c> is a user preference held here in the app and translated into the
+/// product's own option name by the wrapper — the app never learns the catalog's file names.
+/// </remarks>
 public sealed record InterchangeStoreRequest(
     ConnectionInfo Connection,
     TableSelectionSpec TableSelection,
@@ -16,4 +20,5 @@ public sealed record InterchangeStoreRequest(
     bool IncludeData,
     string SnapshotConsistency,
     string UnsupportedFeaturePolicy,
-    bool VerifyAfterStore);
+    bool VerifyAfterStore,
+    bool IncludeSummaryReport = true);

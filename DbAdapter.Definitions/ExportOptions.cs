@@ -28,6 +28,13 @@ public sealed record ExportOptions
     /// <summary>Gets or sets the default row order mode.</summary>
     public ERowOrder DefaultRowOrder { get; init; } = ERowOrder.PrimaryKey;
 
+    /// <summary>
+    /// Gets or sets whether the writer also produces <c>summary.md</c> in the catalog root. The report is
+    /// written after <c>manifest.json</c> closes, so turning it off changes nothing about the catalog
+    /// itself, and a catalog without it is as restorable as one with it.
+    /// </summary>
+    public bool IncludeCatalogReport { get; init; } = true;
+
 }
 
 /// <summary>

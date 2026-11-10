@@ -43,6 +43,8 @@ Binary values (`bytea` columns) are always stored in individual files under the 
 │                          counts, and a checksum per file
 ├── catalog.json           format version, the sections present, the table count
 ├── export.json            when the catalog was written and by which producer
+├── summary.md             the plain-text account of this catalog — see [Reading the catalog summary](#reading-the-catalog-summary)
+├── summary.md.tmp         left only by a write that was interrupted; harmless, and you may delete it
 ├── schema/                one JSON file per section:
 │   ├── schemas.json       schemas
 │   ├── tables.json        tables, columns, keys, constraints, indexes, triggers, partitions
@@ -65,6 +67,37 @@ Binary values (`bytea` columns) are always stored in individual files under the 
 ```
 
 Restore checks every file against the checksums in `manifest.json` before it touches the database, so a partially copied or edited folder is caught at that point rather than applied broken. Treat the folder the way you would treat a database dump: it holds your data and your schema as plain text.
+
+## Reading the catalog summary
+
+`summary.md` is a plain-text account of what the store captured. It is written into the catalog folder and replaced on every store, so it always describes the folder it sits in. The file is Markdown: it opens in any editor, it reads on GitHub, and a change between two stores shows up as a line in a diff.
+
+| Section | What it gives you |
+|---------|-------------------|
+| **Catalog observations** | The few things worth knowing before the numbers: tables with no primary key, the tables the rest of the catalog leans on, the cyclic groups, foreign keys that point outside the catalog, tables that take part in no foreign-key relationship, and pairs joined by more than one constraint. Each line is a count plus a pointer to the section that lists the items in full. A catalog with nothing unusual says so in one line |
+| **Global statistics** | Three figures in bytes that mean different things: *data bytes* (the CSV rows and the binary files), *metadata bytes* (the JSON that describes the objects, `manifest.json` and `export.json` included), and **catalog bytes** — the two together. **Catalog bytes** is the number to compare against the folder. A file manager will report slightly more, because it also counts `summary.md` itself and rounds every file up to the disk's cluster size |
+| **Statistics per table** | One row for every table the catalog holds — its rows, its bytes, its chunk files, and the order its rows were stored in |
+| **Relationships** | Every foreign key the catalog captured, once per constraint in a register you can search, and again in the card of each table it joins. Cyclic groups, heavily referenced tables and duplicated pairs are named |
+
+A table listed under `row order: sourceOrder` did have its rows captured — all of them. What is not promised is the order they come back out in next time, because the table has no key to read by. The rows are there; only their sequence may differ between two stores.
+
+Being listed under *tables that take part in no foreign-key relationship* is not the same as being called unrelated. Views, routines and your own application code can read such a table; the catalog simply records no constraint between it and another table.
+
+!!! info "What the summary describes"
+    It accounts for **the objects the catalog captured**, not for the source database: tables a [table selection](connections/table-selection.md) excluded appear nowhere in it, and a foreign key whose target was excluded is listed as pointing outside the catalog rather than as a missing relation.
+
+The file names objects only — schemas, tables, columns, constraints — plus the numbers measured from the folder. It contains no host name, no user name, no password and no connection string, so it is as safe to commit beside a catalog as the catalog's own text.
+
+Nothing in it is cut because a schema is large. Every captured constraint gets its register row and its two card lines: a table referenced by 400 others gets 400 lines you can scroll through and search, which is more usable than 400 lines crossing a picture. The cost is honesty about length — the file is exactly as long as the catalog's facts, so a very large schema produces a very large text file that searches well and opens slowly in an editor.
+
+### Relationships: why there is no diagram
+
+A diagram of a schema with heavy relationships cannot be read: hundreds of boxes, lines crossing, nothing to search. So the summary lists every foreign key once in a table you can search and again in both tables' own cards, and drops nothing because the schema is large. Cyclic groups, overloaded lookup tables and duplicate pairs are called out by name. A short outline walk is printed only where it can be complete; where one would become a hairball, the report says that instead of printing half of it.
+
+!!! warning "Restore never reads this file"
+    `summary.md` is not part of the catalog's content: it is not listed in `manifest.json`, never hashed, never verified and never applied. Deleting it, editing it or replacing its text cannot break a catalog — the same folder restores identically with the file present, absent or full of nonsense.
+
+Stopping a store while the summary is being written stops only the report. The catalog itself was already finished at that point, so the run is reported as complete with its real counts and no summary path; press Stop at any earlier stage and the folder is genuinely incomplete, as the table above says.
 
 ## Restoring a catalog
 
@@ -112,6 +145,7 @@ The preserved PostgreSQL-only statements are applied only when the target report
 | **Catalog Location** | Root folder for catalogs, with **Browse…**. The last folder you picked is used as the starting point |
 | **Subfolder Pattern** | Folder name created under the root. `{Database}` is the source database name, `{timestamp}` is `yyyy-MM-dd_HH-mm`. Leave it empty to write straight into the root folder |
 | **Include table data** | Off stores the schema only, and restoring such a catalog writes the structure and no rows. On stores the rows and the restore writes them back |
+| **Write summary.md (statistics and relations)** | On writes the plain-text account described under [Reading the catalog summary](#reading-the-catalog-summary) into the catalog folder. Off stores the catalog alone — the folder is complete without it, and a restore needs neither file |
 
 These values live in `settings.json` under `StoreRestore`. Catalogs are currently stored as directories. ZIP packaging is a separate planned feature and is not currently exposed as a Store option.
 
@@ -121,6 +155,7 @@ These values live in `settings.json` under `StoreRestore`. Catalogs are currentl
 | `RowsPerChunk` | 50000 | Maximum row count per chunk file; the 1 000 000-row Excel ceiling is enforced on top of this setting |
 | `SnapshotConsistency` | `consistent` | The row read uses a consistent snapshot across all tables when set to `consistent`, or read-committed isolation when set to `readCommitted` |
 | `UnsupportedFeaturePolicy` | `fail` | When `fail`, an unsupported object stops the restore before any write; when `warn`, the restore skips it and records an issue |
+| `WriteSummaryMarkdown` | `true` | Whether Store writes `summary.md` into the catalog folder. It is an app preference: the setting decides, and nothing about the catalog itself changes |
 
 !!! note "Table selection narrows a catalog"
     A [table selection](connections/table-selection.md) is applied end-to-end: the catalog captures only the tables the selection includes, and the log names the excluded tables when Store starts.

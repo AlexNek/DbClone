@@ -18,6 +18,7 @@ public class StoreRestoreOptionsTests
         options.ChunkBytes.Should().Be(8_388_608);
         options.RowsPerChunk.Should().Be(50_000);
         options.IncludeData.Should().BeTrue();
+        options.WriteSummaryMarkdown.Should().BeTrue();
         options.SnapshotConsistency.Should().Be("consistent");
         options.UnsupportedFeaturePolicy.Should().Be("fail");
     }

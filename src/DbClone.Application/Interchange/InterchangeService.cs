@@ -67,6 +67,7 @@ public sealed class InterchangeService : IInterchangeService
                 ExcludedTables = request.TableSelection.ExcludedTables
                     .Select(t => new TableRef(t.Schema, t.Name))
                     .ToHashSet(),
+                IncludeCatalogReport = request.IncludeSummaryReport,
             };
 
             var exportRequest = new ExportRequest
@@ -108,18 +109,24 @@ public sealed class InterchangeService : IInterchangeService
 
             return new InterchangeStoreResult(
                 Outcome: outcome,
-                SectionsWritten: 7, // schemas, tables, columns, views, routines, sequences, extensions
+                SectionsWritten: result.SectionNames.Count,
                 TablesExported: result.TableCount,
                 RowsExported: result.RowCount,
-                BytesExported: 0, // TODO: Track bytes when CatalogWriter provides this
-                ChunksWritten: 0, // TODO: Track chunks when CatalogWriter provides this
+                BytesExported: result.CatalogBytes,
+                ChunksWritten: result.TotalChunks,
                 IsComplete: result.Success,
                 ConsistencyModeUsed: result.ConsistencyUsed.ToString(),
                 TablesThatFellBackToSourceOrder: result.TablesWithSourceOrder.Select(t => t.ToString()).ToList(),
                 VerificationPassed: verificationPassed,
                 Issues: result.Issues.Select(MapIssue).ToList(),
                 CatalogPath: result.CatalogDirectory,
-                Elapsed: sw.Elapsed);
+                Elapsed: sw.Elapsed,
+
+                // The product returns the report's name relative to the catalog it was handed, so this
+                // wrapper is the one place that turns it into a path. The app knows no catalog file name.
+                SummaryPath: result.ReportRelativePath is null
+                    ? null
+                    : Path.Combine(result.CatalogDirectory, result.ReportRelativePath));
         }
         catch (OperationCanceledException)
         {
@@ -138,7 +145,8 @@ public sealed class InterchangeService : IInterchangeService
                 VerificationPassed: false,
                 Issues: [new InterchangeIssueView(EInterchangeSeverity.Warning, "Cancelled", "The operation was cancelled.", string.Empty, string.Empty)],
                 CatalogPath: null,
-                Elapsed: sw.Elapsed);
+                Elapsed: sw.Elapsed,
+                SummaryPath: null);
         }
         catch (Exception ex)
         {
@@ -157,7 +165,8 @@ public sealed class InterchangeService : IInterchangeService
                 VerificationPassed: false,
                 Issues: [new InterchangeIssueView(EInterchangeSeverity.Error, "ExportFailed", ex.Message, string.Empty, string.Empty)],
                 CatalogPath: null,
-                Elapsed: sw.Elapsed);
+                Elapsed: sw.Elapsed,
+                SummaryPath: null);
         }
     }
 

@@ -51,6 +51,9 @@ public sealed class StoreRestoreOptions
     /// <summary>Whether to include table data in the catalog (not just schema).</summary>
     public bool IncludeData { get; set; } = true;
 
+    /// <summary>Whether the store writes the human-readable summary file into the catalog folder.</summary>
+    public bool WriteSummaryMarkdown { get; set; } = true;
+
     /// <summary>Snapshot consistency mode passed to the product (e.g. "consistent").</summary>
     public string SnapshotConsistency { get; set; } = "consistent";
 

@@ -5,6 +5,7 @@ using CanonicalModel.Interchange;
 using CanonicalModel.Models;
 using DbAdapter.Definitions;
 using DbAdapter.Definitions.Interchange;
+using DatabaseInterchange.Report;
 
 namespace DatabaseInterchange.Format;
 
@@ -23,10 +24,13 @@ public sealed class CatalogWriter : IAsyncDisposable
     private readonly List<ManifestFileEntry> _fileEntries = [];
     private readonly List<string> _sections = [];
     private readonly List<CatalogTableFolder> _tableFolders = [];
+    private readonly List<TableWriteStats> _tableStats = [];
     private int _totalTables;
     private int _totalColumns;
     private long _totalRows;
     private int _totalChunks;
+    private long _rootJsonBytes;
+    private DateTimeOffset? _exportedAt;
     private bool _disposed;
 
     private CatalogWriter(string catalogPath, string producer, string modelFormat, string sourceDialect)
@@ -36,6 +40,43 @@ public sealed class CatalogWriter : IAsyncDisposable
         _modelFormat = modelFormat;
         _sourceDialect = sourceDialect;
     }
+
+    /// <summary>
+    /// Gets what each <see cref="WriteTableAsync"/> call put on disk, in the order the tables were written.
+    /// </summary>
+    /// <remarks>
+    /// These are the numbers the writer already had in hand, exposed instead of thrown away (D3), so the
+    /// catalog report cannot state a per-table figure that disagrees with the folder it describes.
+    /// </remarks>
+    internal IReadOnlyList<TableWriteStats> TableStatistics => _tableStats;
+
+    /// <summary>
+    /// Gets every file recorded in <c>manifest.json</c> beside the size the manifest records for it:
+    /// the <c>schema/*.json</c> sections, <c>native/&lt;dialect&gt;.json</c>, <c>catalog.json</c> and each
+    /// table's <c>table.json</c> and <c>checksums.sha256</c> (FR5).
+    /// </summary>
+    /// <remarks>
+    /// This is a projection of <see cref="_fileEntries"/> — no re-enumeration of the folder, no second
+    /// <see cref="FileInfo"/>, no extra stream. Data chunks and blob containers are deliberately absent,
+    /// because they are covered one level down by each table's own checksums file.
+    /// </remarks>
+    internal IReadOnlyList<(string Path, long Bytes)> MetadataFileSizes =>
+        [.. _fileEntries.Select(f => (f.Path, f.Bytes))];
+
+    /// <summary>
+    /// Gets the combined length of <c>manifest.json</c> and <c>export.json</c> — the only two catalog
+    /// files <see cref="MetadataFileSizes"/> cannot carry, since a file cannot hold its own hash (D3).
+    /// </summary>
+    internal long RootJsonBytes => _rootJsonBytes;
+
+    /// <summary>
+    /// Gets the instant stamped into <c>export.json</c>, so the report states one export time rather than
+    /// two instants a second apart. <see langword="null"/> until <see cref="CompleteAsync"/> has run.
+    /// </summary>
+    internal DateTimeOffset? ExportedAt => _exportedAt;
+
+    /// <summary>Gets the section names exactly as they were written, the count behind <c>SectionsWritten</c>.</summary>
+    internal IReadOnlyList<string> SectionNames => _sections;
 
     /// <summary>
     /// Creates a new catalog writer for the specified directory.
@@ -482,6 +523,17 @@ public sealed class CatalogWriter : IAsyncDisposable
             _totalRows += rowCount;
             _totalChunks += rowWriter.Chunks.Count;
 
+            // The write-time facts behind the catalog report (D3): taken from the same lists the
+            // checksums file is built from, so the report and the folder's own hash list agree.
+            _tableStats.Add(new TableWriteStats(
+                schemaName,
+                table.Name,
+                rowCount,
+                rowWriter.Chunks.Count,
+                rowWriter.Chunks.Sum(c => c.Bytes),
+                rowWriter.BlobContainers.Count,
+                rowWriter.BlobContainers.Sum(b => b.Bytes)));
+
             // Blob containers are listed in the table folder's own checksums.sha256 and nowhere else:
             // adding them to manifest.json would put an array that grows with the data back into the
             // file every reader loads whole (design §8).
@@ -638,10 +690,14 @@ public sealed class CatalogWriter : IAsyncDisposable
             Producer = _producer,
         };
 
-        await WriteJsonFileAsync(
-            Path.Combine(_catalogPath, InterchangeFormat.ExportFileName),
-            export,
-            ct);
+        _exportedAt = export.CreatedAt;
+
+        var exportPath = Path.Combine(_catalogPath, InterchangeFormat.ExportFileName);
+        await WriteJsonFileAsync(exportPath, export, ct);
+
+        // Neither root file can be listed in manifest.json — a file cannot carry its own hash — so its
+        // length is accumulated here instead (D3).
+        _rootJsonBytes += new FileInfo(exportPath).Length;
 
         // Write manifest.json last
         var manifest = new ManifestFile
@@ -664,10 +720,10 @@ public sealed class CatalogWriter : IAsyncDisposable
             Files = _fileEntries.OrderBy(f => f.Path, StringComparer.Ordinal).ToList(),
         };
 
-        await WriteJsonFileAsync(
-            Path.Combine(_catalogPath, InterchangeFormat.ManifestFileName),
-            manifest,
-            ct);
+        var manifestPath = Path.Combine(_catalogPath, InterchangeFormat.ManifestFileName);
+        await WriteJsonFileAsync(manifestPath, manifest, ct);
+
+        _rootJsonBytes += new FileInfo(manifestPath).Length;
     }
 
     /// <summary>
