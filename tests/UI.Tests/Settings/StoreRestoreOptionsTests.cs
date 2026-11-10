@@ -21,6 +21,7 @@ public class StoreRestoreOptionsTests
         options.WriteSummaryMarkdown.Should().BeTrue();
         options.SnapshotConsistency.Should().Be("consistent");
         options.UnsupportedFeaturePolicy.Should().Be("fail");
+        options.CatalogSubfolderPattern.Should().Be("{Connection}_{timestamp}");
     }
 
     [Fact]

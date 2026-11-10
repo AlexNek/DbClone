@@ -37,10 +37,11 @@ public sealed class StoreRestoreOptions
 
     /// <summary>
     /// Subfolder naming pattern under <see cref="DefaultCatalogDirectory"/>.
-    /// Supported placeholders: <c>{Database}</c> (source database name),
+    /// Supported placeholders: <c>{Connection}</c> (saved connection name, or the source database
+    /// name when no saved connection is selected), <c>{Database}</c> (source database name),
     /// <c>{timestamp}</c> (YYYY-MM-DD_HH-mm). The folder is auto-created on Store.
     /// </summary>
-    public string CatalogSubfolderPattern { get; set; } = "{Database}_{timestamp}";
+    public string CatalogSubfolderPattern { get; set; } = "{Connection}_{timestamp}";
 
     /// <summary>Target chunk size in bytes (default 8 MiB).</summary>
     public int ChunkBytes { get; set; } = 8_388_608;

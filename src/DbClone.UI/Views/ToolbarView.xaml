@@ -457,7 +457,7 @@
                                 Margin="0,0,0,4"
                                 FontSize="11"
                                 Foreground="{ui:ThemeResource TextFillColorSecondaryBrush}"
-                                Text="Placeholders: {Database} = source database name, {timestamp} = YYYY-MM-DD_HH-mm"
+                                Text="Placeholders: {Connection} = saved connection name, {Database} = source database name, {timestamp} = YYYY-MM-DD_HH-mm"
                                 TextWrapping="Wrap" />
                             <TextBox
                                 Margin="0,0,0,12"

@@ -143,7 +143,7 @@ The preserved PostgreSQL-only statements are applied only when the target report
 | Setting | Effect |
 |---------|--------|
 | **Catalog Location** | Root folder for catalogs, with **Browse…**. The last folder you picked is used as the starting point |
-| **Subfolder Pattern** | Folder name created under the root. `{Database}` is the source database name, `{timestamp}` is `yyyy-MM-dd_HH-mm`. Leave it empty to write straight into the root folder |
+| **Subfolder Pattern** | Folder name created under the root. `{Connection}` is the name of the saved connection selected on the Source panel — the source database name when none is selected — `{Database}` is the source database name, `{timestamp}` is `yyyy-MM-dd_HH-mm`. Spaces and any character a folder name cannot hold become `_`, a name Windows reserves as a device gets a `_` prefix, and an over-long name is cut while the timestamp tail is kept. Leave it empty to write straight into the root folder |
 | **Include table data** | Off stores the schema only, and restoring such a catalog writes the structure and no rows. On stores the rows and the restore writes them back |
 | **Write summary.md (statistics and relations)** | On writes the plain-text account described under [Reading the catalog summary](#reading-the-catalog-summary) into the catalog folder. Off stores the catalog alone — the folder is complete without it, and a restore needs neither file |
 

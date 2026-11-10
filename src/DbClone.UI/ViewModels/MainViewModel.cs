@@ -388,7 +388,7 @@ public sealed partial class MainViewModel : ObservableObject
 
         if (!_storeValidator.ValidateSourceConnection(Context.Source, StoreRestoreState)) return;
 
-        var catalogPath = _storePathResolver.PromptForStoreCatalogPath(_storeDialogService, Settings, Context.Source.DatabaseName);
+        var catalogPath = _storePathResolver.PromptForStoreCatalogPath(_storeDialogService, Settings, CatalogNameSource.FromViewModel(Context.Source));
         if (catalogPath is null) return;
 
         if (!_storeValidator.EnsureDirectoryExists(catalogPath, StoreRestoreState)) return;
