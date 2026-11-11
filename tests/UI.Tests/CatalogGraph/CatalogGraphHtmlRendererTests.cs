@@ -573,26 +573,77 @@ public sealed class CatalogGraphHtmlRendererTests
         Count(picture, "marker-start=\"url(#one)\"").Should().Be(one);
         Count(picture, "marker-end=\"url(#head)\"").Should().Be(edges);
         Count(picture, "class=\"edge pick\"").Should().Be(edges);
+
+        // A mark is an attribute of the painted path, and that fixes the order the writer emits: the
+        // path's own data closes first and the marks follow it. A mark written while the data is still
+        // open lands inside it — no mark is drawn and the geometry is invalid from there on — so the
+        // data is asserted to hold no attribute at all, and a one-to-one arrow to carry its bar between
+        // its own data and the head it points with (D2).
+        var painted = Regex.Matches(picture, "<path class=\"edge[^>]*>")
+            .Select(match => match.Value)
+            .Where(tag => !tag.Contains("pick", StringComparison.Ordinal))
+            .ToList();
+
+        painted.Should().HaveCount(edges, "one painted path per constraint");
+
+        foreach (var path in painted)
+        {
+            Regex.Match(path, " d=\"([^\"]*)\"").Groups[1].Value.Should()
+                .NotContain("marker-", "the path data closes before any mark is written");
+        }
+
+        painted.Should().Contain(
+            path => Regex.IsMatch(path, " d=\"[^\"]*\" marker-start=\"url\\(#one\\)\" marker-end=\"url\\(#head\\)\">$"),
+            "the bar hangs between the path's own data and the head it points with");
     }
 
     [Fact]
     public void The_legend_draws_the_shape_it_explains()
     {
         // A reader who meets a mark once needs the key once, and needs to see it rather than build it
-        // from a word. Every row samples the shape in the picture's own defs, and states what may be
-        // concluded from it instead of naming a cardinality the reader then has to point at an end of
-        // (D14.5).
+        // from a word. Every row samples the shape in the picture's own defs; the two cardinality rows then
+        // lead with the relationship name every ER editor shares — many-to-one (N:1), one-to-one (1:1) — and
+        // follow it with one plain sentence naming the source and the target table (D5). The bar is a
+        // maximum and is never called "exactly one": optionality is decided by a value or a trigger, which
+        // the catalog does not carry. The reasoning behind each row is the manual's, not the key's: a
+        // paragraph printed beside a 48-pixel sample is a legend nobody reads.
         var rendered = Render(Shapes());
 
         Count(rendered.Document, "<ul class=\"legend\">").Should().Be(1);
         Count(rendered.Document, "<svg class=\"key\"").Should().Be(7, "one drawn sample per row");
 
         rendered.Document.Should().Contain(
-            "<b>arrow</b> leaves the table that stores the column and points at the table the value comes from. Nothing at the tail: many rows there may name the one row at the head",
-            "the plain arrow is the default, so the row has to say which end is the many one");
-        rendered.Document.Should().Contain("<b>bar</b> at most one row of this table for each row it points at");
-        rendered.Document.Should().Contain("no bar means many rows, or a pair the catalog cannot prove");
+            "<b>many-to-one (N:1)</b> multiple records in the source table can reference the same record in the target table",
+            "the plain arrow leads with the name every ER editor gives it, and explains it in one sentence");
+        rendered.Document.Should().Contain(
+            "<b>one-to-one (1:1)</b> each record in the target table can be referenced by at most one record in the source table");
+        rendered.Document.Should().Contain("<b>dashed</b> the table it points at is not in this catalog");
+        rendered.Document.Should().Contain("<b>curve</b> a cycle: the two tables point at each other");
+        rendered.Document.Should().Contain("<b>loop</b> the table points at itself");
+        rendered.Document.Should().Contain("<b>card</b> one table: its name and row count");
+        rendered.Document.Should().Contain("<b>collapsed</b> a cyclic group as one box; select to expand");
         rendered.Document.Should().NotContain("many rows to one row", "the abstract cardinality never said which end it was drawn from");
+
+        // The rows are read back out of the document so the two that name a relationship can be pinned by
+        // their label: a description of many-to-one is not the name of it, and a reader of ER diagrams looks
+        // for the name.
+        var rows = Regex.Matches(rendered.Document, "<b>([^<]+)</b> ([^<]+)</li>")
+            .Select(match => (Label: match.Groups[1].Value, Meaning: match.Groups[2].Value))
+            .ToList();
+
+        rows.Should().HaveCount(7, "every row states its conclusion in words");
+        rows.Take(2).Should().OnlyContain(
+            row => row.Label.Contains("(N:1)", StringComparison.Ordinal)
+                || row.Label.Contains("(1:1)", StringComparison.Ordinal),
+            "a cardinality row leads with the relationship name every ER editor shares, not a description of one");
+        // The bar is a maximum. "Exactly one" is a fact of one constraint — a NOT NULL column under a
+        // key — and the panel states it for that constraint; a key that judges every arrow may not.
+        var legendStart = rendered.Document.IndexOf("<ul class=\"legend\">", StringComparison.Ordinal);
+        var legendEnd = rendered.Document.IndexOf("</ul>", legendStart, StringComparison.Ordinal);
+        var legend = rendered.Document[legendStart..legendEnd];
+
+        legend.Should().NotContain("exactly one", "the key describes every arrow, so it cannot state a minimum");
+        legend.Should().NotContain("one and only one", "that states a minimum a foreign key cannot enforce");
 
         // The shapes the key samples are defined once, in a block written ahead of everything that
         // references them — a key reaching back into the picture, or a second copy of a definition,
@@ -604,20 +655,48 @@ public sealed class CatalogGraphHtmlRendererTests
     }
 
     [Fact]
+    public void The_key_costs_the_picture_one_line_until_it_is_asked_for()
+    {
+        // The key teaches every mark once; a reader who has learnt them should not pay for the lesson
+        // on every open, so it hangs under the header closed. It is a native disclosure — no script,
+        // no state to lose — and every row is in the document either way, so opening it needs no
+        // render and nothing the picture says is behind a control (D14.5).
+        var document = Render(Shapes()).Document;
+
+        Count(document, "<details class=\"keyed\">").Should().Be(1);
+        Regex.Match(document, "<details class=\"keyed\"[^>]*>").Value.Should()
+            .NotContain("open", "the picture keeps the screen until the key is asked for");
+
+        var offered = document.IndexOf("<summary>", StringComparison.Ordinal);
+        var rows = document.IndexOf("<ul class=\"legend\">", StringComparison.Ordinal);
+        var closed = document.IndexOf("</details>", StringComparison.Ordinal);
+
+        offered.Should().BeGreaterThan(-1, "a folded key that cannot be opened would lose the lesson");
+        rows.Should().BeGreaterThan(offered, "the rows fold behind the line that offers them");
+        closed.Should().BeGreaterThan(
+            document.IndexOf("<b>collapsed</b>", StringComparison.Ordinal),
+            "every row folds, not only the first few");
+        Count(document, "<svg class=\"key\"").Should().Be(7, "folding the key removes no row from it");
+    }
+
+    [Fact]
     public void A_mark_never_prints_on_the_mark_of_the_end_beside_it()
     {
         // Keeping two arrows from merging is two rules: the border deals every end its own point at
         // least GraphEdgePorts.MinStep away from the next, and a mark's own ink has to fit inside that
-        // room. A marker scales with the line it hangs on (markerUnits defaults to stroke-width), so
-        // the line's width is part of its ink. All three numbers are read back from the drawing rather
-        // than repeated here, so fattening a mark or thinning the room fails.
+        // room with a gap left over. A marker scales with the line it hangs on (markerUnits defaults to
+        // stroke-width), so the line's width is part of its ink. All three numbers are read back from
+        // the drawing rather than repeated here, so fattening a mark or thinning the room fails.
         var document = Render(Shapes()).Document;
 
         var ink = MarkInk(document, "head");
         var bar = MarkInk(document, "one");
 
-        ink.Should().BeLessThan(GraphEdgePorts.MinStep, "two neighbouring heads would print as one thick arrow");
-        bar.Should().BeLessThan(GraphEdgePorts.MinStep, "a bar would print on the head of the end beside it");
+        // Room enough for the ink is not room enough: a step that leaves a third of a pixel printed the
+        // two heads as one thick mark, which is what made a card with two neighbours look like a card
+        // with one arrow whose head was drawn twice (D4).
+        (GraphEdgePorts.MinStep - ink).Should().BeGreaterThanOrEqualTo(6, "two neighbouring heads would print as one thick arrow");
+        (GraphEdgePorts.MinStep - bar).Should().BeGreaterThanOrEqualTo(6, "a bar would print on the head of the end beside it");
     }
 
     /// <summary>How wide one mark is drawn in the picture, in pixels, ink and all.</summary>

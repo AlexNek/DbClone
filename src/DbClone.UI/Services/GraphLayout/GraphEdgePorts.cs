@@ -15,9 +15,11 @@ namespace DbClone.UI.Services.GraphLayout;
 /// </para>
 /// <para>
 /// A card's corners take no end, because a mark printed on a corner is half on the card and half on
-/// the corridor. When a side is full the walk carries the surplus onto the next side — the four sides
-/// are one loop — so a busy card spills above and below itself, where its long sides have room,
-/// instead of queueing on a short one.
+/// the corridor. Two ends that flank one corner are a whole step apart on the walk but only about
+/// twenty-five pixels apart as drawn, which is a mark's width and two gaps, so the corner stays clear
+/// of the crowding the sides are dealt out to avoid. When a side is full the walk carries the surplus
+/// onto the next side — the four sides are one loop — so a busy card spills above and below itself,
+/// where its long sides have room, instead of queueing on a short one.
 /// </para>
 /// <para>
 /// Order comes from the geometry and from the canonical indexes, never from the order ends were
@@ -33,11 +35,14 @@ internal static class GraphEdgePorts
     private const double Inset = 8;
 
     /// <summary>
-    /// The least room one end gets on the border. It is wider than the arrow head's own ink, so two
-    /// neighbouring ends never print their marks on each other; a test reads both numbers back from
-    /// the drawing, because thinning this or fattening a mark silently merges the arrows again.
+    /// The least room one end gets on the border. It clears the arrow head's own ink by a gap that can
+    /// be seen: the head is 9 units of a 1.3-wide line, 11.7 px, and a step of 12 left the two heads a
+    /// third of a pixel apart, which the picture printed as one thick mark on a card two neighbours
+    /// were pointing at. Eighteen leaves six. A test reads both numbers back from the drawing and
+    /// fails when the gap shrinks, because thinning this or fattening a mark silently merges the arrows
+    /// again.
     /// </summary>
-    internal const double MinStep = 12;
+    internal const double MinStep = 18;
 
     /// <summary>Deals out the border of every card to the ends that meet it.</summary>
     /// <param name="model">The analyzed graph.</param>

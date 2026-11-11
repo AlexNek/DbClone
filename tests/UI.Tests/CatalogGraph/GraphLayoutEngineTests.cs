@@ -721,6 +721,68 @@ public sealed class GraphLayoutEngineTests
     }
 
     [Fact]
+    public void Arrow_ends_of_one_card_stand_a_mark_apart_as_the_page_draws_them()
+    {
+        // Distinct points are not enough, and neither is a step counted along the border: the two are
+        // the same only where the border runs straight. A step that fits the ink without a gap printed
+        // two heads as one thick mark, and the length of that step is pinned against the mark itself by
+        // A_mark_never_prints_on_the_mark_of_the_end_beside_it. This pins the dealing: three arrows
+        // that all land on one point of a card are drawn a whole step apart, not merely somewhere else.
+        var parent = CatalogGraphFixture.TableId("apart", "parent");
+        var fixture = CatalogGraphFixture.Create().Table("apart", "parent", 7);
+
+        for (var child = 0; child < 3; child++)
+        {
+            fixture.Table("apart", $"child{child}", 3, Column("parent_id"));
+            fixture.Edge(
+                CatalogGraphFixture.TableId("apart", $"child{child}"),
+                parent,
+                $"fk_apart_{child}",
+                ["parent_id"]);
+        }
+
+        var model = Analyze(fixture);
+        var hub = model.NodeIndexesById[parent];
+
+        // The picture that merges the heads is one column of cards: three tables stand directly under
+        // the one they name, so all three centre-to-centre lines meet the parent's border on the same
+        // point and the border alone decides how far apart their heads are drawn.
+        var placement = new NodePlacement[model.Nodes.Count];
+        placement[hub] = At(hub, 0);
+
+        for (var child = 0; child < 3; child++)
+        {
+            var index = model.NodeIndexesById[CatalogGraphFixture.TableId("apart", $"child{child}")];
+            placement[index] = At(index, 200 + (child * 100));
+        }
+
+        var ends = GraphEdgePorts.Assign(model, placement);
+
+        var points = model.Edges
+            .Where(edge => edge.ParentIndex == hub)
+            .Select(edge => ends[edge.Index].Parent.Point)
+            .ToList();
+
+        points.Should().HaveCount(3);
+
+        for (var first = 0; first < points.Count; first++)
+        {
+            for (var second = first + 1; second < points.Count; second++)
+            {
+                Space(points[first], points[second]).Should().BeGreaterThanOrEqualTo(
+                    GraphEdgePorts.MinStep - 0.5,
+                    "two heads printed on one card read as one thick arrow, so the border deals out its whole step");
+            }
+        }
+
+        static double Space(GraphPoint first, GraphPoint second) =>
+            Math.Sqrt(Math.Pow(first.X - second.X, 2) + Math.Pow(first.Y - second.Y, 2));
+
+        NodePlacement At(int node, double top) =>
+            new(node, new GraphPoint(0, top), GraphCard.WidthOf(model.Nodes[node]), GraphCard.Height);
+    }
+
+    [Fact]
     public void An_arrow_never_runs_along_or_back_into_its_own_card()
     {
         // An end dealt onto a side is drawn out of that side: a first step along the border reads as a

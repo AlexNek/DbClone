@@ -84,11 +84,13 @@ internal sealed class GraphPictureWriter
             var bar = edge.IsOneToOne ? " marker-start=\"url(#one)\"" : string.Empty;
 
             html.Append("<path class=\"edge").Append(edge.ParentIsCaptured ? string.Empty : " out").Append(away)
-                .Append("\" data-e=\"").Append(edge.Index).Append("\" d=\"").Append(EdgePath(route))
+                .Append("\" data-e=\"").Append(edge.Index).Append("\" d=\"").Append(EdgePath(route)).Append('"')
                 // The mark belongs to the painted line and to nothing else: the band that takes the
                 // pointer repeats the same geometry, so a mark on it would double every folded arrow.
+                // It is written only after the path data is closed: a mark appended while `d` is still
+                // open lands inside the data, which draws no mark and leaves the geometry invalid.
                 .Append(bar)
-                .Append("\" marker-end=\"url(#head)\"><title>").Append(GraphHtmlText.Escape(edge.Label))
+                .Append(" marker-end=\"url(#head)\"><title>").Append(GraphHtmlText.Escape(edge.Label))
                 .Append("</title></path>\n");
 
             // A 1.3 px line is a hard thing to point at, so a second path with the same geometry lies over

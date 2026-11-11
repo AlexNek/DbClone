@@ -16,6 +16,11 @@ h1{margin:0;font-size:17px;font-weight:600}
 .sub{margin:4px 0 0;color:var(--muted);font-size:12px}
 .sub b{color:var(--ink);font-weight:600}
 #counts{margin:6px 0 0;font-weight:600}
+.keyed{margin:6px 0 0}
+.keyed>summary{width:max-content;padding:1px 0;cursor:pointer;color:var(--muted);font-size:12px;font-weight:600}
+.keyed>summary:hover{color:var(--ink)}
+.keyed>summary:focus-visible{outline:2px solid var(--hot);outline-offset:2px;border-radius:3px}
+.keyed .legend{margin-top:6px}
 .legend{display:flex;flex-wrap:wrap;gap:4px 20px;margin:8px 0 0;padding:0;list-style:none;color:var(--muted);font-size:12px}
 .legend b{color:var(--ink)}
 .legend li{display:flex;gap:7px;align-items:flex-start;max-width:430px}

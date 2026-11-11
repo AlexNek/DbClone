@@ -7,14 +7,26 @@ namespace DbClone.UI.Services.GraphHtml;
 /// </summary>
 /// <remarks>
 /// <para>
-/// A row shows the shape first and then states what may be concluded from it. A key that only names
-/// shapes asks the reader to picture a mark before being allowed to see one, and a sentence that
-/// states a cardinality in the abstract — "many rows to one row" — has to be read against the arrow to
-/// be decoded at all, because it never says which end is the many one.
+/// A row shows the shape, then the name the industry gives it, then one plain-English sentence. The two
+/// cardinality rows lead with the relationship name every ER editor and textbook shares —
+/// many-to-one (N:1), one-to-one (1:1) — because that is the term a reader already knows, and follow it
+/// with a sentence for the reader who does not: the words name the two tables by what the arrow does
+/// (the source it starts from, the target it points at), so they can be checked against the line beside
+/// them instead of being translated from some role. The bar states a maximum and never "exactly one":
+/// whether a relationship is optional or mandatory is decided by a value or a trigger, which the
+/// catalog does not carry. The row is the conclusion and nothing else: a paragraph beside a 48-pixel
+/// sample turns a key into an article, and the reasoning each row leaves out is the manual's job and
+/// the panel's, not the key's.
 /// </para>
 /// <para>
 /// Every sample references the marks the arrows themselves carry, so the key and the picture cannot
 /// drift apart, and no row states a figure the catalog could contradict.
+/// </para>
+/// <para>
+/// The key hangs under the header closed: seven rows of prose cost the picture a fifth of the screen,
+/// and a reader who has learnt the marks should not pay for them on every open. It is a native
+/// disclosure, so it needs no script to open and keeps its own keyboard behaviour and its own print
+/// rules, and every row stays in the document whether it is shown or not.
 /// </para>
 /// </remarks>
 internal static class GraphLegendWriter
@@ -47,26 +59,19 @@ internal static class GraphLegendWriter
     {
         ArgumentNullException.ThrowIfNull(html);
 
-        html.Append("<ul class=\"legend\">\n");
-        Row(html, Arrow, "arrow",
-            "leaves the table that stores the column and points at the table the value comes from. "
-            + "Nothing at the tail: many rows there may name the one row at the head");
-        Row(html, Bar, "bar",
-            "at most one row of this table for each row it points at \u2014 a one-to-one extension. "
-            + "Only a key on exactly the referencing columns proves it, so no bar means many rows, or a "
-            + "pair the catalog cannot prove");
-        Row(html, Dashed, "dashed",
-            "the table the arrow points at is not in this catalog, so no card stands where it lands");
-        Row(html, Curve, "curve",
-            "the constraint closes a cycle, so these tables point at one another and the line bows "
-            + "instead of running straight");
-        Row(html, Loop, "loop",
-            "the table points at itself: a row's value comes from another row of the same table");
-        Row(html, Card, "card",
-            "one per table, with its name and its row count printed inside it");
-        Row(html, Collapsed, "collapsed",
-            "a cyclic group drawn as one box; select it and the tables it holds open where they stand");
-        html.Append("</ul>\n");
+        html.Append("<details class=\"keyed\">\n")
+            .Append("<summary>Key \u2014 how to read the picture</summary>\n")
+            .Append("<ul class=\"legend\">\n");
+        Row(html, Arrow, "many-to-one (N:1)",
+            "multiple records in the source table can reference the same record in the target table");
+        Row(html, Bar, "one-to-one (1:1)",
+            "each record in the target table can be referenced by at most one record in the source table");
+        Row(html, Dashed, "dashed", "the table it points at is not in this catalog");
+        Row(html, Curve, "curve", "a cycle: the two tables point at each other");
+        Row(html, Loop, "loop", "the table points at itself");
+        Row(html, Card, "card", "one table: its name and row count");
+        Row(html, Collapsed, "collapsed", "a cyclic group as one box; select to expand");
+        html.Append("</ul>\n</details>\n");
     }
 
     private static void Row(StringBuilder html, string sample, string word, string meaning)
