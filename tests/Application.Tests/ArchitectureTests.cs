@@ -143,6 +143,31 @@ public class ArchitectureTests
     }
 
 
+    /// <summary>Gets the regular expression matching a direct JSON deserialization of a catalog file.</summary>
+    private static readonly Regex IndependentCatalogDeserialization = new(
+        @"\bJsonSerializer\b|\bJsonDocument\b|\bJsonNode\b|\bUtf8JsonReader\b|\bUtf8JsonWriter\b|\bJsonSerializerOptions\b",
+        RegexOptions.Compiled);
+
+    [Fact]
+    public void InterchangeFacadeDeserializesNoCatalogFileOfItsOwn()
+    {
+        // Arrange — the app-side half of feature 07 T7.
+        var facadeRoot = Path.Combine(RepoRoot, "src", "DbClone.Application", "Interchange");
+
+        // Act
+        var offenders = Directory.EnumerateFiles(facadeRoot, "*.cs", SearchOption.AllDirectories)
+            .Where(file => !file.Contains($"{Path.DirectorySeparatorChar}bin{Path.DirectorySeparatorChar}")
+                           && !file.Contains($"{Path.DirectorySeparatorChar}obj{Path.DirectorySeparatorChar}"))
+            .Where(file => IndependentCatalogDeserialization.IsMatch(File.ReadAllText(file)))
+            .Select(file => Path.GetRelativePath(RepoRoot, file))
+            .ToList();
+
+        // Assert — one deserialization path: every catalog read goes through the product's reader, so
+        // restore, verify and the relationship view cannot disagree about whether a catalog is readable.
+        offenders.Should().BeEmpty(
+            "the interchange facade must read a catalog through the product's reader only");
+    }
+
     /// <summary>Gets the regular expression matching a using of a Microsoft.Extensions namespace other than the logging abstraction.</summary>
     private static readonly Regex NonLoggingExtensionsUsing = new(@"^using\s+Microsoft\.Extensions\.(?!Logging[\w.]*\s*;)[\w.]+\s*;$", RegexOptions.Compiled | RegexOptions.Multiline);
 

@@ -34,13 +34,18 @@ public sealed class StoreWorkflowService : IWorkflowService<StoreRequest, StoreR
             SnapshotConsistency: request.SnapshotConsistency,
             UnsupportedFeaturePolicy: request.UnsupportedFeaturePolicy,
             VerifyAfterStore: true,
-            IncludeSummaryReport: request.IncludeSummaryReport);
+            IncludeSummaryReport: request.IncludeSummaryReport,
+            IncludeSqlScripts: request.IncludeSqlScripts);
 
         var result = await _interchangeService.StoreAsync(interchangeRequest, progress: null, ct);
-        return MapResult(result, request.CatalogPath, request.IncludeSummaryReport);
+        return MapResult(result, request.CatalogPath, request.IncludeSummaryReport, request.IncludeSqlScripts);
     }
 
-    private static StoreResult MapResult(InterchangeStoreResult result, string catalogPath, bool summaryRequested)
+    private static StoreResult MapResult(
+        InterchangeStoreResult result,
+        string catalogPath,
+        bool summaryRequested,
+        bool sqlScriptsRequested)
     {
         var success = result.Outcome is EStoreOutcome.Success or EStoreOutcome.CompletedWithIssues;
 
@@ -54,7 +59,9 @@ public sealed class StoreWorkflowService : IWorkflowService<StoreRequest, StoreR
             HasIssues: result.Outcome == EStoreOutcome.CompletedWithIssues,
             VerificationPassed: result.VerificationPassed,
             SummaryPath: result.SummaryPath,
-            SummaryRequested: summaryRequested);
+            SummaryRequested: summaryRequested,
+            SqlScripts: result.SqlScripts,
+            SqlScriptsRequested: sqlScriptsRequested);
     }
 
     private static string BuildMessage(InterchangeStoreResult result)

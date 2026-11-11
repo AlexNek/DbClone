@@ -161,7 +161,7 @@ public sealed class BlobContainerRoundTripTests : IDisposable
         });
 
         var names = Directory.GetFiles(Path.Combine(TableDir("images"), "blobs"))
-            .Select(Path.GetFileName!)
+            .Select(path => Path.GetFileName(path)!)
             .ToList();
         names.Should().HaveCount(2);
         names.Distinct(StringComparer.OrdinalIgnoreCase).Should().HaveCount(2,
@@ -214,7 +214,7 @@ public sealed class BlobContainerRoundTripTests : IDisposable
         });
 
         var names = Directory.GetFiles(Path.Combine(TableDir("images"), "blobs"))
-            .Select(Path.GetFileName!)
+            .Select(path => Path.GetFileName(path)!)
             .ToList();
         names.Should().HaveCount(5);
         names.Distinct(StringComparer.OrdinalIgnoreCase).Should().HaveCount(5,
@@ -374,7 +374,7 @@ public sealed class BlobContainerRoundTripTests : IDisposable
 
     private IReadOnlyList<string> ContainerNames() =>
         Directory.GetFiles(Path.Combine(TableDir("images"), "blobs"))
-            .Select(Path.GetFileName!)
+            .Select(path => Path.GetFileName(path)!)
             .OrderBy(n => n, StringComparer.Ordinal)
             .ToList();
 

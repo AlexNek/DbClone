@@ -317,4 +317,20 @@ public sealed record IndexDefinition : ISchemaObject
 
     /// <summary>Gets or sets whether the index is unique.</summary>
     public bool IsUnique { get; init; }
+
+    /// <summary>Gets or sets the key columns, in the order the index stores them.</summary>
+    /// <remarks>
+    /// <para>
+    /// The columns are stated as data because the captured definition text does not state them as data:
+    /// the engine writes them inside a SQL statement, so a consumer that wanted one column had to read
+    /// SQL. A reader that renders words shows this list; a restore replays <see cref="NativeDefinition"/>,
+    /// because the two state different facts — what the index sorts on, and how to recreate it.
+    /// </para>
+    /// <para>
+    /// <see langword="null"/> means the producer stated no list, which is how a folder written before the
+    /// field existed reads. An empty list is not used for that case: it would claim an index over no
+    /// columns.
+    /// </para>
+    /// </remarks>
+    public IReadOnlyList<string>? Columns { get; init; }
 }

@@ -3,6 +3,7 @@ using CanonicalModel.Interchange;
 using DbAdapter.Definitions;
 
 using DatabaseInterchange.Report;
+using DatabaseInterchange.Script;
 
 namespace DatabaseInterchange.Tests.Report;
 
@@ -245,8 +246,12 @@ internal static class ReportModel
         new RelationGraphBuilder().Build(snapshot);
 
     /// <summary>Renders the complete document for a snapshot through the two real renderers.</summary>
-    internal static string Document(InterchangeSnapshot snapshot, CatalogStatistics? statistics = null) =>
+    internal static string Document(
+        InterchangeSnapshot snapshot,
+        CatalogStatistics? statistics = null,
+        ScriptResult? scripts = null) =>
         new MarkdownCatalogReportRenderer().Render(
             statistics ?? Statistics(snapshot),
-            MapOf(snapshot));
+            MapOf(snapshot),
+            scripts);
 }

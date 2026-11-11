@@ -1,6 +1,7 @@
 using System.Security;
 using System.Text;
 using CanonicalModel.Interchange;
+using DatabaseInterchange.Script;
 
 namespace DatabaseInterchange.Report;
 
@@ -61,6 +62,10 @@ internal sealed class CatalogReportWriter
     /// <param name="catalogDirectory">The catalog root the report belongs to (FR15).</param>
     /// <param name="statistics">The measured account of the finished catalog.</param>
     /// <param name="map">The relation facts analysed from the same snapshot.</param>
+    /// <param name="scripts">
+    /// What the SQL script pass produced, or <see langword="null"/> when that option was off — the section that
+    /// names the scripts is present exactly when the pass ran (FR7, D9).
+    /// </param>
     /// <param name="issues">
     /// The export's issue list, appended with one warning when the write itself failed (FR13). A
     /// cancellation adds nothing: nothing malfunctioned.
@@ -74,6 +79,7 @@ internal sealed class CatalogReportWriter
         string catalogDirectory,
         CatalogStatistics statistics,
         RelationMap map,
+        ScriptResult? scripts,
         IList<InterchangeIssue> issues,
         CancellationToken ct)
     {
@@ -90,7 +96,7 @@ internal sealed class CatalogReportWriter
             // Both halves of D4.2 are inside the try: a cancel that arrived before the render is answered
             // the same way as one that arrived after it — the report stops, the catalog is not blamed.
             ct.ThrowIfCancellationRequested();
-            var document = _renderer.Render(statistics, map);
+            var document = _renderer.Render(statistics, map, scripts);
 
             ct.ThrowIfCancellationRequested();
             await WriteContentAsync(temp, document, ct);

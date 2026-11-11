@@ -3,6 +3,7 @@ using CanonicalModel.Interchange;
 using DbAdapter.Definitions;
 
 using DatabaseInterchange.Format;
+using DatabaseInterchange.Script;
 
 using FluentAssertions;
 
@@ -246,6 +247,38 @@ public sealed class CatalogVerifierIntegrityTests : IDisposable
         result.IsValid.Should().BeFalse();
         result.Issues.Should().Contain(i =>
             i.Contains("data.00001.csv") && i.Contains("is not in the folder"));
+    }
+
+    [Fact]
+    public async Task VerifyAsync_IgnoresTheScriptsFolderTheStoreWrites()
+    {
+        // Arrange — a finished catalog, then the two files a store with the script option leaves beside
+        // it. The verifier walks table data folders only, so a `sql/` folder is neither an unclaimed data
+        // folder nor an unlisted data file (D10).
+        var table = SimpleTable("images");
+        await using (var writer = await CatalogWriter.CreateAsync(
+                         _catalogPath, producer: "DbClone-test", sourceDialect: "postgresql"))
+        {
+            await writer.WriteSectionAsync("tables", [table]);
+            await writer.WriteTableAsync(table, "public", SingleRow());
+            await writer.CompleteAsync();
+        }
+
+        var before = await new CatalogVerifier().VerifyAsync(_catalogPath);
+        before.IsValid.Should().BeTrue(string.Join(" | ", before.Issues));
+
+        var scripts = Path.Combine(_catalogPath, CatalogScriptWriter.DirectoryName);
+        Directory.CreateDirectory(scripts);
+        File.WriteAllText(Path.Combine(scripts, CatalogScriptWriter.SchemaFileName), "CREATE SCHEMA IF NOT EXISTS public;");
+        File.WriteAllText(Path.Combine(scripts, CatalogScriptWriter.DataFileName), "INSERT INTO public.images (id) VALUES ('1'::bigint);");
+
+        // Act
+        var after = await new CatalogVerifier().VerifyAsync(_catalogPath);
+
+        // Assert — the same verdict and the same issues, file for file: the catalog is unchanged by the
+        // text that describes it.
+        after.IsValid.Should().BeTrue(string.Join(" | ", after.Issues));
+        after.Issues.Should().Equal(before.Issues);
     }
 
     private static TableDefinition SimpleTable(string name)

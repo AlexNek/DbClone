@@ -68,6 +68,7 @@ public sealed class InterchangeService : IInterchangeService
                     .Select(t => new TableRef(t.Schema, t.Name))
                     .ToHashSet(),
                 IncludeCatalogReport = request.IncludeSummaryReport,
+                IncludeSqlScripts = request.IncludeSqlScripts,
             };
 
             var exportRequest = new ExportRequest
@@ -126,7 +127,20 @@ public sealed class InterchangeService : IInterchangeService
                 // wrapper is the one place that turns it into a path. The app knows no catalog file name.
                 SummaryPath: result.ReportRelativePath is null
                     ? null
-                    : Path.Combine(result.CatalogDirectory, result.ReportRelativePath));
+                    : Path.Combine(result.CatalogDirectory, result.ReportRelativePath),
+
+                // The same rule for the scripts, which the product names twice over (schema and data).
+                SqlScripts: result.SqlScripts is { } scripts
+                    ? new SqlScriptPaths(
+                        SchemaPath: ToAbsolute(result.CatalogDirectory, scripts.SchemaPath),
+                        DataPath: ToAbsolute(result.CatalogDirectory, scripts.DataPath),
+                        SchemaBytes: scripts.SchemaBytes,
+                        DataBytes: scripts.DataBytes,
+                        SchemaStatements: scripts.SchemaStatements,
+                        DataStatements: scripts.DataStatements,
+                        Rows: scripts.Rows,
+                        PayloadBytes: scripts.PayloadBytes)
+                    : null);
         }
         catch (OperationCanceledException)
         {
@@ -351,6 +365,327 @@ public sealed class InterchangeService : IInterchangeService
     }
 
     /// <inheritdoc />
+    public async Task<CatalogGraphView> ReadGraphAsync(
+        string catalogPath,
+        CancellationToken cancellationToken)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(catalogPath);
+
+        _logger.LogInformation("Read graph started: catalog={CatalogPath}", catalogPath);
+
+        await using var reader = await CatalogReader.OpenAsync(catalogPath, cancellationToken);
+        var manifest = reader.Manifest;
+        var index = reader.Index;
+
+        var schemas = await reader.ReadSectionAsync<SchemaDefinition>("schemas", cancellationToken);
+        var tables = await reader.ReadSectionAsync<TableDefinition>("tables", cancellationToken);
+
+        // Index versus content disagreement: draw neither and stop with both counts, because a picture
+        // of the smaller set would understate relations and look authoritative while doing it.
+        if (index.TableCount != tables.Count)
+        {
+            throw new InvalidOperationException(
+                $"The catalog contradicts itself: catalog.json records {index.TableCount} table(s) " +
+                $"while schema/tables.json holds {tables.Count}. Re-export the database.");
+        }
+
+        var schemaNameById = new Dictionary<string, string>(schemas.Count, StringComparer.Ordinal);
+        foreach (var schema in schemas)
+        {
+            schemaNameById[schema.Ref.Value] = schema.Name;
+        }
+
+        string SchemaNameOf(TableDefinition table) =>
+            schemaNameById.TryGetValue(table.SchemaRef.Value, out var name)
+                ? name
+                : SafeObjectName(table.SchemaRef);
+
+        var capturedById = new Dictionary<string, TableDefinition>(tables.Count, StringComparer.Ordinal);
+        foreach (var table in tables)
+        {
+            capturedById[table.Ref.Value] = table;
+        }
+
+        // R9: rows come from each table's table.json, never from re-reading a data row. A null means
+        // the run captured no data for that table; a 0 means it captured the table and it is empty.
+        var rowCountById = new Dictionary<string, long?>(tables.Count, StringComparer.Ordinal);
+        foreach (var table in tables)
+        {
+            rowCountById[table.Ref.Value] = await reader.ReadTableRowCountAsync(
+                SchemaNameOf(table),
+                table.Name,
+                cancellationToken);
+        }
+
+        var edges = new List<CatalogRelationEdgeView>();
+        var outsideById = new Dictionary<string, CatalogOutsideTableView>(StringComparer.Ordinal);
+        var referencingColumnsByTable = new Dictionary<string, HashSet<string>>(StringComparer.Ordinal);
+        var referencedColumnsByTable = new Dictionary<string, HashSet<string>>(StringComparer.Ordinal);
+
+        foreach (var table in tables)
+        {
+            var childId = table.Ref.Value;
+            var columnsByName = new Dictionary<string, ColumnDefinition>(table.Columns.Count, StringComparer.Ordinal);
+            foreach (var column in table.Columns)
+            {
+                columnsByName[column.Name] = column;
+            }
+
+            foreach (var foreignKey in table.ForeignKeys)
+            {
+                var parentRef = foreignKey.ReferencedTableRef;
+                var stated = DescribeReference(parentRef);
+                var parentIsCaptured = stated.StatesSomething && capturedById.ContainsKey(parentRef.Value);
+
+                string parentId;
+                if (stated.StatesSomething)
+                {
+                    parentId = parentRef.Value;
+                    if (!parentIsCaptured)
+                    {
+                        outsideById.TryAdd(parentId, new CatalogOutsideTableView(parentId, stated.Schema, stated.Name));
+                    }
+                }
+                else
+                {
+                    // The reference states nothing. The key only keeps two nameless targets apart;
+                    // the label is the renderer's business, never a name invented here.
+                    parentId = $"unresolved:{childId}|{foreignKey.Name}";
+                    outsideById.TryAdd(parentId, new CatalogOutsideTableView(parentId, null, null));
+                }
+
+                edges.Add(new CatalogRelationEdgeView(
+                    ChildId: childId,
+                    ParentId: parentId,
+                    ConstraintName: foreignKey.Name,
+                    Columns: [.. foreignKey.Columns],
+                    ReferencedColumns: [.. foreignKey.ReferencedColumns],
+                    OnDelete: NormalizeAction(foreignKey.OnDelete),
+                    OnUpdate: NormalizeAction(foreignKey.OnUpdate),
+                    IsMandatory: IsMandatory(columnsByName, foreignKey.Columns),
+                    IsSelfReference: parentIsCaptured && string.Equals(parentId, childId, StringComparison.Ordinal),
+                    ParentIsCaptured: parentIsCaptured));
+
+                var referencing = GetOrAdd(referencingColumnsByTable, childId);
+                foreach (var column in foreignKey.Columns)
+                {
+                    referencing.Add(column);
+                }
+
+                if (parentIsCaptured)
+                {
+                    var referenced = GetOrAdd(referencedColumnsByTable, parentId);
+                    foreach (var column in foreignKey.ReferencedColumns)
+                    {
+                        referenced.Add(column);
+                    }
+                }
+            }
+        }
+
+        var tableViews = tables
+            .OrderBy(t => t.Ref.Value, StringComparer.Ordinal)
+            .Select(table =>
+            {
+                var id = table.Ref.Value;
+                referencingColumnsByTable.TryGetValue(id, out var referencing);
+                referencedColumnsByTable.TryGetValue(id, out var referenced);
+
+                var columns = table.Columns
+                    .OrderBy(c => c.Ordinal)
+                    .Select(c => new CatalogColumnView(
+                        Name: c.Name,
+                        LogicalType: c.LogicalType.ToString(),
+                        IsNullable: c.Nullable,
+                        IsPartOfPrimaryKey: table.PrimaryKey?.Columns.Contains(c.Name, StringComparer.Ordinal) == true,
+                        IsReferencingForeignKey: referencing?.Contains(c.Name) == true,
+                        IsReferencedByForeignKey: referenced?.Contains(c.Name) == true,
+                        Comment: c.Description))
+                    .ToList();
+
+                var indexes = (table.Indexes ?? [])
+                    .OrderBy(index => index.Name, StringComparer.Ordinal)
+                    .Select(index => new CatalogIndexView(
+                        Name: index.Name,
+                        IsUnique: index.IsUnique,
+                        Definition: index.NativeDefinition?.Text,
+                        Columns: index.Columns))
+                    .ToList();
+
+                return new CatalogTableView(
+                    Id: id,
+                    Schema: SchemaNameOf(table),
+                    Table: table.Name,
+                    RowCount: rowCountById.TryGetValue(id, out var rows) ? rows : null,
+                    ColumnCount: columns.Count,
+                    IndexCount: indexes.Count,
+                    ForeignKeyCount: table.ForeignKeys.Count,
+                    Columns: columns,
+                    PrimaryKey: table.PrimaryKey is null
+                        ? null
+                        : new CatalogKeyView(table.PrimaryKey.Name, [.. table.PrimaryKey.Columns]),
+                    UniqueKeys:
+                    [
+                        .. (table.UniqueConstraints ?? [])
+                            .OrderBy(key => key.Name, StringComparer.Ordinal)
+                            .Select(key => new CatalogKeyView(key.Name, [.. key.Columns])),
+                    ],
+                    Indexes: indexes,
+                    CheckConstraints:
+                    [
+                        .. (table.CheckConstraints ?? [])
+                            .OrderBy(check => check.Name, StringComparer.Ordinal)
+                            .Select(check => new CatalogCheckConstraintView(
+                                check.Name,
+                                check.Expression?.Text ?? string.Empty)),
+                    ]);
+            })
+            .ToList();
+
+        var relatedIds = new HashSet<string>(StringComparer.Ordinal);
+        foreach (var edge in edges)
+        {
+            relatedIds.Add(edge.ChildId);
+            if (edge.ParentIsCaptured)
+            {
+                relatedIds.Add(edge.ParentId);
+            }
+        }
+
+        var schemaViews = tables
+            .GroupBy(SchemaNameOf, StringComparer.Ordinal)
+            .OrderBy(g => g.Key, StringComparer.Ordinal)
+            .Select(g =>
+            {
+                var inSchema = g.ToList();
+                return new CatalogSchemaView(
+                    Schema: g.Key,
+                    TableCount: inSchema.Count,
+                    RelatedTableCount: inSchema.Count(t => relatedIds.Contains(t.Ref.Value)));
+            })
+            .ToList();
+
+        // A schema-only run states no row count for any table; that is the one flag the header needs.
+        var hasData = tables.Any(t => rowCountById.TryGetValue(t.Ref.Value, out var rows) && rows is not null);
+
+        return new CatalogGraphView(
+            CatalogPath: catalogPath,
+            FormatVersion: manifest.FormatVersion,
+            SourceDialect: manifest.SourceDialect,
+            HasData: hasData,
+            Tables: tableViews,
+            OutsideTables: outsideById.Values.OrderBy(o => o.Id, StringComparer.Ordinal).ToList(),
+            Schemas: schemaViews,
+            Edges: edges
+                .OrderBy(e => e.ChildId, StringComparer.Ordinal)
+                .ThenBy(e => e.ConstraintName, StringComparer.Ordinal)
+                .ThenBy(e => e.ParentId, StringComparer.Ordinal)
+                .ToList(),
+            UnrelatedTableCount: tables.Count(t => !relatedIds.Contains(t.Ref.Value)));
+    }
+
+    private static readonly (string? Schema, string? Name, bool StatesSomething) NoReference = (null, null, false);
+
+    /// <summary>
+    /// Reads what a reference states, without inventing anything for one that states nothing.
+    /// </summary>
+    private static (string? Schema, string? Name, bool StatesSomething) DescribeReference(ObjectRef reference)
+    {
+        if (string.IsNullOrEmpty(reference.Value))
+        {
+            return NoReference;
+        }
+
+        var schema = SafeSchemaName(reference);
+        var name = SafeObjectName(reference);
+
+        if (string.IsNullOrEmpty(name) && string.IsNullOrEmpty(schema))
+        {
+            return NoReference;
+        }
+
+        return (string.IsNullOrEmpty(schema) ? null : schema, string.IsNullOrEmpty(name) ? null : name, true);
+    }
+
+    private static string? SafeSchemaName(ObjectRef reference)
+    {
+        if (string.IsNullOrEmpty(reference.Value))
+        {
+            return null;
+        }
+
+        try
+        {
+            return reference.SchemaName();
+        }
+        catch (ArgumentException)
+        {
+            return null;
+        }
+    }
+
+    private static string SafeObjectName(ObjectRef reference)
+    {
+        if (string.IsNullOrEmpty(reference.Value))
+        {
+            return string.Empty;
+        }
+
+        try
+        {
+            return reference.ObjectName();
+        }
+        catch (ArgumentException)
+        {
+            return string.Empty;
+        }
+    }
+
+    /// <summary>
+    /// §5.1: an edge is mandatory when every referencing column is non-nullable.
+    /// </summary>
+    private static bool IsMandatory(
+        IReadOnlyDictionary<string, ColumnDefinition> columnsByName,
+        IReadOnlyList<string> referencingColumns)
+    {
+        if (referencingColumns.Count == 0)
+        {
+            return false;
+        }
+
+        foreach (var name in referencingColumns)
+        {
+            if (!columnsByName.TryGetValue(name, out var column) || column.Nullable)
+            {
+                return false;
+            }
+        }
+
+        return true;
+    }
+
+    /// <summary>
+    /// §5.2: <c>NO ACTION</c> is the default the caller never needs to see, so it reads as
+    /// "not stated" just as an absent action does.
+    /// </summary>
+    private static string? NormalizeAction(string? action) =>
+        string.IsNullOrWhiteSpace(action)
+        || string.Equals(action, "NO ACTION", StringComparison.OrdinalIgnoreCase)
+            ? null
+            : action;
+
+    private static HashSet<string> GetOrAdd(Dictionary<string, HashSet<string>> map, string key)
+    {
+        if (!map.TryGetValue(key, out var set))
+        {
+            set = new HashSet<string>(StringComparer.Ordinal);
+            map[key] = set;
+        }
+
+        return set;
+    }
+
+    /// <inheritdoc />
     public async Task<VerificationSummary> VerifyAsync(
         string catalogPath,
         CancellationToken cancellationToken)
@@ -493,6 +828,13 @@ public sealed class InterchangeService : IInterchangeService
             LastCompletedChunk: null, // TODO: Track when importer provides this
             Elapsed: elapsed);
     }
+
+    /// <summary>
+    /// Turns a path the product named relative to the catalog it was handed into the path the application
+    /// reports, or <see langword="null"/> when the product wrote no such file.
+    /// </summary>
+    private static string? ToAbsolute(string catalogDirectory, string? relativePath) =>
+        relativePath is null ? null : Path.Combine(catalogDirectory, relativePath);
 
     private static InterchangeIssueView MapIssue(InterchangeIssue issue) =>
         new(

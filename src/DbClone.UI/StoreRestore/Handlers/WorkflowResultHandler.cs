@@ -36,6 +36,20 @@ public sealed class WorkflowResultHandler : IWorkflowResultHandler
             state.LogDetail($"Summary: {result.SummaryPath}");
         else if (result.SummaryRequested)
             state.LogWarning("Summary: not written");
+
+        // One line per file the store wrote, in the order the names were handed over: a user who ran the
+        // store to get a script should not have to open the folder to find out whether there is one.
+        if (result.SqlScripts is { } scripts && scripts.SchemaPath is { } schemaScript)
+        {
+            state.LogDetail($"SQL schema: {schemaScript} ({scripts.SchemaStatements} statements, {scripts.SchemaBytes} bytes)");
+            if (scripts.DataPath is { } dataScript)
+                state.LogDetail($"SQL data: {dataScript} ({scripts.DataStatements} statements, {scripts.Rows} rows, {scripts.DataBytes} bytes)");
+        }
+        else if (result.SqlScriptsRequested)
+        {
+            state.LogWarning("SQL scripts: not written");
+        }
+
         if (!result.VerificationPassed && result.Success)
             state.LogWarning("Catalog verification did not pass.");
     }

@@ -41,6 +41,31 @@ public interface IInterchangeService
         CancellationToken cancellationToken);
 
     /// <summary>
+    /// Reads the catalog's captured relationship graph — the tables it holds, the tables its
+    /// constraints only name, and the foreign keys between them — without a database connection
+    /// and without re-reading a single data row.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// The read goes through <c>CatalogReader</c> only, so restore, verify and this view cannot
+    /// disagree about whether a catalog is readable. Scope stays O(tables), not O(rows): the read
+    /// set is <c>manifest.json</c>, <c>catalog.json</c>, <c>schema/schemas.json</c>,
+    /// <c>schema/tables.json</c> and each table's <c>data/&lt;schema&gt;/&lt;table&gt;/table.json</c>.
+    /// </para>
+    /// <para>
+    /// A catalog whose <c>catalog.json</c> and <c>schema/tables.json</c> disagree is refused rather
+    /// than drawn: the disagreement means one of the two counts is wrong, and quietly drawing the
+    /// smaller set would understate relations.
+    /// </para>
+    /// </remarks>
+    /// <param name="catalogPath">The catalog folder to read.</param>
+    /// <param name="cancellationToken">Cancellation token.</param>
+    /// <returns>The relationship graph as app DTOs.</returns>
+    Task<CatalogGraphView> ReadGraphAsync(
+        string catalogPath,
+        CancellationToken cancellationToken);
+
+    /// <summary>
     /// Verifies a catalog's integrity (hashes and counts).
     /// A failure blocks restore and names the failing files.
     /// </summary>

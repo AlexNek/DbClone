@@ -1,3 +1,5 @@
+using System.Text.Json;
+
 using DbClone.UI.Settings;
 
 using FluentAssertions;
@@ -22,6 +24,34 @@ public class StoreRestoreOptionsTests
         options.SnapshotConsistency.Should().Be("consistent");
         options.UnsupportedFeaturePolicy.Should().Be("fail");
         options.CatalogSubfolderPattern.Should().Be("{Connection}_{timestamp}");
+    }
+
+    [Fact]
+    public void SqlScripts_defaults_on_because_handing_the_catalog_to_any_client_is_the_point()
+    {
+        // The product option defaults off — the pass is asked for — while the user-facing preference
+        // defaults on: a user who never opens the settings still gets the files (FR10).
+        new StoreRestoreOptions().SqlScripts.Should().BeTrue();
+    }
+
+    [Fact]
+    public void SqlScripts_survives_the_round_trip_and_an_older_file_leaves_it_on()
+    {
+        // Arrange — a settings file written before the option existed.
+        const string olderFile = """{ "StoreRestore": { "ChunkBytes": 8388608 } }""";
+
+        // Act
+        var fromOlderFile = JsonSerializer.Deserialize<UserSettings>(olderFile);
+
+        // Assert — an upgrade must not silently turn the new files off for a user who already has settings.
+        fromOlderFile!.StoreRestore.SqlScripts.Should().BeTrue();
+
+        // Act — and an explicit choice travels both ways.
+        var saved = JsonSerializer.Serialize(new StoreRestoreOptions { SqlScripts = false });
+        var reloaded = JsonSerializer.Deserialize<StoreRestoreOptions>(saved);
+
+        // Assert
+        reloaded!.SqlScripts.Should().BeFalse();
     }
 
     [Fact]

@@ -1,0 +1,994 @@
+using DbClone.UI.Models.CatalogGraph;
+
+namespace DbClone.UI.Services.GraphLayout;
+
+/// <summary>
+/// Turns each constraint into a drawn path: a straight segment when the way is clear, a dog-leg that
+/// turns in a corridor between cards when it is not, a curve when the constraint closes a cycle, and
+/// a loop to the right of a table that points at itself.
+/// </summary>
+/// <remarks>
+/// <para>
+/// Two rules outrank the others. No path may cross a card it does not start or end on (plan D4 step
+/// 8, T25), and no two paths may run along one line: a pair of arrows drawn on one coordinate is drawn
+/// as one line, so the reader sees a single stroke joining four tables and can attribute neither end.
+/// Every route therefore claims the stretches it covers, and a candidate that would cover a stretch
+/// another route already covers is passed over while a free line exists — in another corridor first,
+/// then on a lane beside the first. Running over another route is the last resort of a picture that
+/// leaves no other way round, never the shape it prefers (T26).
+/// </para>
+/// <para>
+/// The short way is preferred among the routes that satisfy both rules — a straight segment when it
+/// clears every card and every claimed stretch, otherwise the shortest clean dog-leg — so the picture
+/// reads as a map of the catalog rather than as a fan of chords drawn over it.
+/// </para>
+/// <para>
+/// An arrow is drawn to a point of the border <see cref="GraphEdgePorts"/> gave its end, and it leaves
+/// that end on the outside of the side the point stands on. The rule that keeps two constraints from
+/// being drawn as one line says nothing about where a line ends, and it is the end a reader uses to
+/// decide which table an arrow belongs to: ends left to fall where the centre-to-centre line lands are
+/// the one place two arrows can still become one. A way that ran along its own card's border would
+/// then read as a stroke over the table, so every family of route starts by moving away from it.
+/// </para>
+/// <para>
+/// A cycle is carried by the curve and nothing else, and the two directions of a mutual pair bow to
+/// opposite sides, so two arrows between one pair of tables are never one line (FR13, D9).
+/// </para>
+/// </remarks>
+internal static class GraphEdgeRouter
+{
+    /// <summary>How far a path stays from a card it does not touch.</summary>
+    internal const double Clearance = 5;
+
+    /// <summary>The sideways step between two constraints that join the same pair of tables.</summary>
+    internal const double ParallelOffset = 22;
+
+    /// <summary>How far a vertical run is drawn beside the corridor line it shares with the corridor's centre.</summary>
+    internal const double LaneStep = 12;
+
+    /// <summary>
+    /// How far a horizontal run is drawn above or below its corridor line. Smaller than
+    /// <see cref="LaneStep"/> because a row corridor is one row gap tall while a column corridor is a
+    /// whole column gap wide, so the room beside the line differs by axis.
+    /// </summary>
+    internal const double LaneRowStep = 9;
+
+    /// <summary>How far a closing cycle's curve bows away from the straight line between its ends.</summary>
+    internal const double Bulge = 26;
+
+    /// <summary>How far a self-reference loop reaches into the corridor beside its table.</summary>
+    internal const double LoopReach = 44;
+
+    /// <summary>How finely a curve is sampled when checking that it clears the cards.</summary>
+    private const int CurveSamples = 8;
+
+    /// <summary>How far two coordinates may differ and still be the same line.</summary>
+    private const double Tolerance = 0.01;
+
+    /// <summary>Routes every edge of the graph.</summary>
+    /// <param name="model">The analyzed graph.</param>
+    /// <param name="placement">Where every card sits.</param>
+    /// <param name="grid">The corridors the routes may turn in.</param>
+    /// <returns>One route per edge, in edge-index order.</returns>
+    public static IReadOnlyList<EdgeRoute> Route(
+        CatalogGraphModel model,
+        IReadOnlyList<NodePlacement> placement,
+        GraphGrid grid)
+    {
+        ArgumentNullException.ThrowIfNull(model);
+        ArgumentNullException.ThrowIfNull(placement);
+        ArgumentNullException.ThrowIfNull(grid);
+
+        var groupOfNode = GroupOfNode(model);
+        var ends = GraphEdgePorts.Assign(model, placement);
+        var tracks = new TrackUse();
+        var cards = new CardIndex(grid, model.Nodes.Count);
+        var near = new List<int>(32);
+        var routes = new List<EdgeRoute>(model.Edges.Count);
+
+        foreach (var edge in model.Edges)
+        {
+            var shift = (edge.ParallelOrdinal - ((edge.ParallelCount - 1) / 2.0)) * ParallelOffset;
+            var closesCycle = groupOfNode[edge.ChildIndex] >= 0
+                && groupOfNode[edge.ChildIndex] == groupOfNode[edge.ParentIndex];
+
+            var route = edge.IsSelfReference
+                ? Loop(edge, placement, grid, ends[edge.Index], shift)
+                : closesCycle
+                    ? Cycle(edge, placement, ends[edge.Index], shift)
+                    : Line(edge, placement, grid, cards, near, ends[edge.Index], shift, tracks);
+
+            tracks.Claim(route);
+            routes.Add(route);
+        }
+
+        return routes;
+    }
+
+    /// <summary>
+    /// A constraint between two different parts of the picture: straight when every card and every
+    /// claimed stretch is clear of it, otherwise the shortest right-angled path that turns only in
+    /// empty corridors. A path that would run over another route is accepted only when no corridor and
+    /// no lane of one offers a way that does not.
+    /// </summary>
+    private static EdgeRoute Line(
+        CatalogGraphEdge edge,
+        IReadOnlyList<NodePlacement> placement,
+        GraphGrid grid,
+        CardIndex cards,
+        List<int> near,
+        GraphEdgeEnds ends,
+        double shift,
+        TrackUse tracks)
+    {
+        var child = placement[edge.ChildIndex];
+        var parent = placement[edge.ParentIndex];
+        var start = ends.Child.Point;
+        var end = ends.Parent.Point;
+
+        IReadOnlyList<GraphPoint>? best = null;
+        var bestClears = false;
+        var bestShared = true;
+        var bestLength = double.MaxValue;
+
+        void Consider(IReadOnlyList<GraphPoint> candidate)
+        {
+            var length = Length(candidate);
+            var clears = Clears(candidate, placement, cards, near, edge.ChildIndex, edge.ParentIndex);
+            var shared = tracks.IsShared(candidate);
+
+            if (best is null || Beats(clears, shared, length, bestClears, bestShared, bestLength))
+            {
+                best = candidate;
+                bestClears = clears;
+                bestShared = shared;
+                bestLength = length;
+            }
+        }
+
+        foreach (var candidate in AllWays(child, parent, ends, grid, shift))
+        {
+            Consider(candidate);
+
+            // The straight way is the shortest way there is between two ends, so once it keeps off every
+            // card and every claimed stretch there is nothing further to look for. Looking is the
+            // expensive part of a thousand-table picture, so the ways arrive lazily and stop here.
+            if (bestClears && !bestShared)
+            {
+                break;
+            }
+        }
+
+        // The ends decide which corridor families are offered, and a card's own corridors always answer,
+        // so the fallback only stands in for a picture whose corridor lattice has nothing in it at all.
+        return Build(edge, best ?? [start, end]);
+    }
+
+    /// <summary>
+    /// Every way from one end to the other, in the order the picture prefers them: the corridors first,
+    /// then a lane beside a corridor, one lane after another. A route that takes a lane instead of the
+    /// corridor's own centre line is the same stroke drawn 12 px to one side, so it is worth looking at
+    /// only after the corridors themselves have failed to leave the cards and the claimed stretches
+    /// alone.
+    /// </summary>
+    private static IEnumerable<IReadOnlyList<GraphPoint>> AllWays(
+        NodePlacement child,
+        NodePlacement parent,
+        GraphEdgeEnds ends,
+        GraphGrid grid,
+        double shift)
+    {
+        foreach (var way in Ways(child, parent, ends, grid, shift, 0, 0))
+        {
+            yield return way;
+        }
+
+        foreach (var (laneX, laneY) in Lanes())
+        {
+            foreach (var way in Ways(child, parent, ends, grid, shift, laneX, laneY))
+            {
+                yield return way;
+            }
+        }
+    }
+
+    /// <summary>
+    /// The lanes a dog-leg is drawn on when every corridor's own centre line is taken: a little to one
+    /// side, then a little further, so a second constraint can be drawn beside the first in the same
+    /// corridor instead of along it.
+    /// </summary>
+    /// <remarks>
+    /// A lane moves a run only sideways to itself — a vertical stretch moves in x, a horizontal one in
+    /// y — and never both at once. That is the whole point: a corridor is empty along its length, so a
+    /// second line beside the first is still inside it, while a line pushed the same way along the
+    /// corridor's length would be pushed toward the cards the corridor runs between. An earlier version
+    /// shifted every coordinate at once and could therefore only ever find ways that clipped a card,
+    /// which left long routes taking the picture's own edge corridor instead.
+    /// </remarks>
+    private static IEnumerable<(double X, double Y)> Lanes()
+    {
+        yield return (-LaneStep, 0);
+        yield return (LaneStep, 0);
+        yield return (-2 * LaneStep, 0);
+        yield return (2 * LaneStep, 0);
+        yield return (0, -LaneRowStep);
+        yield return (0, LaneRowStep);
+    }
+
+    /// <summary>
+    /// Whether a candidate is a better drawing than the one held so far, in the order the picture
+    /// cares about: a route that keeps off the cards first, then one that keeps off a stretch another
+    /// route already covers, then the shorter one. A tie keeps the earlier candidate, so a straight
+    /// segment wins over a dog-leg of the same length and the result never depends on iteration order.
+    /// </summary>
+    private static bool Beats(
+        bool clears,
+        bool shared,
+        double length,
+        bool bestClears,
+        bool bestShared,
+        double bestLength)
+    {
+        if (clears != bestClears)
+        {
+            return clears;
+        }
+
+        if (shared != bestShared)
+        {
+            return !shared;
+        }
+
+        return length < bestLength;
+    }
+
+    /// <summary>
+    /// The ways from one end to the other, in the order the picture prefers them: the straight line
+    /// when it leaves both cards the way their sides face, then the right-angled paths that turn only
+    /// in the empty corridors beside the two cards. Which families exist is decided by the ends,
+    /// because a route leaves an end on the outside of the side that end stands on — an arrow drawn
+    /// along the border of its own card reads as a stroke over the table. A corridor crosses no card,
+    /// so a clean way exists for every pair and the shortcut is never bought by drawing over one.
+    /// </summary>
+    /// <param name="child">The card the arrow starts at.</param>
+    /// <param name="parent">The card the arrow ends on.</param>
+    /// <param name="ends">The two points the arrow owns, one on each card.</param>
+    /// <param name="grid">The lattice the corridors belong to.</param>
+    /// <param name="shift">The sideways step that keeps a parallel set's routes apart.</param>
+    /// <param name="laneX">How far beside the corridor's centre line the vertical runs of this pass are drawn.</param>
+    /// <param name="laneY">How far beside the corridor's centre line the horizontal runs of this pass are drawn.</param>
+    private static IEnumerable<IReadOnlyList<GraphPoint>> Ways(
+        NodePlacement child,
+        NodePlacement parent,
+        GraphEdgeEnds ends,
+        GraphGrid grid,
+        double shift,
+        double laneX,
+        double laneY)
+    {
+        var from = ends.Child;
+        var to = ends.Parent;
+        var start = from.Point;
+        var end = to.Point;
+
+        if (Leaves(from, end) && Leaves(to, start))
+        {
+            yield return [start, end];
+        }
+
+        var xs = ColumnCorridors(grid, child, parent, shift, laneX);
+        var ys = RowCorridors(grid, child, parent, shift, laneY);
+
+        foreach (var way in (from.LeavesSideways, to.LeavesSideways) switch
+        {
+            (true, true) => SidewaysWays(from, to, xs, ys),
+            (true, false) => OutSidewaysWays(from, to, xs, ys),
+            (false, true) => InSidewaysWays(from, to, xs, ys),
+            _ => UprightWays(from, to, xs, ys),
+        })
+        {
+            yield return way;
+        }
+    }
+
+    /// <summary>
+    /// The ways between two ends that both leave their card sideways: out to a column corridor, along
+    /// it, and back into the other card. When a third card stands in that corridor too, the way goes
+    /// out to one column, across a row corridor, along it past the blocker, back across and in — the
+    /// two cards' own borders are then the only lines the arrow runs beside, and it runs on neither.
+    /// </summary>
+    private static IEnumerable<IReadOnlyList<GraphPoint>> SidewaysWays(
+        GraphEdgePort from,
+        GraphEdgePort to,
+        List<double> xs,
+        List<double> ys)
+    {
+        var start = from.Point;
+        var end = to.Point;
+
+        if (Math.Abs(start.Y - end.Y) > Tolerance)
+        {
+            foreach (var x in xs.Where(value => LeavesX(from, value) && LeavesX(to, value)))
+            {
+                yield return [start, new GraphPoint(x, start.Y), new GraphPoint(x, end.Y), end];
+            }
+        }
+
+        foreach (var y in ys.Where(value => Math.Abs(value - start.Y) > Tolerance && Math.Abs(value - end.Y) > Tolerance))
+        {
+            foreach (var outX in xs.Where(value => LeavesX(from, value)))
+            {
+                foreach (var inX in xs.Where(value => LeavesX(to, value) && Math.Abs(value - outX) > Tolerance))
+                {
+                    yield return
+                    [
+                        start,
+                        new GraphPoint(outX, start.Y),
+                        new GraphPoint(outX, y),
+                        new GraphPoint(inX, y),
+                        new GraphPoint(inX, end.Y),
+                        end,
+                    ];
+                }
+            }
+        }
+    }
+
+    /// <summary>
+    /// The ways between two ends that both leave their card upright: out to a row corridor, along it,
+    /// and back down into the other card. A card standing between the two — the usual case in one
+    /// column of tables, where the arrow's own column is the column the blocker occupies — sends the
+    /// way around in x, because the only way past a card in the line the ends share is out of it.
+    /// </summary>
+    private static IEnumerable<IReadOnlyList<GraphPoint>> UprightWays(
+        GraphEdgePort from,
+        GraphEdgePort to,
+        List<double> xs,
+        List<double> ys)
+    {
+        var start = from.Point;
+        var end = to.Point;
+
+        if (Math.Abs(start.X - end.X) > Tolerance)
+        {
+            foreach (var y in ys.Where(value => LeavesY(from, value) && LeavesY(to, value)))
+            {
+                yield return [start, new GraphPoint(start.X, y), new GraphPoint(end.X, y), end];
+            }
+        }
+
+        foreach (var x in xs.Where(value => Math.Abs(value - start.X) > Tolerance && Math.Abs(value - end.X) > Tolerance))
+        {
+            foreach (var outY in ys.Where(value => LeavesY(from, value)))
+            {
+                foreach (var inY in ys.Where(value => LeavesY(to, value) && Math.Abs(value - outY) > Tolerance))
+                {
+                    yield return
+                    [
+                        start,
+                        new GraphPoint(start.X, outY),
+                        new GraphPoint(x, outY),
+                        new GraphPoint(x, inY),
+                        new GraphPoint(end.X, inY),
+                        end,
+                    ];
+                }
+            }
+        }
+    }
+
+    /// <summary>
+    /// The ways out of one card sideways and into the other upright: the one turn where the two
+    /// approach lines cross, then the pair of corridors that carries the way when a card stands on
+    /// that crossing.
+    /// </summary>
+    private static IEnumerable<IReadOnlyList<GraphPoint>> OutSidewaysWays(
+        GraphEdgePort from,
+        GraphEdgePort to,
+        List<double> xs,
+        List<double> ys)
+    {
+        var start = from.Point;
+        var end = to.Point;
+
+        if (LeavesX(from, end.X) && LeavesY(to, start.Y))
+        {
+            yield return [start, new GraphPoint(end.X, start.Y), end];
+        }
+
+        foreach (var x in xs.Where(value => LeavesX(from, value) && Math.Abs(value - end.X) > Tolerance))
+        {
+            foreach (var y in ys.Where(value => LeavesY(to, value) && Math.Abs(value - start.Y) > Tolerance))
+            {
+                yield return
+                [
+                    start,
+                    new GraphPoint(x, start.Y),
+                    new GraphPoint(x, y),
+                    new GraphPoint(end.X, y),
+                    end,
+                ];
+            }
+        }
+    }
+
+    /// <summary>The ways out of one card upright and into the other sideways: the mirror of the above.</summary>
+    private static IEnumerable<IReadOnlyList<GraphPoint>> InSidewaysWays(
+        GraphEdgePort from,
+        GraphEdgePort to,
+        List<double> xs,
+        List<double> ys)
+    {
+        var start = from.Point;
+        var end = to.Point;
+
+        if (LeavesY(from, end.Y) && LeavesX(to, start.X))
+        {
+            yield return [start, new GraphPoint(start.X, end.Y), end];
+        }
+
+        foreach (var y in ys.Where(value => LeavesY(from, value) && Math.Abs(value - end.Y) > Tolerance))
+        {
+            foreach (var x in xs.Where(value => LeavesX(to, value) && Math.Abs(value - start.X) > Tolerance))
+            {
+                yield return
+                [
+                    start,
+                    new GraphPoint(start.X, y),
+                    new GraphPoint(x, y),
+                    new GraphPoint(x, end.Y),
+                    end,
+                ];
+            }
+        }
+    }
+
+    /// <summary>
+    /// The corridor lines a vertical run may be drawn along: the one on either side of each of the two
+    /// cards. Four of them, so the search stays proportional to the edge count rather than to the
+    /// picture's size.
+    /// </summary>
+    private static List<double> ColumnCorridors(
+        GraphGrid grid,
+        NodePlacement child,
+        NodePlacement parent,
+        double shift,
+        double laneX)
+    {
+        var lines = new List<double>(4);
+
+        foreach (var column in new[]
+        {
+            grid.ColumnOfNode[child.NodeIndex],
+            grid.ColumnOfNode[child.NodeIndex] + 1,
+            grid.ColumnOfNode[parent.NodeIndex],
+            grid.ColumnOfNode[parent.NodeIndex] + 1,
+        })
+        {
+            var x = grid.ColumnCorridors[column] + shift + laneX;
+            if (!lines.Any(value => Math.Abs(value - x) < 0.5))
+            {
+                lines.Add(x);
+            }
+        }
+
+        return lines;
+    }
+
+    /// <summary>The corridor lines a horizontal run may be drawn along: the one above and below each card.</summary>
+    private static List<double> RowCorridors(
+        GraphGrid grid,
+        NodePlacement child,
+        NodePlacement parent,
+        double shift,
+        double laneY)
+    {
+        var lines = new List<double>(4);
+
+        foreach (var row in new[]
+        {
+            grid.RowOfNode[child.NodeIndex],
+            grid.RowOfNode[child.NodeIndex] + 1,
+            grid.RowOfNode[parent.NodeIndex],
+            grid.RowOfNode[parent.NodeIndex] + 1,
+        })
+        {
+            var y = grid.RowCorridors[row] + shift + laneY;
+            if (!lines.Any(value => Math.Abs(value - y) < 0.5))
+            {
+                lines.Add(y);
+            }
+        }
+
+        return lines;
+    }
+
+    /// <summary>Whether the way to a point leaves an end on the side it stands on rather than along it.</summary>
+    private static bool Leaves(GraphEdgePort port, GraphPoint toward) =>
+        port.LeavesSideways ? LeavesX(port, toward.X) : LeavesY(port, toward.Y);
+
+    /// <summary>Whether a run drawn along this x leaves a sideways end on the outside of its card.</summary>
+    private static bool LeavesX(GraphEdgePort port, double x) =>
+        (port.OutwardX * (x - port.Point.X)) > Tolerance;
+
+    /// <summary>Whether a run drawn along this y leaves an upright end on the outside of its card.</summary>
+    private static bool LeavesY(GraphEdgePort port, double y) =>
+        (port.OutwardY * (y - port.Point.Y)) > Tolerance;
+
+    /// <summary>
+    /// A constraint whose two ends sit in one cyclic group, drawn as a curve so the picture states
+    /// the cycle. The two directions of a mutual pair bow to opposite sides; a bulge that would cross
+    /// a card is flipped, then reduced, before it is accepted.
+    /// </summary>
+    private static EdgeRoute Cycle(
+        CatalogGraphEdge edge,
+        IReadOnlyList<NodePlacement> placement,
+        GraphEdgeEnds ends,
+        double shift)
+    {
+        var start = ends.Child.Point;
+        var end = ends.Parent.Point;
+
+        var (dx, dy) = (end.X - start.X, end.Y - start.Y);
+        var length = Math.Sqrt((dx * dx) + (dy * dy));
+        var (normalX, normalY) = length > 0 ? (-dy / length, dx / length) : (0.0, 1.0);
+        var side = edge.ChildIndex < edge.ParentIndex ? -1 : 1;
+
+        IReadOnlyList<GraphPoint>? first = null;
+        foreach (var bulge in CycleBulges(shift))
+        {
+            foreach (var signed in new[] { side, -side })
+            {
+                var points = Curve(start, end, normalX * signed * bulge, normalY * signed * bulge);
+                first ??= points;
+
+                if (CurveClears(points, placement))
+                {
+                    return new EdgeRoute(edge.Index, EEdgeShape.Detour, points, Midpoint(points));
+                }
+            }
+        }
+
+        return new EdgeRoute(edge.Index, EEdgeShape.Detour, first!, Midpoint(first!));
+    }
+
+    /// <summary>
+    /// The bulges a closing cycle is tried at: a gentle bow first, then wider arcs, because two
+    /// members of one block may not be neighbours and the curve has to go around the cards between
+    /// them instead of across them.
+    /// </summary>
+    private static IEnumerable<double> CycleBulges(double shift)
+    {
+        yield return Bulge + shift;
+        yield return Bulge * 2;
+        yield return Bulge * 3.5;
+        yield return Bulge * 5.5;
+        yield return Bulge * 8;
+    }
+
+    /// <summary>
+    /// A table pointing at itself: a loop drawn into the corridor at its right, so the arrow says
+    /// "itself" without running across the card or over its neighbour. Both of its ends belong to the
+    /// one card, so each is given its own point on it: two self-references drawn into one point are
+    /// drawn as one arrow naming neither constraint.
+    /// </summary>
+    private static EdgeRoute Loop(
+        CatalogGraphEdge edge,
+        IReadOnlyList<NodePlacement> placement,
+        GraphGrid grid,
+        GraphEdgeEnds ends,
+        double shift)
+    {
+        var node = placement[edge.ChildIndex];
+        var column = grid.ColumnOfNode[node.NodeIndex];
+        var limit = column + 1 < grid.ColumnLefts.Count
+            ? grid.ColumnLefts[column + 1]
+            : grid.Width - (GraphRankedPlacement.Margin / 2);
+
+        var available = Math.Max(0, limit - node.Right);
+        var reach = Math.Clamp((available / 2) + shift, 14, LoopReach);
+
+        var start = ends.Child;
+        var end = ends.Parent;
+
+        // The loop bows out of each end along the side that end stands on, which for the ends a
+        // self-reference is given is the card's own right — the corridor the reach is measured into.
+        return new EdgeRoute(
+            edge.Index,
+            EEdgeShape.Loop,
+            [start.Point, Out(start, reach), Out(end, reach), end.Point],
+            new GraphPoint(node.Right + reach + 8, node.Centre.Y));
+    }
+
+    /// <summary>The point a route reaches once it has left an end by the given distance.</summary>
+    private static GraphPoint Out(GraphEdgePort port, double distance) =>
+        new(port.Point.X + (port.OutwardX * distance), port.Point.Y + (port.OutwardY * distance));
+
+    /// <summary>
+    /// Whether a route keeps clear of every card. The two cards the route joins are met by design, so
+    /// they are checked only along the segments between the route's own ends.
+    /// </summary>
+    /// <param name="points">The candidate route.</param>
+    /// <param name="placement">Where every card sits.</param>
+    /// <param name="cards">The cards by cell, so only the ones a segment reaches are tested.</param>
+    /// <param name="near">The scratch list <paramref name="cards"/> fills; reused so a search allocates nothing.</param>
+    /// <param name="childIndex">The card the arrow starts at.</param>
+    /// <param name="parentIndex">The card the arrow ends on.</param>
+    private static bool Clears(
+        IReadOnlyList<GraphPoint> points,
+        IReadOnlyList<NodePlacement> placement,
+        CardIndex cards,
+        List<int> near,
+        int childIndex,
+        int parentIndex)
+    {
+        for (var segment = 0; segment + 1 < points.Count; segment++)
+        {
+            var first = segment == 0;
+            var last = segment + 2 == points.Count;
+
+            cards.Collect(near, points[segment], points[segment + 1], Clearance);
+
+            foreach (var node in near)
+            {
+                double clearance;
+                if (node == childIndex || node == parentIndex)
+                {
+                    if (first || last)
+                    {
+                        continue;
+                    }
+
+                    clearance = 0;
+                }
+                else
+                {
+                    clearance = Clearance;
+                }
+
+                if (GraphGeometry.SegmentHitsRect(points[segment], points[segment + 1], placement[node], clearance))
+                {
+                    return false;
+                }
+            }
+        }
+
+        return true;
+    }
+
+    /// <summary>Whether a sampled curve stays off every card, its own two included.</summary>
+    private static bool CurveClears(IReadOnlyList<GraphPoint> points, IReadOnlyList<NodePlacement> placement)
+    {
+        for (var sample = 1; sample < CurveSamples; sample++)
+        {
+            var t = (double)sample / CurveSamples;
+            var position = CubicAt(points, t);
+
+            foreach (var card in placement)
+            {
+                if (GraphGeometry.Contains(card, position))
+                {
+                    return false;
+                }
+            }
+        }
+
+        return true;
+    }
+
+    private static IReadOnlyList<GraphPoint> Curve(
+        GraphPoint start,
+        GraphPoint end,
+        double offsetX,
+        double offsetY)
+    {
+        var thirdX = (end.X - start.X) / 3;
+        var thirdY = (end.Y - start.Y) / 3;
+
+        return
+        [
+            start,
+            new GraphPoint(start.X + thirdX + offsetX, start.Y + thirdY + offsetY),
+            new GraphPoint(start.X + (2 * thirdX) + offsetX, start.Y + (2 * thirdY) + offsetY),
+            end,
+        ];
+    }
+
+    private static GraphPoint CubicAt(IReadOnlyList<GraphPoint> points, double t)
+    {
+        var inverse = 1 - t;
+        var weightStart = inverse * inverse * inverse;
+        var weightOne = 3 * inverse * inverse * t;
+        var weightTwo = 3 * inverse * t * t;
+        var weightEnd = t * t * t;
+
+        return new GraphPoint(
+            (weightStart * points[0].X) + (weightOne * points[1].X) + (weightTwo * points[2].X) + (weightEnd * points[3].X),
+            (weightStart * points[0].Y) + (weightOne * points[1].Y) + (weightTwo * points[2].Y) + (weightEnd * points[3].Y));
+    }
+
+    private static EdgeRoute Build(CatalogGraphEdge edge, IReadOnlyList<GraphPoint> points) =>
+        new(edge.Index, EEdgeShape.Line, points, Midpoint(points));
+
+    private static double Length(IReadOnlyList<GraphPoint> points)
+    {
+        var length = 0.0;
+        for (var index = 0; index + 1 < points.Count; index++)
+        {
+            var (dx, dy) = (points[index + 1].X - points[index].X, points[index + 1].Y - points[index].Y);
+            length += Math.Sqrt((dx * dx) + (dy * dy));
+        }
+
+        return length;
+    }
+
+    /// <summary>The point halfway along the drawn path, which is where the edge's hidden column text sits.</summary>
+    private static GraphPoint Midpoint(IReadOnlyList<GraphPoint> points)
+    {
+        if (points.Count < 2)
+        {
+            return points[0];
+        }
+
+        if (points.Count == 4)
+        {
+            return new GraphPoint(
+                (points[0].X + (3 * points[1].X) + (3 * points[2].X) + points[3].X) / 8,
+                (points[0].Y + (3 * points[1].Y) + (3 * points[2].Y) + points[3].Y) / 8);
+        }
+
+        var half = Length(points) / 2;
+        var walked = 0.0;
+        for (var index = 0; index + 1 < points.Count; index++)
+        {
+            var (dx, dy) = (points[index + 1].X - points[index].X, points[index + 1].Y - points[index].Y);
+            var segment = Math.Sqrt((dx * dx) + (dy * dy));
+            if (walked + segment >= half && segment > 0)
+            {
+                var share = (half - walked) / segment;
+                return new GraphPoint(points[index].X + (dx * share), points[index].Y + (dy * share));
+            }
+
+            walked += segment;
+        }
+
+        return points[^1];
+    }
+
+    /// <summary>The cyclic group each node belongs to, or -1 for a table outside every cycle.</summary>
+    private static int[] GroupOfNode(CatalogGraphModel model)
+    {
+        var groupOfNode = new int[model.Nodes.Count];
+        Array.Fill(groupOfNode, -1);
+
+        foreach (var group in model.CyclicGroups)
+        {
+            foreach (var node in group.MemberNodeIndexes)
+            {
+                groupOfNode[node] = group.Number;
+            }
+        }
+
+        return groupOfNode;
+    }
+
+    /// <summary>
+    /// The cards arranged by the cell each one fills, so a segment is tested only against the cards it
+    /// can reach.
+    /// </summary>
+    /// <remarks>
+    /// A card fills exactly one cell of the placement lattice — one per column, one per row — so the
+    /// lattice doubles as a bucket grid and no bucketing arithmetic is needed. A segment grown by the
+    /// clearance names the columns and rows that could be within reach, and only those cells are
+    /// visited; a vertical run in a corridor between two columns names none at all. Without this the
+    /// lane search would test every candidate against every card, which is quadratic in the picture's
+    /// size and made a thousand-table catalog take a minute to route.
+    /// </remarks>
+    private sealed class CardIndex
+    {
+        private readonly int _columns;
+        private readonly int _rows;
+        private readonly int[] _nodeOfCell;
+        private readonly double[] _lefts;
+        private readonly double[] _rights;
+        private readonly double[] _tops;
+        private readonly double[] _bottoms;
+
+        /// <summary>Indexes the cards by the cell of the lattice they occupy.</summary>
+        /// <param name="grid">The lattice the cards were placed on.</param>
+        /// <param name="count">How many nodes there are.</param>
+        public CardIndex(GraphGrid grid, int count)
+        {
+            ArgumentNullException.ThrowIfNull(grid);
+
+            _columns = Math.Max(1, grid.ColumnLefts.Count);
+            _rows = Math.Max(1, grid.RowTops.Count);
+            _nodeOfCell = new int[_columns * _rows];
+            Array.Fill(_nodeOfCell, -1);
+
+            for (var node = 0; node < count; node++)
+            {
+                _nodeOfCell[(grid.RowOfNode[node] * _columns) + grid.ColumnOfNode[node]] = node;
+            }
+
+            _lefts = [.. grid.ColumnLefts];
+            _rights = [.. grid.ColumnWidths.Select((width, column) => grid.ColumnLefts[column] + width)];
+            _tops = [.. grid.RowTops];
+            _bottoms = [.. grid.RowTops.Select(top => top + GraphCard.Height)];
+        }
+
+        /// <summary>
+        /// Fills a list with the cards a segment could meet, its ends grown by the clearance. The list
+        /// is emptied first so the caller may keep one for the whole search.
+        /// </summary>
+        /// <param name="into">The list to fill.</param>
+        /// <param name="start">Where the segment starts.</param>
+        /// <param name="end">Where the segment ends.</param>
+        /// <param name="clearance">How far from a card the segment must stay.</param>
+        public void Collect(List<int> into, GraphPoint start, GraphPoint end, double clearance)
+        {
+            into.Clear();
+
+            var left = Math.Min(start.X, end.X) - clearance;
+            var right = Math.Max(start.X, end.X) + clearance;
+            var top = Math.Min(start.Y, end.Y) - clearance;
+            var bottom = Math.Max(start.Y, end.Y) + clearance;
+
+            // The columns march left to right and the rows top to bottom, so the cells in reach are one
+            // contiguous block of the lattice: find its two corners and visit nothing outside them.
+            var firstColumn = 0;
+            while (firstColumn < _columns && _rights[firstColumn] < left)
+            {
+                firstColumn++;
+            }
+
+            var lastColumn = _columns - 1;
+            while (lastColumn >= firstColumn && _lefts[lastColumn] > right)
+            {
+                lastColumn--;
+            }
+
+            var firstRow = 0;
+            while (firstRow < _rows && _bottoms[firstRow] < top)
+            {
+                firstRow++;
+            }
+
+            var lastRow = _rows - 1;
+            while (lastRow >= firstRow && _tops[lastRow] > bottom)
+            {
+                lastRow--;
+            }
+
+            for (var row = firstRow; row <= lastRow; row++)
+            {
+                var line = row * _columns;
+                for (var column = firstColumn; column <= lastColumn; column++)
+                {
+                    var node = _nodeOfCell[line + column];
+                    if (node >= 0)
+                    {
+                        into.Add(node);
+                    }
+                }
+            }
+        }
+    }
+
+    /// <summary>
+    /// The stretches the routes already drawn along occupy: the x of every vertical run and the y-range
+    /// covered on it, the y of every horizontal run and its x-range. A dog-leg that picks a corridor is
+    /// picking ground other routes may already be drawn on, and two routes drawn along one line over one
+    /// another are indistinguishable in the picture — one stroke, four tables, and no way to say which
+    /// end belongs to which constraint.
+    /// </summary>
+    /// <remarks>
+    /// A stretch is compared by the range it covers, never by the whole line it lies on: a corridor is
+    /// free where nobody has drawn in it yet, so a route may use the same x as a route far above it.
+    /// Coordinates are compared as rounded values because they all come from the same lattice
+    /// arithmetic: two routes that took the same corridor produce the identical double, so exact
+    /// equality is the rule and the rounding only keeps a stray fraction from splitting one line into
+    /// two claims. Only a right-angled route claims a stretch; a curve is drawn across the picture, not
+    /// along a corridor.
+    /// </remarks>
+    private sealed class TrackUse
+    {
+        /// <summary>How far two coordinates may differ and still be the same line.</summary>
+        private const double Tolerance = 0.01;
+
+        private readonly Dictionary<double, List<(double From, double To)>> _vertical = [];
+        private readonly Dictionary<double, List<(double From, double To)>> _horizontal = [];
+
+        /// <summary>Whether any part of the route covers a stretch another route already covers.</summary>
+        /// <param name="points">The candidate route.</param>
+        /// <returns>Whether the route would be drawn along a stretch already in use.</returns>
+        public bool IsShared(IReadOnlyList<GraphPoint> points)
+        {
+            for (var index = 0; index + 1 < points.Count; index++)
+            {
+                var start = points[index];
+                var end = points[index + 1];
+
+                if (Math.Abs(end.X - start.X) < Tolerance
+                    && _vertical.TryGetValue(Track(start.X), out var vertical)
+                    && Covers(vertical, Math.Min(start.Y, end.Y), Math.Max(start.Y, end.Y)))
+                {
+                    return true;
+                }
+
+                if (Math.Abs(end.Y - start.Y) < Tolerance
+                    && _horizontal.TryGetValue(Track(start.Y), out var horizontal)
+                    && Covers(horizontal, Math.Min(start.X, end.X), Math.Max(start.X, end.X)))
+                {
+                    return true;
+                }
+            }
+
+            return false;
+        }
+
+        /// <summary>Records the stretches a route that has been drawn now occupies.</summary>
+        /// <param name="route">The route the router accepted.</param>
+        public void Claim(EdgeRoute route)
+        {
+            if (route.Shape != EEdgeShape.Line)
+            {
+                return;
+            }
+
+            var points = route.Points;
+            for (var index = 0; index + 1 < points.Count; index++)
+            {
+                var start = points[index];
+                var end = points[index + 1];
+
+                if (Math.Abs(end.X - start.X) < Tolerance)
+                {
+                    Add(_vertical, Track(start.X), Math.Min(start.Y, end.Y), Math.Max(start.Y, end.Y));
+                }
+
+                if (Math.Abs(end.Y - start.Y) < Tolerance)
+                {
+                    Add(_horizontal, Track(start.Y), Math.Min(start.X, end.X), Math.Max(start.X, end.X));
+                }
+            }
+        }
+
+        /// <summary>Whether one of the ranges on a line meets the range a candidate covers on it.</summary>
+        private static bool Covers(IReadOnlyList<(double From, double To)> ranges, double from, double to)
+        {
+            foreach (var (held, heldTo) in ranges)
+            {
+                if (Math.Min(to, heldTo) - Math.Max(from, held) > Tolerance)
+                {
+                    return true;
+                }
+            }
+
+            return false;
+        }
+
+        /// <summary>Adds one stretch to a line's own list, dropping the ones with no length to speak of.</summary>
+        private static void Add(
+            Dictionary<double, List<(double From, double To)>> tracks,
+            double line,
+            double from,
+            double to)
+        {
+            if (to - from < Tolerance)
+            {
+                return;
+            }
+
+            if (!tracks.TryGetValue(line, out var ranges))
+            {
+                ranges = [];
+                tracks[line] = ranges;
+            }
+
+            ranges.Add((from, to));
+        }
+
+        private static double Track(double value) => Math.Round(value, 3);
+    }
+}

@@ -54,13 +54,13 @@ public sealed class PostgreSqlWriter : IDatabaseWriter
     /// The rows one <c>INSERT</c> statement carries. A batch is the unit the data pass commits, so this
     /// also says how much a failing batch writes back.
     /// </summary>
-    private const int MaxBatchRows = 1000;
+    internal const int MaxBatchRows = 1000;
 
     /// <summary>
     /// The text length at which a batch is closed whatever it holds. A row of large text or JSON values
     /// outruns the row count, and a statement of several megabytes is not worth building to send.
     /// </summary>
-    private const int MaxBatchTextLength = 2_000_000;
+    internal const int MaxBatchTextLength = 2_000_000;
 
     /// <summary>
     /// What one stored binary value costs the batch budget: its placeholder text. The bytes themselves travel
@@ -133,7 +133,7 @@ public sealed class PostgreSqlWriter : IDatabaseWriter
             return;
         }
 
-        var statements = BuildStatements(stage, objects);
+        var statements = BuildStatements(Adapter.Info.Dialect, stage, objects);
 
         if (statements.Count == 0)
         {
@@ -249,7 +249,16 @@ public sealed class PostgreSqlWriter : IDatabaseWriter
     /// Estimates the SQL text length a single row's values will occupy in an INSERT statement,
     /// measured after quoting and escaping — the budget R7 names.
     /// </summary>
-    private static int MeasureRowSqlLength(IReadOnlyList<RowTarget> targets, DataValue[] row)
+    /// <remarks>
+    /// A payload costs its placeholder when the bytes travel as parameter data, and its whole base64
+    /// text when <paramref name="inlinePayloads"/> writes them into the statement, which is the script
+    /// renderer's case: a budget that counted a 12-character placeholder for a megabyte of bytes would
+    /// let a single statement grow past the limit it exists to hold.
+    /// </remarks>
+    internal static int MeasureRowSqlLength(
+        IReadOnlyList<RowTarget> targets,
+        DataValue[] row,
+        bool inlinePayloads = false)
     {
         var length = 0;
         for (var i = 0; i < targets.Count; i++)
@@ -266,9 +275,11 @@ public sealed class PostgreSqlWriter : IDatabaseWriter
             }
 
             var value = row[target.RowIndex];
-            if (value.Binary is not null)
+            if (value.Binary is { } payload)
             {
-                length += BinaryPlaceholderTextLength; // "@blobN", the bytes going as parameter data
+                length += inlinePayloads
+                    ? InlinePayloadTextLength(payload, target.Type)
+                    : BinaryPlaceholderTextLength; // "@blobN", the bytes going as parameter data
             }
             else if (value.IsNull || value.Value is null)
             {
@@ -287,10 +298,21 @@ public sealed class PostgreSqlWriter : IDatabaseWriter
     }
 
     /// <summary>
+    /// The length of the text an inlined payload occupies: <c>decode('&lt;base64&gt;', 'base64')::type</c>.
+    /// </summary>
+    private static int InlinePayloadTextLength(IBinaryPayload payload, string type)
+    {
+        // Base64 turns every three bytes into four characters, padded to a whole group.
+        var base64 = 4 * ((payload.Length + 2) / 3);
+
+        return "decode('".Length + (int)base64 + "', 'base64')::".Length + type.Length;
+    }
+
+    /// <summary>
     /// Builds the INSERT statement for the current batch rows and returns its text length.
     /// Used to project whether adding another row would exceed the text budget.
     /// </summary>
-    private static int EstimateBatchStatementLength(
+    internal static int EstimateBatchStatementLength(
         string tableName,
         string columnList,
         IReadOnlyList<RowTarget> targets,
@@ -452,20 +474,21 @@ public sealed class PostgreSqlWriter : IDatabaseWriter
     /// has nothing to do with.
     /// </para>
     /// </remarks>
-    internal IReadOnlyList<string> BuildStatements(
+    internal static IReadOnlyList<string> BuildStatements(
+        string dialect,
         SchemaStage stage,
         IReadOnlyList<ISchemaObject> objects) =>
         stage switch
         {
             SchemaStage.Schemas => CreateSchemaStatements(objects),
-            SchemaStage.Types => CreateTypeStatements(objects),
+            SchemaStage.Types => CreateTypeStatements(dialect, objects),
             SchemaStage.Sequences => CreateSequenceStatements(objects),
-            SchemaStage.Tables => CreateTableStatements(objects),
-            SchemaStage.Routines => CreateRoutineStatements(objects),
-            SchemaStage.Views => CreateViewStatements(objects),
+            SchemaStage.Tables => CreateTableStatements(dialect, objects),
+            SchemaStage.Routines => CreateRoutineStatements(dialect, objects),
+            SchemaStage.Views => CreateViewStatements(dialect, objects),
             SchemaStage.Constraints => CreateForeignKeyStatements(objects),
-            SchemaStage.Indexes => CreateIndexStatements(objects),
-            SchemaStage.Triggers => CreateTriggerStatements(objects),
+            SchemaStage.Indexes => CreateIndexStatements(dialect, objects),
+            SchemaStage.Triggers => CreateTriggerStatements(dialect, objects),
             _ => throw new NotSupportedException(
                 $"The schema stage \"{stage}\" holds {objects.Count} object(s) this adapter " +
                 "cannot apply yet, so nothing was executed."),
@@ -556,7 +579,9 @@ public sealed class PostgreSqlWriter : IDatabaseWriter
     /// transaction rolls back instead of leaving half a type behind.
     /// </para>
     /// </remarks>
-    private IReadOnlyList<string> CreateTypeStatements(IReadOnlyList<ISchemaObject> objects)
+    private static IReadOnlyList<string> CreateTypeStatements(
+        string dialect,
+        IReadOnlyList<ISchemaObject> objects)
     {
         var staged = new List<(int Rank, NativeObjectDefinition Type)>(objects.Count);
 
@@ -586,11 +611,11 @@ public sealed class PostgreSqlWriter : IDatabaseWriter
                 .OrderBy(s => s.Rank)
                 .ThenBy(s => s.Type.SchemaName, StringComparer.Ordinal)
                 .ThenBy(s => s.Type.Name, StringComparer.Ordinal)
-                .Select(s => CreateTypeStatement(s.Type)),
+                .Select(s => CreateTypeStatement(dialect, s.Type)),
         ];
     }
 
-    private string CreateTypeStatement(NativeObjectDefinition native)
+    private static string CreateTypeStatement(string dialect, NativeObjectDefinition native)
     {
         var named = $"The type \"{native.Name}\"";
         var text = native.NativeDefinition;
@@ -609,7 +634,7 @@ public sealed class PostgreSqlWriter : IDatabaseWriter
                 "would create something other than the source's type.");
         }
 
-        RequireDialect(text.Dialect, named);
+        RequireDialect(dialect, text.Dialect, named);
 
         return $"{text.Text.TrimEnd(';')};";
     }
@@ -667,7 +692,8 @@ public sealed class PostgreSqlWriter : IDatabaseWriter
     /// <see cref="SchemaStage.Constraints"/> stage, which runs once every table of the catalog exists.
     /// </para>
     /// </remarks>
-    private IReadOnlyList<string> CreateTableStatements(
+    private static IReadOnlyList<string> CreateTableStatements(
+        string dialect,
         IReadOnlyList<ISchemaObject> objects)
     {
         var tables = new List<TableDefinition>(objects.Count);
@@ -705,7 +731,7 @@ public sealed class PostgreSqlWriter : IDatabaseWriter
             {
                 if (table.ParentRef is null || created.Contains(table.ParentRef.Value))
                 {
-                    statements.Add(CreateTableStatement(table));
+                    statements.Add(CreateTableStatement(dialect, table));
                     created.Add(table.Ref);
                 }
                 else
@@ -737,7 +763,7 @@ public sealed class PostgreSqlWriter : IDatabaseWriter
     /// left it: a table on its own, a partitioned table waiting for its partitions, or a partition of
     /// a parent that is already created.
     /// </summary>
-    private string CreateTableStatement(TableDefinition table)
+    private static string CreateTableStatement(string dialect, TableDefinition table)
     {
         var named = $"the table \"{table.Name}\"";
         var tableName = PgIdentifierQuoter.QuoteSchemaQualified(
@@ -803,7 +829,7 @@ public sealed class PostgreSqlWriter : IDatabaseWriter
 
         foreach (var column in table.Columns)
         {
-            declarations.Add(CreateColumnDeclaration(column));
+            declarations.Add(CreateColumnDeclaration(dialect, column));
         }
 
         if (table.PrimaryKey is { } primaryKey)
@@ -831,7 +857,7 @@ public sealed class PostgreSqlWriter : IDatabaseWriter
                     "expression, so it cannot be created.");
             }
 
-            RequireDialect(expression.Dialect, $"The check constraint \"{check.Name}\"");
+            RequireDialect(dialect, expression.Dialect, $"The check constraint \"{check.Name}\"");
 
             // pg_get_constraintdef appends " NOT VALID" for a constraint the source never validated,
             // and that clause is legal only in ALTER TABLE ADD CONSTRAINT.
@@ -853,7 +879,7 @@ public sealed class PostgreSqlWriter : IDatabaseWriter
     /// Builds one column's declaration: its type as the source named it, then the clauses the catalog
     /// has content for.
     /// </summary>
-    private string CreateColumnDeclaration(ColumnDefinition column)
+    private static string CreateColumnDeclaration(string dialect, ColumnDefinition column)
     {
         var sql = new StringBuilder();
         sql.Append($"{PgIdentifierQuoter.QuoteIdentifier(column.Name)} {column.NativeType.Name}");
@@ -865,7 +891,10 @@ public sealed class PostgreSqlWriter : IDatabaseWriter
 
         if (column.Generated is { } generated)
         {
-            RequireDialect(generated.Dialect, $"The generation expression of column \"{column.Name}\"");
+            RequireDialect(
+                dialect,
+                generated.Dialect,
+                $"The generation expression of column \"{column.Name}\"");
             sql.Append($" GENERATED ALWAYS AS ({generated.Text}) STORED");
         }
         else if (!string.IsNullOrWhiteSpace(column.Identity))
@@ -880,7 +909,7 @@ public sealed class PostgreSqlWriter : IDatabaseWriter
         else if (column.DefaultValue is { } defaultValue
                  && !string.IsNullOrWhiteSpace(defaultValue.Text))
         {
-            RequireDialect(defaultValue.Dialect, $"The default of column \"{column.Name}\"");
+            RequireDialect(dialect, defaultValue.Dialect, $"The default of column \"{column.Name}\"");
             sql.Append($" DEFAULT {defaultValue.Text}");
         }
 
@@ -900,7 +929,7 @@ public sealed class PostgreSqlWriter : IDatabaseWriter
     /// stage is handed the tables again rather than a constraint section of its own. A key names the
     /// table it points at by qualified-name reference.
     /// </remarks>
-    private IReadOnlyList<string> CreateForeignKeyStatements(
+    private static IReadOnlyList<string> CreateForeignKeyStatements(
         IReadOnlyList<ISchemaObject> objects)
     {
         var statements = new List<string>();
@@ -921,7 +950,7 @@ public sealed class PostgreSqlWriter : IDatabaseWriter
         return statements;
     }
 
-    private string CreateForeignKeyStatement(
+    private static string CreateForeignKeyStatement(
         TableDefinition table,
         ForeignKeyDefinition foreignKey)
     {
@@ -981,7 +1010,8 @@ public sealed class PostgreSqlWriter : IDatabaseWriter
     /// flag. An index with no captured text therefore cannot be rebuilt.
     /// </para>
     /// </remarks>
-    private IReadOnlyList<string> CreateIndexStatements(
+    private static IReadOnlyList<string> CreateIndexStatements(
+        string dialect,
         IReadOnlyList<ISchemaObject> objects)
     {
         var statements = new List<string>();
@@ -1002,7 +1032,7 @@ public sealed class PostgreSqlWriter : IDatabaseWriter
             {
                 if (!IsConstraintBacked(table, index.Name))
                 {
-                    statements.Add(CreateIndexStatement(table, index));
+                    statements.Add(CreateIndexStatement(dialect, table, index));
                 }
             }
         }
@@ -1024,7 +1054,10 @@ public sealed class PostgreSqlWriter : IDatabaseWriter
         || table.UniqueConstraints.Any(u => string.Equals(u.Name, indexName, StringComparison.Ordinal))
         || table.ExclusionConstraints.Any(e => string.Equals(e.Name, indexName, StringComparison.Ordinal));
 
-    private string CreateIndexStatement(TableDefinition table, IndexDefinition index)
+    private static string CreateIndexStatement(
+        string dialect,
+        TableDefinition table,
+        IndexDefinition index)
     {
         var named = $"The index \"{index.Name}\" on table \"{table.Name}\"";
         var native = index.NativeDefinition;
@@ -1044,7 +1077,7 @@ public sealed class PostgreSqlWriter : IDatabaseWriter
                 "would create something other than the source's index.");
         }
 
-        RequireDialect(native.Dialect, named);
+        RequireDialect(dialect, native.Dialect, named);
 
         return $"{native.Text.TrimEnd(';')};";
     }
@@ -1070,7 +1103,8 @@ public sealed class PostgreSqlWriter : IDatabaseWriter
     /// records no condition at all.
     /// </para>
     /// </remarks>
-    private IReadOnlyList<string> CreateTriggerStatements(
+    private static IReadOnlyList<string> CreateTriggerStatements(
+        string dialect,
         IReadOnlyList<ISchemaObject> objects)
     {
         var statements = new List<string>();
@@ -1096,7 +1130,7 @@ public sealed class PostgreSqlWriter : IDatabaseWriter
                     "adapter, so it cannot be restored in the state the source had it in.");
             }
 
-            statements.Add(CreateTriggerStatement(trigger));
+            statements.Add(CreateTriggerStatement(dialect, trigger));
 
             if (trigger.EnabledState == "D")
             {
@@ -1109,7 +1143,7 @@ public sealed class PostgreSqlWriter : IDatabaseWriter
         return statements;
     }
 
-    private string CreateTriggerStatement(TriggerDefinition trigger)
+    private static string CreateTriggerStatement(string dialect, TriggerDefinition trigger)
     {
         var named = $"The trigger \"{trigger.Name}\"";
         var native = trigger.NativeDefinition;
@@ -1129,7 +1163,7 @@ public sealed class PostgreSqlWriter : IDatabaseWriter
                 "would create something other than the source's trigger.");
         }
 
-        RequireDialect(native.Dialect, named);
+        RequireDialect(dialect, native.Dialect, named);
 
         return $"{native.Text.TrimEnd(';')};";
     }
@@ -1165,7 +1199,8 @@ public sealed class PostgreSqlWriter : IDatabaseWriter
     /// <summary>
     /// Runs the captured routine text, which is already a complete <c>CREATE</c> statement.
     /// </summary>
-    private IReadOnlyList<string> CreateRoutineStatements(
+    private static IReadOnlyList<string> CreateRoutineStatements(
+        string dialect,
         IReadOnlyList<ISchemaObject> objects)
     {
         var statements = new List<string>(objects.Count);
@@ -1191,7 +1226,7 @@ public sealed class PostgreSqlWriter : IDatabaseWriter
                     "implementation the source never had.");
             }
 
-            RequireDialect(native.Dialect, $"The routine \"{routine.Name}\"");
+            RequireDialect(dialect, native.Dialect, $"The routine \"{routine.Name}\"");
             statements.Add($"{native.Text.TrimEnd(';')};");
         }
 
@@ -1201,7 +1236,8 @@ public sealed class PostgreSqlWriter : IDatabaseWriter
     /// <summary>
     /// Creates views and materialized views from the query body the catalog recorded.
     /// </summary>
-    private IReadOnlyList<string> CreateViewStatements(
+    private static IReadOnlyList<string> CreateViewStatements(
+        string dialect,
         IReadOnlyList<ISchemaObject> objects)
     {
         var views = new List<Models.ViewDefinition>();
@@ -1215,7 +1251,7 @@ public sealed class PostgreSqlWriter : IDatabaseWriter
             }
 
             var schemaName = RequireSchema(view.SchemaRef, $"the view \"{view.Name}\"");
-            var body = DefinitionText(view);
+            var body = DefinitionText(dialect, view);
 
             if (view.IsMaterialized)
             {
@@ -1240,7 +1276,7 @@ public sealed class PostgreSqlWriter : IDatabaseWriter
     /// <summary>
     /// Reads the query body a view object carries, which the format stores as a fragment.
     /// </summary>
-    private string DefinitionText(ViewDefinition view)
+    private static string DefinitionText(string dialect, ViewDefinition view)
     {
         var named = $"The view \"{view.Name}\"";
 
@@ -1248,7 +1284,7 @@ public sealed class PostgreSqlWriter : IDatabaseWriter
         // both carry the same statement, so the only questions here are whether the text is there and
         // which dialect it is written in.
         var text = view.Definition?.Text ?? view.NativeDefinition?.Text;
-        var dialect = view.Definition?.Dialect ?? view.NativeDefinition?.Dialect;
+        var recordedDialect = view.Definition?.Dialect ?? view.NativeDefinition?.Dialect;
 
         if (string.IsNullOrWhiteSpace(text))
         {
@@ -1256,7 +1292,7 @@ public sealed class PostgreSqlWriter : IDatabaseWriter
                 $"{named} carries no definition text, so it cannot be created.");
         }
 
-        RequireDialect(dialect ?? string.Empty, named);
+        RequireDialect(dialect, recordedDialect ?? string.Empty, named);
         return text;
     }
 
@@ -1306,14 +1342,22 @@ public sealed class PostgreSqlWriter : IDatabaseWriter
     /// A body from another dialect fails on the server with a syntax error that names no dialect, so
     /// checking here turns a confusing rejection into the actual fact: this catalog is not for this
     /// engine. Text translation is the format's own stage and has not run.
+    /// <para>
+    /// <paramref name="expectedDialect"/> is passed rather than read from the adapter, because the same
+    /// builders answer both the restore, which applies text against a live target, and the script
+    /// renderer, which writes that same text into a file — and only the former holds an adapter.
+    /// </para>
     /// </remarks>
-    private void RequireDialect(string dialect, string objectName)
+    private static void RequireDialect(
+        string expectedDialect,
+        string dialect,
+        string objectName)
     {
-        if (!string.Equals(dialect, Adapter.Info.Dialect, StringComparison.OrdinalIgnoreCase))
+        if (!string.Equals(dialect, expectedDialect, StringComparison.OrdinalIgnoreCase))
         {
             throw new InvalidOperationException(
                 $"{objectName} is written in the \"{dialect}\" dialect, which this " +
-                $"\"{Adapter.Info.Dialect}\" adapter cannot execute.");
+                $"\"{expectedDialect}\" adapter cannot execute.");
         }
     }
 
@@ -1402,14 +1446,16 @@ public sealed class PostgreSqlWriter : IDatabaseWriter
     /// <remarks>
     /// The <c>parameters</c> list is where a stored binary value's parameter is added, so the caller can attach
     /// it to the command. Leaving it out is only for building a batch's text, which means a batch holding no
-    /// payload.
+    /// payload — unless <paramref name="inlinePayloads"/> is set, which is the script renderer's case: a file
+    /// has no parameters, so the bytes are written into the statement instead (D5).
     /// </remarks>
     internal static string BuildInsertStatement(
         string tableName,
         string columnList,
         IReadOnlyList<RowTarget> targets,
         IReadOnlyList<DataValue[]> batch,
-        List<NpgsqlParameter>? parameters = null)
+        List<NpgsqlParameter>? parameters = null,
+        bool inlinePayloads = false)
     {
         // R7: the statement is built directly into a StringBuilder, appending each row's values
         // in place — no intermediate string per value, no Join, no ToString chain.
@@ -1424,7 +1470,7 @@ public sealed class PostgreSqlWriter : IDatabaseWriter
             }
 
             sql.Append('(');
-            AppendRowValues(sql, targets, batch[r], parameters);
+            AppendRowValues(sql, targets, batch[r], parameters, inlinePayloads);
             sql.Append(')');
         }
 
@@ -1452,12 +1498,26 @@ public sealed class PostgreSqlWriter : IDatabaseWriter
     /// on either side (design §5, §6.9) — and a <c>bytea</c> is a built-in type, so a typed parameter reads it
     /// correctly, which is precisely the case the literal rule exists to cover for user-defined types.
     /// </para>
+    /// <para>
+    /// A script has no parameters, so <paramref name="inlinePayloads"/> reverses that one rule and writes the
+    /// bytes into the statement as base64 (D5). Base64 is chosen over hex because it is 4/3 of the payload
+    /// against 2×, and because its alphabet cannot contain the quote that would end the literal. One value is
+    /// one very long line: a string literal cannot be wrapped, since a newline inside it would become part of
+    /// the value.
+    /// </para>
+    /// <para>
+    /// <paramref name="typedNulls"/> is for the one list that is typed before its target's columns are known:
+    /// a <c>VALUES</c> block a statement reads back by name. There a bare <c>NULL</c> would be read as text
+    /// once every value of its column is null, so the cast names the type the value is missing from.
+    /// </para>
     /// </remarks>
     internal static void AppendRowValues(
         StringBuilder sql,
         IReadOnlyList<RowTarget> targets,
         DataValue[] row,
-        List<NpgsqlParameter>? parameters = null)
+        List<NpgsqlParameter>? parameters = null,
+        bool inlinePayloads = false,
+        bool typedNulls = false)
     {
         for (var i = 0; i < targets.Count; i++)
         {
@@ -1481,25 +1541,39 @@ public sealed class PostgreSqlWriter : IDatabaseWriter
             var value = row[target.RowIndex];
             if (value.Binary is { } payload)
             {
-                if (parameters is null)
+                if (inlinePayloads)
+                {
+                    sql.Append("decode('");
+                    sql.Append(EncodePayloadAsBase64(payload));
+                    sql.Append("', 'base64')::");
+                    sql.Append(target.Type);
+                }
+                else if (parameters is null)
                 {
                     throw new InvalidOperationException(
                         $"The value of column \"{target.Column}\" is stored as bytes outside the row file, " +
                         "so it can only be written as a parameter, and no parameter list was given.");
                 }
-
-                // One parameter per value, so the placeholder names count the payloads the batch holds.
-                var name = $"blob{parameters.Count}";
-                parameters.Add(
-                    new NpgsqlParameter(name, NpgsqlDbType.Bytea)
-                    {
-                        Value = payload.OpenRead(),
-                    });
-                sql.Append('@').Append(name);
+                else
+                {
+                    // One parameter per value, so the placeholder names count the payloads the batch holds.
+                    var name = $"blob{parameters.Count}";
+                    parameters.Add(
+                        new NpgsqlParameter(name, NpgsqlDbType.Bytea)
+                        {
+                            Value = payload.OpenRead(),
+                        });
+                    sql.Append('@').Append(name);
+                }
             }
             else if (value.IsNull || value.Value is null)
             {
                 sql.Append("NULL");
+
+                if (typedNulls)
+                {
+                    sql.Append("::").Append(target.Type);
+                }
             }
             else
             {
@@ -1509,6 +1583,24 @@ public sealed class PostgreSqlWriter : IDatabaseWriter
                 sql.Append(target.Type);
             }
         }
+    }
+
+    /// <summary>
+    /// Reads a stored payload and encodes it as the base64 text a script writes into a statement.
+    /// </summary>
+    /// <remarks>
+    /// The renderer reads the stream the value carries and never opens a container of its own, which is the
+    /// same contract the parameter path relies on — so an unreadable payload fails here, by the table's own
+    /// name, rather than being written as a null.
+    /// </remarks>
+    internal static string EncodePayloadAsBase64(IBinaryPayload payload)
+    {
+        using var stream = payload.OpenRead();
+        using var buffer = new MemoryStream(
+            payload.Length is > 0 and <= int.MaxValue ? (int)payload.Length : 0);
+        stream.CopyTo(buffer);
+
+        return Convert.ToBase64String(buffer.ToArray());
     }
 
     /// <summary>

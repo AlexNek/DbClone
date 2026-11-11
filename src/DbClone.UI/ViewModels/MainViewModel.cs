@@ -62,7 +62,11 @@ public sealed partial class MainViewModel : ObservableObject
     private readonly IWorkflowValidator _storeValidator;
     private readonly ICatalogPathResolver _storePathResolver;
     private readonly IDialogService _storeDialogService;
+    private readonly IRelationshipViewHandler _relationshipView;
     private CancellationTokenSource? _storeCts;
+
+    /// <summary>The catalog the last successful Store wrote — the target of the view command.</summary>
+    private string? _lastStoredCatalogPath;
 
     /// <summary>The three workflow components behind their common contract.</summary>
     private readonly IWorkflowViewModel[] _workflows;
@@ -240,6 +244,7 @@ public sealed partial class MainViewModel : ObservableObject
         _storeValidator = serviceProvider.GetRequiredService<IWorkflowValidator>();
         _storePathResolver = serviceProvider.GetRequiredService<ICatalogPathResolver>();
         _storeDialogService = serviceProvider.GetRequiredService<IDialogService>();
+        _relationshipView = serviceProvider.GetRequiredService<IRelationshipViewHandler>();
 
         _workflows = [Copy, Compare];
 
@@ -412,6 +417,27 @@ public sealed partial class MainViewModel : ObservableObject
         await ExecuteStoreWorkflowAsync("Restore", ct => RunRestoreAsync(catalogPath, ct));
     }
 
+    // ── Relationship view (feature 07, D6) ──────────────────────────────────────
+
+    /// <summary>Opens the relationship view of the catalog the last successful Store wrote.</summary>
+    [RelayCommand(CanExecute = nameof(CanViewRelationships))]
+    private Task ViewRelationshipsAsync() =>
+        _relationshipView.ShowAsync(_lastStoredCatalogPath!, StoreRestoreState);
+
+    private bool CanViewRelationships() => _lastStoredCatalogPath is not null;
+
+    /// <summary>Opens the relationship view of any stored catalog the user picks.</summary>
+    [RelayCommand]
+    private async Task BrowseRelationshipsAsync()
+    {
+        var catalogPath = _storePathResolver.PromptForRestoreCatalogPath(_storeDialogService, Settings);
+        if (catalogPath is null) return;
+
+        if (!_storeValidator.ValidateDirectoryExists(catalogPath, StoreRestoreState)) return;
+
+        await _relationshipView.ShowAsync(catalogPath, StoreRestoreState);
+    }
+
     private async Task ExecuteStoreWorkflowAsync(string operationName, Func<CancellationToken, Task> executor)
     {
         _storeCts = new CancellationTokenSource();
@@ -456,10 +482,26 @@ public sealed partial class MainViewModel : ObservableObject
             SnapshotConsistency: options.SnapshotConsistency,
             UnsupportedFeaturePolicy: options.UnsupportedFeaturePolicy,
             TableSelection: _tableSelectionService.OperationSpec,
-            IncludeSummaryReport: options.WriteSummaryMarkdown);
+            IncludeSummaryReport: options.WriteSummaryMarkdown,
+            IncludeSqlScripts: options.SqlScripts);
 
         var result = await _storeWorkflow.ExecuteAsync(request, ct);
         _resultHandler.HandleStoreResult(StoreRestoreState, result);
+        RememberStoredCatalog(result);
+
+        // FR17: a catalog that finished arrives with its picture beside it, so the file is there before
+        // anybody asks for it. A picture that cannot be written leaves the store a success and says why.
+        if (result.Success && !string.IsNullOrWhiteSpace(result.CatalogPath))
+        {
+            await _relationshipView.TryWriteAsync(result.CatalogPath, StoreRestoreState, ct).ConfigureAwait(false);
+        }
+    }
+
+    /// <summary>Remembers the catalog a successful store wrote, and forgets a run that wrote none.</summary>
+    private void RememberStoredCatalog(StoreResult result)
+    {
+        _lastStoredCatalogPath = result.Success ? result.CatalogPath : null;
+        ViewRelationshipsCommand.NotifyCanExecuteChanged();
     }
 
     private async Task RunRestoreAsync(string catalogPath, CancellationToken ct)

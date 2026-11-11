@@ -44,6 +44,12 @@ public interface IDatabaseAdapter
     ICopySession CreateCopySession();
 
     /// <summary>
+    /// SQL-script role. Stateless and targetless: the scripts describe a catalog on disk, so no
+    /// connection is opened and no target is needed to create the renderer.
+    /// </summary>
+    ISqlScriptRenderer CreateScriptRenderer();
+
+    /// <summary>
     /// Opens a reader for export operations against the specified target.
     /// The reader owns its connection and transaction; dispose after use.
     /// </summary>

@@ -5,6 +5,7 @@ using CanonicalModel.Interchange;
 
 using DatabaseInterchange.Format;
 using DatabaseInterchange.Report;
+using DatabaseInterchange.Script;
 
 using FluentAssertions;
 
@@ -167,10 +168,10 @@ public sealed class CatalogReportWriterTests : IDisposable
         var statistics = ReportModel.Statistics(Fixture());
         var map = ReportModel.MapOf(Fixture());
         await FluentActions.Invoking(() => _sut.WriteAsync(
-                _catalogPath, statistics, map, null!, CancellationToken.None))
+                _catalogPath, statistics, map, null, null!, CancellationToken.None))
             .Should().ThrowAsync<ArgumentNullException>();
         await FluentActions.Invoking(() => _sut.WriteAsync(
-                "", statistics, map, [], CancellationToken.None))
+                "", statistics, map, null, [], CancellationToken.None))
             .Should().ThrowAsync<ArgumentException>();
         ReportExists().Should().BeFalse();
     }
@@ -193,9 +194,9 @@ public sealed class CatalogReportWriterTests : IDisposable
 
         // Assert
         writeParameters.Should().Equal(
-            typeof(string), typeof(CatalogStatistics), typeof(RelationMap),
+            typeof(string), typeof(CatalogStatistics), typeof(RelationMap), typeof(ScriptResult),
             typeof(IList<InterchangeIssue>), typeof(CancellationToken));
-        renderParameters.Should().Equal(typeof(CatalogStatistics), typeof(RelationMap));
+        renderParameters.Should().Equal(typeof(CatalogStatistics), typeof(RelationMap), typeof(ScriptResult));
 
         // Neither model can hold a secret: the words below are the kinds of member a credential would
         // arrive under, and the report models carry no such member, so no redaction logic exists to forget.
@@ -206,7 +207,10 @@ public sealed class CatalogReportWriterTests : IDisposable
         string[] connectionNames = ["port", "dsn", "connectionstring", "username", "password"];
         foreach (var type in renderParameters)
         {
-            type.Namespace.Should().Be("DatabaseInterchange.Report",
+            // The script summary is the one input that is not a report model; it is still the product's
+            // own record of what it wrote, never a consumer's connection state.
+            type.Namespace.Should().BeOneOf(
+                ["DatabaseInterchange.Report", "DatabaseInterchange.Script"],
                 "the document reads the product's own models, never a consumer's connection state");
             var suspicious = type.GetProperties(BindingFlags.Instance | BindingFlags.Public)
                 .Select(p => p.Name.ToLowerInvariant())
@@ -224,6 +228,7 @@ public sealed class CatalogReportWriterTests : IDisposable
             _catalogPath,
             ReportModel.Statistics(snapshot),
             ReportModel.MapOf(snapshot),
+            null,
             issues,
             ct);
     }

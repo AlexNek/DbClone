@@ -3,6 +3,7 @@ using System.Text.RegularExpressions;
 using CanonicalModel.Interchange;
 
 using DatabaseInterchange.Report;
+using DatabaseInterchange.Script;
 
 using FluentAssertions;
 
@@ -253,6 +254,129 @@ public sealed class MarkdownCatalogReportRendererTests
 
         // The report states catalog-relative paths only, so no folder of the source machine appears.
         document.Should().NotContain(@"C:\").And.NotContain("/home/").And.NotContain("/Users/");
+    }
+
+    [Fact]
+    public void Render_WithoutTheScriptPass_PrintsNoScriptsSection()
+    {
+        // Act
+        var document = ReportModel.Document(TwoTables());
+
+        // Assert (D9) — a section saying "nothing" would only raise a question nobody asked.
+        document.Should().NotContain("## SQL scripts");
+    }
+
+    [Fact]
+    public void Render_PrintsOneScriptsRowPerFileAndWhatTheFilesAreNot()
+    {
+        // Arrange
+        var scripts = new ScriptResult
+        {
+            SchemaPath = "sql/schema.sql",
+            SchemaBytes = 120,
+            SchemaStatements = 7,
+            DataPath = "sql/data.sql",
+            DataBytes = 340,
+            DataStatements = 9,
+            Rows = 20,
+        };
+
+        // Act
+        var document = ReportModel.Document(TwoTables(), scripts: scripts);
+
+        // Assert (FR7, D9) — a file the pass wrote is a fact; the row states its size and what it holds.
+        Section(document, "## SQL scripts").Should().Equal(
+            "| file | bytes | statements | rows |",
+            "| --- | --- | --- | --- |",
+            "| sql/schema.sql | 120 | 7 | - |",
+            "| sql/data.sql | 340 | 9 | 20 |",
+            "Every statement in these files may be run again: the second run creates no object and adds no row.",
+            "Foreign keys are added unvalidated and validated at the end of `sql/data.sql`.",
+            "A table that already exists is left as it is — no column, key or check is reconciled.",
+            "A sequence keeps the position its own declaration gives it — a catalog records no current value.",
+            "No role, grant or policy is written. Not a substitute for Restore, which also verifies the catalog.",
+            "These files are not part of the catalog bytes above: they describe the catalog, they do not belong to it.");
+    }
+
+    [Fact]
+    public void Render_WhenTheDataFileInlinesPayloads_SaysWhyItCanBeLarger()
+    {
+        // Arrange — a catalog whose data file carries the bytes a restore binds as parameters (D5).
+        var scripts = new ScriptResult
+        {
+            SchemaPath = "sql/schema.sql",
+            SchemaBytes = 120,
+            SchemaStatements = 7,
+            DataPath = "sql/data.sql",
+            DataBytes = 4096,
+            DataStatements = 9,
+            Rows = 20,
+            PayloadBytes = 3072,
+        };
+
+        // Act
+        var document = ReportModel.Document(TwoTables(), scripts: scripts);
+
+        // Assert — the size is stated, not capped, so the report says where it comes from.
+        Section(document, "## SQL scripts").Should().Contain(
+            "`sql/data.sql` inlines 3072 bytes of binary payloads as base64, which is why it can be larger "
+            + "than the data it describes.");
+    }
+
+    [Fact]
+    public void Render_ForASchemaOnlyScript_SaysTheTailIsInTheSchemaFile()
+    {
+        // Arrange — a schema-only catalog writes no data file, so the key validation belongs to the one file.
+        var scripts = new ScriptResult
+        {
+            SchemaPath = "sql/schema.sql",
+            SchemaBytes = 120,
+            SchemaStatements = 7,
+        };
+
+        // Act
+        var document = ReportModel.Document(TwoTables(), scripts: scripts);
+
+        // Assert (D2) — the sentence names the file that was written rather than assuming two.
+        Section(document, "## SQL scripts").Should().Contain(
+            "Foreign keys are added unvalidated and validated at the end of `sql/schema.sql`.");
+        document.Should().NotContain("`sql/data.sql`");
+    }
+
+    [Fact]
+    public void Render_ForARefusedScriptPass_StatesTheReasonInOneSentence()
+    {
+        // Arrange
+        var scripts = new ScriptResult
+        {
+            Refusal = new ScriptRefusal
+            {
+                Code = "SqlScriptsRefused",
+                Reason = "the catalog is written in the \"mysql\" dialect",
+            },
+        };
+
+        // Act
+        var document = ReportModel.Document(TwoTables(), scripts: scripts);
+
+        // Assert (D11) — a reader who asked for scripts and got none deserves the reason where they look.
+        Section(document, "## SQL scripts").Should().Equal(
+            "the catalog is written in the \"mysql\" dialect");
+        document.Should().NotContain("| file | bytes |");
+    }
+
+    [Fact]
+    public void Render_ForACancelledScriptPass_SaysThePassWasCancelled()
+    {
+        // Arrange
+        var scripts = new ScriptResult { Cancelled = true };
+
+        // Act
+        var document = ReportModel.Document(TwoTables(), scripts: scripts);
+
+        // Assert — a cancelled pass is not a refusal, so it states what happened and names no file.
+        Section(document, "## SQL scripts").Should().Equal(
+            "no script was written — the pass was cancelled");
     }
 
     private static InterchangeSnapshot TwoTables() =>

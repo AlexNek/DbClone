@@ -124,6 +124,24 @@ public sealed class InterchangeStoreReportTests : IDisposable
     }
 
     [Fact]
+    public async Task WithTheScriptOptionOff_TheProductIsAskedForNothing_AndTheStoreIsUnchanged()
+    {
+        // Arrange
+        GiveSource(rowsPerTable: 2);
+
+        // Act — the app-level default, which is how every test in this suite builds its request.
+        var result = await StoreAsync();
+
+        // Assert (FR10) — the pass is opt-in at this boundary, so the outcome, the counters and the issue
+        // list are exactly what the store reported before the scripts existed.
+        _lastOptions.Should().NotBeNull();
+        _lastOptions!.IncludeSqlScripts.Should().BeFalse();
+        result.Outcome.Should().Be(EStoreOutcome.Success);
+        result.Issues.Should().BeEmpty();
+        result.SqlScripts.Should().BeNull();
+    }
+
+    [Fact]
     public async Task BytesAndChunks_AreTheMeasuresTheWriterReached()
     {
         // Arrange — three rows per table over two tables, so every counter is non-trivial.

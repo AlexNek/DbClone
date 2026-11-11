@@ -125,6 +125,53 @@ public sealed class CatalogWriterTests : IDisposable
     }
 
     [Fact]
+    public async Task Index_key_columns_survive_the_round_trip_and_an_unstated_list_reads_as_none()
+    {
+        // The columns are the fact a reader prints and the DDL is the statement a restore replays, so the
+        // list is stored beside the text rather than inside it. A folder from a producer that stated no
+        // list must read back as "not stated" and not as an index over no columns — that is what lets an
+        // older catalog keep showing the text it does hold.
+        var schemaRef = ObjectRef.Schema("public");
+        var tableRef = ObjectRef.Table("public", "orders");
+
+        IndexDefinition Index(string name, IReadOnlyList<string>? columns) => new()
+        {
+            Ref = ObjectRef.SubObject("index", "public", "orders", name),
+            Name = name,
+            TableRef = tableRef,
+            IsUnique = false,
+            Columns = columns,
+        };
+
+        var tables = new List<TableDefinition>
+        {
+            new()
+            {
+                Ref = tableRef,
+                Name = "orders",
+                SchemaRef = schemaRef,
+                Indexes = [Index("ix_orders_customer", ["customer_id", "placed_at"]), Index("ix_orders_old", null)],
+            },
+        };
+
+        // Act
+        await using (var writer = await CatalogWriter.CreateAsync(
+                         _catalogPath, producer: "DbClone-test", sourceDialect: "postgresql"))
+        {
+            await writer.WriteSectionAsync("tables", tables);
+            await writer.CompleteAsync();
+        }
+
+        await using var reader = await CatalogReader.OpenAsync(_catalogPath);
+        var read = (await reader.ReadSectionAsync<TableDefinition>("tables")).Single();
+
+        // Assert
+        read.Indexes.Single(i => i.Name == "ix_orders_customer").Columns.Should()
+            .Equal("customer_id", "placed_at");
+        read.Indexes.Single(i => i.Name == "ix_orders_old").Columns.Should().BeNull();
+    }
+
+    [Fact]
     public async Task WriteTableAsync_writes_row_chunks_and_counts_them_in_manifest()
     {
         // Arrange

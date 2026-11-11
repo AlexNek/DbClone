@@ -2,6 +2,7 @@ using CanonicalModel.Interchange;
 using DbAdapter.Definitions;
 using DatabaseInterchange.Format;
 using DatabaseInterchange.Report;
+using DatabaseInterchange.Script;
 
 using Microsoft.Extensions.Logging;
 
@@ -69,6 +70,13 @@ public sealed record ExportResult
     /// rest of this result still describes the finished catalog (D4.2).
     /// </summary>
     public string? ReportRelativePath { get; init; }
+
+    /// <summary>
+    /// Gets what the SQL script pass produced, or <see langword="null"/> when the option was off. A refusal
+    /// or a failed write leaves the catalog complete and restorable, and states its reason here and as one
+    /// warning issue (FR8, D8).
+    /// </summary>
+    public ScriptResult? SqlScripts { get; init; }
 }
 
 /// <summary>
@@ -105,6 +113,7 @@ public sealed class SnapshotExporter
     private readonly CatalogStatisticsBuilder _statisticsBuilder = new();
     private readonly RelationGraphBuilder _relationBuilder = new();
     private readonly CatalogReportWriter _reportWriter = new();
+    private readonly CatalogScriptWriter _scriptWriter = new();
 
     /// <summary>
     /// Initializes a new instance of the <see cref="SnapshotExporter"/> class.
@@ -315,15 +324,17 @@ public sealed class SnapshotExporter
     /// </summary>
     /// <remarks>
     /// <para>
-    /// The order is the point of the method: <c>manifest.json</c> is closed before the report is touched,
-    /// so the report cannot perturb the catalog's content identity and can state the totals the writer
-    /// actually reached. That line is also the cancellation boundary of D4.2 — a cancel before it makes the
-    /// store genuinely incomplete and propagates; a cancel after it stops only the report, because the
-    /// artifact on disk is finished, verifiable and restorable.
+    /// The order is the point of the method: <c>manifest.json</c> is closed first, so nothing that follows can
+    /// perturb the catalog's content identity and can state the totals the writer actually reached. That line
+    /// is also the cancellation boundary of D4.2 — a cancel before it makes the store genuinely incomplete and
+    /// propagates; a cancel after it stops only the scripts and the report, because the artifact on disk is
+    /// finished, verifiable and restorable. The scripts come before the totals because a script file is part of
+    /// what the catalog holds: a measurement taken first would describe a directory a stage later changed.
     /// </para>
     /// <para>
-    /// The progress frames stay monotone on both paths: <c>Completing / 95</c>, then <c>Writing summary</c>
-    /// at 96 when the report runs, then <c>Complete / 100</c> last. Nothing is reported after the summary.
+    /// The progress frames stay monotone on both paths: <c>Completing / 95</c>, then <c>Writing SQL scripts</c>
+    /// at 96 when the option is on, then <c>Writing summary</c> at 97 when the report runs, then
+    /// <c>Complete / 100</c> last. Nothing is reported after the summary.
     /// </para>
     /// <para>
     /// <paramref name="sourceOrderTables"/> are the tables actually written in source order. The schema-only
@@ -343,12 +354,27 @@ public sealed class SnapshotExporter
         progress?.Report(new InterchangeProgress { Stage = "Completing", Percentage = 95 });
         await writer.CompleteAsync(ct);
 
+        // A script-write failure, a refusal or a report-write failure lands here as one warning issue and
+        // never fails the store (FR8, FR13); a cancellation in either stage is a stop, not a failure, and
+        // adds no issue (D4.2, D12).
+        var issues = new List<InterchangeIssue>();
+
+        // The relation facts are analysed once for whichever pass asked for them: the scripts name the
+        // cycles and the report describes them, and analysing the same snapshot twice gives one answer twice.
+        var relations = request.Options.IncludeSqlScripts || request.Options.IncludeCatalogReport
+            ? _relationBuilder.Build(snapshot)
+            : null;
+
+        // The scripts are a post-catalog pass: manifest.json is closed, so they describe the catalog on
+        // disk rather than a source database that may have moved on (D8).
+        var scripts = await WriteSqlScriptsAsync(request, relations, issues, progress, ct);
+
+        // The totals are read after the scripts, because a script file is part of what the catalog holds: a
+        // measurement taken before the pass would state a directory that does not exist yet (D8).
         var statistics = BuildStatistics(request, snapshot, writer, sourceOrderTables);
 
-        // A report-write failure lands here as one warning issue and never fails the store (FR13);
-        // a cancellation in this stage is a stop, not a failure, and adds no issue (D4.2).
-        var issues = new List<InterchangeIssue>();
-        var reportPath = await WriteCatalogReportAsync(request, snapshot, statistics, issues, progress, ct);
+        var reportPath = await WriteCatalogReportAsync(
+            request, statistics, relations, scripts, issues, progress, ct);
 
         progress?.Report(new InterchangeProgress { Stage = "Complete", Percentage = 100 });
 
@@ -367,7 +393,69 @@ public sealed class SnapshotExporter
             SectionNames = statistics.SectionNames,
             Issues = issues,
             ReportRelativePath = reportPath,
+            SqlScripts = scripts,
         };
+    }
+
+    /// <summary>
+    /// Writes <c>sql/schema.sql</c> and <c>sql/data.sql</c> when the caller asked for them (D8).
+    /// </summary>
+    /// <remarks>
+    /// The whole pass is contained: a failure the writer does not expect — a renderer this adapter cannot
+    /// build, a catalog the reader rejects — is one warning and no file, because a catalog without the scripts
+    /// is still a complete catalog and the store has already succeeded (FR8).
+    /// </remarks>
+    /// <returns>
+    /// What the pass produced, or <see langword="null"/> when the option was off — a refusal or a failed
+    /// write still answers with a result that states why nothing was written.
+    /// </returns>
+    private async Task<ScriptResult?> WriteSqlScriptsAsync(
+        ExportRequest request,
+        RelationMap? relations,
+        IList<InterchangeIssue> issues,
+        IProgress<InterchangeProgress>? progress,
+        CancellationToken ct)
+    {
+        if (!request.Options.IncludeSqlScripts)
+        {
+            return null;
+        }
+
+        // A catalog this pass is about to describe must not look finished while the pass is running (D8).
+        progress?.Report(new InterchangeProgress { Stage = "Writing SQL scripts", Percentage = 96 });
+
+        try
+        {
+            return await _scriptWriter.WriteAsync(
+                request.CatalogDirectory,
+                _adapter.CreateScriptRenderer(),
+                relations?.CyclicGroups ?? [],
+                issues,
+                ct);
+        }
+        catch (OperationCanceledException)
+        {
+            // A cancel is a stop, not a failure, and adds no issue (D4.2, D12).
+            return new ScriptResult { Cancelled = true };
+        }
+        catch (Exception ex)
+        {
+            var reason = $"The SQL scripts could not be written: {ex.Message}";
+
+            issues.Add(new InterchangeIssue(
+                CatalogScriptWriter.WriteFailureCode,
+                EIssueSeverity.Warning,
+                reason));
+
+            return new ScriptResult
+            {
+                Refusal = new ScriptRefusal
+                {
+                    Code = CatalogScriptWriter.WriteFailureCode,
+                    Reason = reason,
+                },
+            };
+        }
     }
 
     /// <summary>
@@ -379,24 +467,27 @@ public sealed class SnapshotExporter
     /// </returns>
     private async Task<string?> WriteCatalogReportAsync(
         ExportRequest request,
-        InterchangeSnapshot snapshot,
         CatalogStatistics statistics,
+        RelationMap? relations,
+        ScriptResult? scripts,
         IList<InterchangeIssue> issues,
         IProgress<InterchangeProgress>? progress,
         CancellationToken ct)
     {
-        if (!request.Options.IncludeCatalogReport)
+        if (!request.Options.IncludeCatalogReport || relations is null)
         {
             return null;
         }
 
-        // A large catalog must not look finished while it is still working (D4.1).
-        progress?.Report(new InterchangeProgress { Stage = "Writing summary", Percentage = 96 });
+        // The report comes last, so the numbers it states are the ones the catalog reached — the scripts
+        // above are described by it rather than measured into it (D8, D10).
+        progress?.Report(new InterchangeProgress { Stage = "Writing summary", Percentage = 97 });
 
         return await _reportWriter.WriteAsync(
             request.CatalogDirectory,
             statistics,
-            _relationBuilder.Build(snapshot),
+            relations,
+            scripts,
             issues,
             ct);
     }

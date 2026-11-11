@@ -11,6 +11,7 @@ Store writes a connected database into a **catalog** — a folder of files on di
 |---------|----------|
 | **Store** button | Below the **source** connection panel — the database that is captured |
 | **Restore** button | Below the **destination** connection panel — the database a catalog is applied to |
+| **View relationships** | Below the **source** connection panel, under **Store** — opens the [relationship explorer](#viewing-the-relationships) of the catalog the last store wrote. The folder button beside it opens any stored catalog |
 | **Store Options** | Toolbar popup: catalog location, subfolder pattern, data inclusion, packing |
 | **Pause / Resume**, **Stop** | Toolbar, enabled while a Store or Restore operation runs |
 | ++ctrl+shift+s++ / ++ctrl+shift+r++ | Start Store / Start Restore — see [Keyboard Shortcuts](keyboard-shortcuts.md) |
@@ -45,6 +46,9 @@ Binary values (`bytea` columns) are always stored in individual files under the 
 ├── export.json            when the catalog was written and by which producer
 ├── summary.md             the plain-text account of this catalog — see [Reading the catalog summary](#reading-the-catalog-summary)
 ├── summary.md.tmp         left only by a write that was interrupted; harmless, and you may delete it
+├── sql/                   the catalog as the source engine's own SQL — see [The catalog's own SQL](#the-catalogs-own-sql)
+│   ├── schema.sql         every object, in the order a restore creates them, re-runnable
+│   └── data.sql           one block per table in dependency order, re-runnable, ending with the key validation
 ├── schema/                one JSON file per section:
 │   ├── schemas.json       schemas
 │   ├── tables.json        tables, columns, keys, constraints, indexes, triggers, partitions
@@ -75,8 +79,9 @@ Restore checks every file against the checksums in `manifest.json` before it tou
 | Section | What it gives you |
 |---------|-------------------|
 | **Catalog observations** | The few things worth knowing before the numbers: tables with no primary key, the tables the rest of the catalog leans on, the cyclic groups, foreign keys that point outside the catalog, tables that take part in no foreign-key relationship, and pairs joined by more than one constraint. Each line is a count plus a pointer to the section that lists the items in full. A catalog with nothing unusual says so in one line |
-| **Global statistics** | Three figures in bytes that mean different things: *data bytes* (the CSV rows and the binary files), *metadata bytes* (the JSON that describes the objects, `manifest.json` and `export.json` included), and **catalog bytes** — the two together. **Catalog bytes** is the number to compare against the folder. A file manager will report slightly more, because it also counts `summary.md` itself and rounds every file up to the disk's cluster size |
+| **Global statistics** | Three figures in bytes that mean different things: *data bytes* (the CSV rows and the binary files), *metadata bytes* (the JSON that describes the objects, `manifest.json` and `export.json` included), and **catalog bytes** — the two together. **Catalog bytes** is the number to compare against the folder. A file manager will report slightly more, because it also counts `summary.md`, the `sql/` scripts and rounds every file up to the disk's cluster size |
 | **Statistics per table** | One row for every table the catalog holds — its rows, its bytes, its chunk files, and the order its rows were stored in |
+| **SQL scripts** | The two files the store wrote beside the catalog, each with its size, statement count and rows, the guarantee that they may be run twice, and what they deliberately do not do — see [The catalog's own SQL](#the-catalogs-own-sql). Absent when the option is off, and one sentence naming the reason when nothing was written |
 | **Relationships** | Every foreign key the catalog captured, once per constraint in a register you can search, and again in the card of each table it joins. Cyclic groups, heavily referenced tables and duplicated pairs are named |
 
 A table listed under `row order: sourceOrder` did have its rows captured — all of them. What is not promised is the order they come back out in next time, because the table has no key to read by. The rows are there; only their sequence may differ between two stores.
@@ -90,14 +95,121 @@ The file names objects only — schemas, tables, columns, constraints — plus t
 
 Nothing in it is cut because a schema is large. Every captured constraint gets its register row and its two card lines: a table referenced by 400 others gets 400 lines you can scroll through and search, which is more usable than 400 lines crossing a picture. The cost is honesty about length — the file is exactly as long as the catalog's facts, so a very large schema produces a very large text file that searches well and opens slowly in an editor.
 
-### Relationships: why there is no diagram
+### Relationships: why the summary carries no diagram
 
-A diagram of a schema with heavy relationships cannot be read: hundreds of boxes, lines crossing, nothing to search. So the summary lists every foreign key once in a table you can search and again in both tables' own cards, and drops nothing because the schema is large. Cyclic groups, overloaded lookup tables and duplicate pairs are called out by name. A short outline walk is printed only where it can be complete; where one would become a hairball, the report says that instead of printing half of it.
+A diagram of a schema with heavy relationships cannot be read as one sheet: hundreds of boxes, lines crossing, nothing to search. So the summary lists every foreign key once in a table you can search and again in both tables' own cards, and drops nothing because the schema is large. Cyclic groups, overloaded lookup tables and duplicate pairs are called out by name. A short outline walk is printed only where it can be complete; where one would become a hairball, the report says that instead of printing half of it.
+
+A picture of the same facts does exist, as a separate document you ask for — see [Viewing the relationships](#viewing-the-relationships). For the reason just given, it opens on one table's neighbourhood rather than on the whole database.
 
 !!! warning "Restore never reads this file"
     `summary.md` is not part of the catalog's content: it is not listed in `manifest.json`, never hashed, never verified and never applied. Deleting it, editing it or replacing its text cannot break a catalog — the same folder restores identically with the file present, absent or full of nonsense.
 
 Stopping a store while the summary is being written stops only the report. The catalog itself was already finished at that point, so the run is reported as complete with its real counts and no summary path; press Stop at any earlier stage and the folder is genuinely incomplete, as the table above says.
+
+## The catalog's own SQL
+
+With **Write SQL scripts** on — the default — a store also writes the catalog as SQL beside it, in `sql/schema.sql` and `sql/data.sql`. Both files are written in the dialect the source database speaks: its own type names, the index, view, trigger and function text the store captured from the server, and the same `'text'::type` literals a restore already sends. A catalog can therefore be handed to `psql` or any SQL client on a machine that has no DbClone.
+
+Run `schema.sql` first and `data.sql` second. A catalog that holds no rows gets no `data.sql`; the closing statements then sit at the end of `schema.sql`, so running the files in name order always finishes the job.
+
+Every statement may be run again: a second run creates no object and adds no row.
+
+| Object | How it is written |
+|--------|-------------------|
+| Schema, sequence, table, partition, materialized view, index | `CREATE … IF NOT EXISTS` — an object that already exists is left exactly as it is |
+| View | `CREATE OR REPLACE VIEW`; a view whose column list changed still fails, with the server's own message naming it |
+| Enum, composite type, domain | The captured statement inside a block that ignores a duplicate object |
+| Function, procedure | The captured text, which is already `CREATE OR REPLACE` |
+| Foreign key | `DROP CONSTRAINT IF EXISTS`, then `ADD CONSTRAINT … NOT VALID`; every key is validated at the end of the last file |
+| Trigger | `DROP TRIGGER IF EXISTS`, then the captured statement |
+| Table rows | `INSERT … ON CONFLICT DO NOTHING` when the table has a primary key or a unique key that every row must fill — every column of it declared `NOT NULL`, and no `WHERE` narrowing it; `INSERT … SELECT … WHERE NOT EXISTS` otherwise, so the whole row is the identity |
+
+Each table's rows form one block with its own transaction, and the blocks are written in dependency order: a table the rows of a later block point at comes first, whatever the names sort like. A failure therefore leaves every earlier table complete and the file re-runnable from its start. The two settings the literals depend on — `TIME ZONE 'UTC'` and `standard_conforming_strings = 'on'` — are set at the top of each file and again inside every table block. The rows are read from the catalog and handed to the file one batch at a time, so a table larger than memory still writes one statement after another instead of being held to the end.
+
+What the files deliberately do **not** do:
+
+- **Reconcile an existing table.** A table that is already there keeps its columns, keys and checks; nothing is altered or dropped to make it match the catalog.
+- **Write roles, grants, policies or ownership.** A script that silently created roles and grants would be a privilege change disguised as a dump.
+- **Create extensions.** The catalog records them, but no stage of the format creates one.
+- **Restore a sequence's position.** A catalog records a sequence's declaration, not its current value, so a script-created sequence starts where its own `START WITH` puts it.
+- **Load a foreign-key cycle unattended.** Each table is its own transaction, so the first block of a cycle needs rows a later block has not committed; `data.sql` names each cycle in a header comment, and the key validation at the end reports a cycle whose data truly disagrees.
+- **Leave a binary value out.** A `bytea` value is inlined as `decode('<base64>', 'base64')::<type>`, which is why `data.sql` can be larger than the catalog's own data; the summary states how many bytes were inlined.
+
+`summary.md` gains an **SQL scripts** section that names both files with their sizes, statement and row counts, the guarantee and each of the limits above. The scripts are not part of the catalog's bytes and are not hashed: like the summary, deleting or editing them cannot break a catalog, and a restore never reads them.
+
+!!! note "When nothing is written"
+    The pass refuses rather than writing half a script — a catalog recorded by another engine's adapter, a catalog in the direct format, or an object the restore itself cannot create. The store still completes: the reason is one warning in the log and one sentence in the summary, and the catalog is exactly the catalog it would have been with the option off. Both files are built under temporary names and moved into place only once they are complete, so a cancelled or failed pass leaves a pair an earlier store wrote exactly as it found it.
+
+## Viewing the relationships
+
+The summary above states the relationships as text. The same catalog can also be drawn and opened in your browser, and a finished store draws it for you: the picture is in the catalog folder as soon as the store completes, so there is nothing to press first. To open one, **View relationships** under the source connection panel draws the catalog the last store of this session wrote and opens it, and the folder button beside it opens any catalog already on disk — including one stored in an earlier session.
+
+Neither needs a connection. The picture is built from the catalog folder alone — it never opens a database — so a catalog can be explored on a machine that cannot reach the database it came from. The document is one self-contained HTML file: no server, no CDN, no asset folder, so it opens with the network disconnected and can be mailed or committed with the catalog.
+
+!!! info "Why the file sits in the catalog folder"
+    The picture is named after the catalog folder and written **inside** it — `my_app_db_2026-11-10_16-10/my_app_db_2026-11-10_16-10.html` — so a catalog and the picture of it travel together and the store folder stays clean. Like `summary.md`, the picture is not part of the catalog's content: it is not listed in `manifest.json`, not hashed, not verified and never restored, so deleting it or editing it cannot break a catalog. Every store rewrites the file when it finishes, and opening the view rewrites it again; a picture that cannot be written never makes a store a failure, because the catalog is already complete — the log states the reason instead.
+
+### The card: the name and the count, inside
+
+Every table is one card, and both facts about it are printed **inside** it, on two lines: the table's name, and its row count. The card is exactly as wide as the longer of those two lines, so `ai_chat_provider_configuration` gets a wider card than `orders` — and no name is ever cut, wrapped or pushed outside the shape.
+
+No dimension states a figure. Every card has the same height and a width that follows its own text, so a larger shape never means "a larger table": the row count is read in words inside the card, not off its size, and no colour carries a number either.
+
+| Printed on the card | Meaning |
+|---------------------|---------|
+| `1 240 rows` | The row count the store captured |
+| `0 rows` | A real table that was captured empty |
+| `no data captured` | The structure was captured but not the rows — table data was switched off |
+| `not in this catalog` | A constraint points at this table and the store did not capture it |
+
+### What the arrows say
+
+| You see | It means |
+|---------|-----------|
+| A solid arrow with nothing on its tail | Many rows of the table it starts from may name the one row it points at — the shape of nearly every foreign key, so it is the case that carries no mark |
+| A bar across the child end | At most one child row names each parent row: the referencing columns are exactly a primary key or a unique constraint of the child |
+| A dashed arrow | The referenced table is not in this catalog |
+| An arrow curving back around | The constraint closes a cycle: the two tables point at each other |
+| A loop on one card | The table points at itself |
+| A dashed card | A table a constraint names but the store did not capture. The panel prints its name and its constraints, and nothing the folder does not state |
+| A `↺ N` box over a band | A cyclic group drawn as one shape; select it to expand its members in place |
+
+The parent end carries no mark because it cannot vary: a foreign key always references a unique key, so one parent row is always what a child row names. The child end is where a relation differs, so it is the only end that is marked, and it is marked only for the exception: a bar where the catalog proves one, nothing where it proves many or cannot prove either. The proof comes from the keys the store captured, never from a guess: a key of the child must cover **exactly** the referencing columns, so a key on `(user_id, tenant)` does not make a constraint on `user_id` one-to-one. A unique index alone is not proof either: the catalog records an index's key columns, but nothing about its predicate or its expressions, so a `WHERE`-restricted unique index would be taken for a key over the whole table — such a pair is drawn with no bar, which reads as the default rather than as a claim the database does not allow.
+
+Many-to-many is not an arrow, because no engine declares one. It is a table that points through two others, and when its key is exactly the columns it points through, the panel names it: `issue_labels · join table of issues and labels — inferred`. The word *inferred* is deliberate — a link table carrying a surrogate key or a discriminator column is not named at all rather than guessed at.
+
+No encoding stands for two facts, and no fact has two encodings. The columns a constraint joins are never printed along its arrow: they are written beside it and appear when you point at the arrow or select it, so a corridor carries its line and nothing else and two routes that converge never stack their text on each other. Selecting an arrow does not ask you to land on its line — a wide invisible band follows every arrow, so a point a few pixels to the side of a line reveals and selects that constraint, and two parallel arrows stay separately selectable because each keeps its own band. A constraint loses nothing by that — it keeps its arrow, its tooltip, its row in the register and its place in the panel, where its columns are printed in full without touching anything. Two constraints between the same pair of tables stay two arrows you can select one at a time.
+
+### How the cards are arranged
+
+Direction is carried by the arrowhead, never by where a table sits, and the cards are arranged by what they reference: a table that references nothing stands in the top band, a table that references it in the band below, so the picture reads top-down and a table is drawn under the table it points at. Within a band the cards are ordered by where the tables they are joined to actually stand — a child follows its parent's column instead of the slot the band happened to be filled in — so the arrows between neighbouring bands stay short and cross as little as possible, and the whole set forms one page-shaped patch rather than a tall strip; a cyclic group keeps a patch of its own, with nothing drawn inside it. A table nothing joins is drawn below the rest rather than mixed in among the tables that are joined.
+
+An arrow never passes over a card it has nothing to do with. When the direct way is blocked, the path turns in the empty gap between cards and comes in from the side; and when two arrows would otherwise be drawn on the same line — where a reader would follow one line and see only one constraint — the second is given its own line beside the first. Every arrow is likewise given its own point on the card it joins: the border of a card is dealt out among the arrows that meet it, a mark's width apart, and a side that has no room left hands the surplus to the next side. Two arrows that both point at the same face of one table therefore land beside one another rather than fused into one thick arrow belonging to no constraint in particular, and each leaves its own card on the outside of the side it stands on instead of running along that card's border. Two arrows are drawn on one line only when every other way is blocked, which in practice means only where two constraints converge for their last few pixels onto the same card. The arrangement is a heuristic, not an optimum: drawing a graph with the shortest possible arrows and no crossing at all is a problem with no practical solution, so the same catalog always produces the same picture, and a pair that cannot have a short arrow is given a clean one instead of a short one over a table. Where a table ends up is decided by measuring the picture it produces rather than by a fixed preference: the bands propose an arrangement, its own arrows are counted — how many cross each other, how many would run over a card, how far they travel — and the arrangement that measures best is the one drawn, so a table joined to a single table is stood beside it whichever table that turned out to be.
+
+### Narrowing what you look at
+
+| Control | What it does |
+|---------|---------------|
+| **Search** | Matches a table, a column, a constraint or a comment. The result list names the field each row matched — every table in the catalog, not only the ones on screen — and selecting a row shows that table: a table the picture was not showing is revealed, switched back on and brought into view, then selected with its panel open |
+| **Direction** | While a table is selected: **both ways**, **references** (the arrows leaving it) or **referenced by** (the arrows arriving). The arrows outside the chosen direction fade rather than disappear |
+| The bar of chips | One chip per schema, per cyclic group and for the tables in no relationship. A click hides a cluster, alt-click (or shift-click) shows only it. A catalog with a single schema states the schema instead of offering a switch whose other state is "hide everything" |
+| **Show the whole database** | Appears when the picture opened on one table's neighbourhood. A small catalog opens showing everything; a dense one opens where a reader can start, never on the biggest hub |
+| **−** / **+** / **Fit** / **100%** | Zoom. Drag to pan, wheel to zoom |
+| The panel on the right | The selected table itself: its row count, its columns with their types and key marks, its primary key, its unique constraints, its indexes — each named by the key columns the store captured, so a reader never has to read a SQL statement to find out what an index covers, with the engine's own statement printed only for an index whose columns the folder does not state — and its check constraints with their expressions. Then both lists of constraints, each row naming the constraint, the columns it joins, its `on delete`/`on update` action, and how many child rows may name a parent — `exactly one`, `at most one`, or whether a child row may have no parent at all — so two constraints joining the same columns are told apart by name and rule, never printed as duplicates |
+| The register at the bottom | Every constraint in the catalog, one row each, with its columns, its `on delete` and `on update` actions and its rule. Selecting a row selects that arrow |
+
+Nothing is removed by narrowing: focus, direction, the chips and the search change what is in view, and the count line under the header says how much of the catalog that is. An arrow is drawn only while both of the tables it joins are: a table the picture is not showing takes its arrows out of the picture with it, so no line ever runs to a position where no card stands, and the arrows come back with the table. The register never narrows, so the picture can always be checked against the whole catalog.
+
+### What the picture does not state
+
+The header names the catalog, how many tables and relations the file holds, its format version and dialect, and when the picture was generated. Two things it deliberately does not state:
+
+- **Per-table storage bytes.** The catalog's byte figures are totals for the whole folder; it records a table's rows and chunk files, not a byte figure per table.
+- **When the catalog was stored.** The picture is stamped with the moment it was generated. The catalog's own write time is in `export.json`.
+
+Cardinality is stated where the keys prove it, and one case stays unsaid: a relation whose uniqueness rests on a **unique index** is drawn as many. The catalog records an index's name, its uniqueness and its key columns, but nothing about the predicate that restricts it, so an index unique only over the rows a `WHERE` clause admits would be read as a key over the whole table — and a mark that is sometimes missing is better than a mark that is sometimes wrong. The panel still lists the index, so a reader can see the disagreement; the picture will not guess.
+
+The panel states the table's key, unique constraints, indexes and check constraints from the catalog itself — an index is named by the key columns the store captured as data, and nothing is printed for a fact the folder does not hold. A table comment is not shown at all, because the catalog records comments for columns and not for tables.
 
 ## Restoring a catalog
 
@@ -146,6 +258,7 @@ The preserved PostgreSQL-only statements are applied only when the target report
 | **Subfolder Pattern** | Folder name created under the root. `{Connection}` is the name of the saved connection selected on the Source panel — the source database name when none is selected — `{Database}` is the source database name, `{timestamp}` is `yyyy-MM-dd_HH-mm`. Spaces and any character a folder name cannot hold become `_`, a name Windows reserves as a device gets a `_` prefix, and an over-long name is cut while the timestamp tail is kept. Leave it empty to write straight into the root folder |
 | **Include table data** | Off stores the schema only, and restoring such a catalog writes the structure and no rows. On stores the rows and the restore writes them back |
 | **Write summary.md (statistics and relations)** | On writes the plain-text account described under [Reading the catalog summary](#reading-the-catalog-summary) into the catalog folder. Off stores the catalog alone — the folder is complete without it, and a restore needs neither file |
+| **Write SQL scripts (schema and data)** | On writes the catalog's own SQL beside it — see [The catalog's own SQL](#the-catalogs-own-sql). Off stores the catalog alone; the folder is complete either way, and a restore never reads the scripts |
 
 These values live in `settings.json` under `StoreRestore`. Catalogs are currently stored as directories. ZIP packaging is a separate planned feature and is not currently exposed as a Store option.
 
@@ -156,6 +269,7 @@ These values live in `settings.json` under `StoreRestore`. Catalogs are currentl
 | `SnapshotConsistency` | `consistent` | The row read uses a consistent snapshot across all tables when set to `consistent`, or read-committed isolation when set to `readCommitted` |
 | `UnsupportedFeaturePolicy` | `fail` | When `fail`, an unsupported object stops the restore before any write; when `warn`, the restore skips it and records an issue |
 | `WriteSummaryMarkdown` | `true` | Whether Store writes `summary.md` into the catalog folder. It is an app preference: the setting decides, and nothing about the catalog itself changes |
+| `SqlScripts` | `true` | Whether Store also writes the catalog's own SQL (`schema.sql` and `data.sql`) beside it. On by default, so the files are there without opening the settings; turning it off leaves the catalog byte for byte as it was |
 
 !!! note "Table selection narrows a catalog"
     A [table selection](connections/table-selection.md) is applied end-to-end: the catalog captures only the tables the selection includes, and the log names the excluded tables when Store starts.

@@ -221,7 +221,10 @@ public sealed class SnapshotImporter
         var capabilities = _adapter.Capabilities ?? throw new InvalidOperationException(
             "The adapter does not declare its capabilities, so the catalog's objects cannot be placed "
             + "in a stage.");
-        var nativeStages = PlaceNativeObjects(nativeObjects, capabilities, out var unplaceable);
+        var nativeStages = SchemaStagePlan.PlaceNativeObjects(
+            nativeObjects,
+            capabilities.CanCreate,
+            out var unplaceable);
 
         if (unplaceable.Count > 0)
         {
@@ -232,65 +235,19 @@ public sealed class SnapshotImporter
                 + "does not create it, and nothing was executed.");
         }
 
-        // The stages run in the order SchemaStage declares, which is a dependency order: an object is
-        // applied once everything it names has been applied. Routines come before views because a
-        // view may call a function.
-        progress?.Report(new InterchangeProgress { Stage = "Applying schemas", Percentage = 20 });
-        await writer.ApplySchemaAsync(SchemaStage.Schemas, AsObjects(schemas), ct);
+        // The stages run in the order the one plan states, which is a dependency order: an object is
+        // applied once everything it names has been applied. A script over the same catalog walks the
+        // same list, so the two can never disagree about what may be created before what.
+        foreach (var step in SchemaStagePlan.Build(schemas, sequences, tables, routines, views, nativeStages))
+        {
+            progress?.Report(new InterchangeProgress
+            {
+                Stage = $"Applying {step.Stage.ToString().ToLowerInvariant()}",
+                Percentage = step.Percentage,
+            });
 
-        // Types come before the tables because a table column, a function signature and a domain can all
-        // name one, so nothing that follows can be created before them.
-        await ApplyNativeStagesAsync(
-            writer,
-            nativeStages,
-            stage => stage < SchemaStage.Tables,
-            percentage: 25,
-            progress,
-            ct);
-
-        progress?.Report(new InterchangeProgress { Stage = "Applying sequences", Percentage = 30 });
-        await writer.ApplySchemaAsync(SchemaStage.Sequences, AsObjects(sequences), ct);
-
-        progress?.Report(new InterchangeProgress { Stage = "Applying tables", Percentage = 40 });
-        await writer.ApplySchemaAsync(SchemaStage.Tables, AsObjects(tables), ct);
-
-        progress?.Report(new InterchangeProgress { Stage = "Applying routines", Percentage = 50 });
-        await writer.ApplySchemaAsync(SchemaStage.Routines, AsObjects(routines), ct);
-
-        progress?.Report(new InterchangeProgress { Stage = "Applying views", Percentage = 60 });
-        await writer.ApplySchemaAsync(SchemaStage.Views, AsObjects(views), ct);
-
-        // The tables are handed to this stage a second time, because the format keeps a foreign key
-        // inside the table that owns it and the key cannot be created until the table it points at
-        // exists — which, for the whole catalog, is not true until every table is.
-        progress?.Report(new InterchangeProgress { Stage = "Applying constraints", Percentage = 65 });
-        await writer.ApplySchemaAsync(SchemaStage.Constraints, AsObjects(tables), ct);
-
-        // The tables are handed to the index stage as well, for the same reason they are handed to the
-        // constraint stage: which recorded indexes still have to be created is decided against the
-        // constraints inside the same table. A trigger carries its own statement, in which the engine has
-        // already written the function it calls, so trigger objects are flattened out of the tables and
-        // passed alone.
-        progress?.Report(new InterchangeProgress { Stage = "Applying indexes", Percentage = 70 });
-        await writer.ApplySchemaAsync(SchemaStage.Indexes, AsObjects(tables), ct);
-
-        progress?.Report(new InterchangeProgress { Stage = "Applying triggers", Percentage = 75 });
-        await writer.ApplySchemaAsync(
-            SchemaStage.Triggers,
-            AsObjects([.. tables.SelectMany(t => t.Triggers)]),
-            ct);
-
-        // The native kinds the routing places after the tables are applied here: a publication lists
-        // tables, and a subscription reads a publication, so neither can be created while the tables are
-        // still missing. An adapter that declares it creates neither never reaches this call, because the
-        // refusal above already stopped the import.
-        await ApplyNativeStagesAsync(
-            writer,
-            nativeStages,
-            stage => stage >= SchemaStage.Tables,
-            percentage: 78,
-            progress,
-            ct);
+            await writer.ApplySchemaAsync(step.Stage, step.Objects, ct);
+        }
 
         // Import data
         long totalRows = 0;
@@ -426,73 +383,4 @@ public sealed class SnapshotImporter
 
         return counts.Where(c => c.Value > 0).ToDictionary(c => c.Key, c => c.Value);
     }
-
-    /// <summary>
-    /// Groups the native objects by the stage that creates them and reports the ones nothing can place.
-    /// </summary>
-    private static IReadOnlyDictionary<SchemaStage, IReadOnlyList<NativeObjectDefinition>> PlaceNativeObjects(
-        IReadOnlyList<NativeObjectDefinition> nativeObjects,
-        IDatabaseCapabilities capabilities,
-        out IReadOnlyList<NativeObjectDefinition> unplaceable)
-    {
-        var stages = new Dictionary<SchemaStage, List<NativeObjectDefinition>>();
-        var refused = new List<NativeObjectDefinition>();
-
-        foreach (var native in nativeObjects)
-        {
-            var stage = NativeObjectRouting.StageFor(native.Kind);
-            if (stage is null || !capabilities.CanCreate(native.Kind))
-            {
-                refused.Add(native);
-                continue;
-            }
-
-            if (!stages.TryGetValue(stage.Value, out var placed))
-            {
-                placed = [];
-                stages[stage.Value] = placed;
-            }
-
-            placed.Add(native);
-        }
-
-        unplaceable = refused;
-
-        return stages.ToDictionary(
-            kvp => kvp.Key,
-            kvp => (IReadOnlyList<NativeObjectDefinition>)kvp.Value);
-    }
-
-    /// <summary>
-    /// Hands each native group to its own stage, in stage order, on one side of the tables.
-    /// </summary>
-    /// <remarks>
-    /// The tables split the stages because the native file records no dependency ids: a kind the stage
-    /// numbering places before them is something the tables need, and a kind after them is something that
-    /// names them. Which side a stage is on is a comparison of the numbers the enum already carries, so a
-    /// kind added to the routing table needs no change here.
-    /// </remarks>
-    private static async Task ApplyNativeStagesAsync(
-        IDatabaseWriter writer,
-        IReadOnlyDictionary<SchemaStage, IReadOnlyList<NativeObjectDefinition>> nativeStages,
-        Func<SchemaStage, bool> sideOfTables,
-        int percentage,
-        IProgress<InterchangeProgress>? progress,
-        CancellationToken ct)
-    {
-        foreach (var stage in nativeStages.Keys.Where(sideOfTables).OrderBy(stage => (int)stage))
-        {
-            progress?.Report(new InterchangeProgress
-            {
-                Stage = $"Applying {stage.ToString().ToLowerInvariant()}",
-                Percentage = percentage,
-            });
-
-            await writer.ApplySchemaAsync(stage, AsObjects(nativeStages[stage]), ct);
-        }
-    }
-
-    private static IReadOnlyList<ISchemaObject> AsObjects<T>(IReadOnlyList<T> objects)
-        where T : ISchemaObject =>
-        [.. objects];
 }

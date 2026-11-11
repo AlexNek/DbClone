@@ -15,6 +15,11 @@ namespace DbClone.Application.Interchange;
 /// <see langword="null"/> when the option was off, the write failed, or the user cancelled while the
 /// report was being written. A null here never means the catalog is unusable.
 /// </para>
+/// <para>
+/// <c>SqlScripts</c> carries the same kind of answer for the SQL scripts: absolute paths and measures, or
+/// <see langword="null"/> when the option was off. When the pass refused, the record is present with no
+/// schema path and one warning issue states why — the catalog is complete and restorable either way.
+/// </para>
 /// </remarks>
 public sealed record InterchangeStoreResult(
     EStoreOutcome Outcome,
@@ -30,4 +35,5 @@ public sealed record InterchangeStoreResult(
     IReadOnlyList<InterchangeIssueView> Issues,
     string? CatalogPath,
     TimeSpan Elapsed,
-    string? SummaryPath = null);
+    string? SummaryPath = null,
+    SqlScriptPaths? SqlScripts = null);

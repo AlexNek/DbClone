@@ -249,6 +249,10 @@ internal sealed class DatabaseModelMapper
                         Name = i.Name,
                         TableRef = tableRef,
                         IsUnique = i.IsUnique,
+                        // The key columns the metadata reader already selected. They are stored as data so
+                        // that a reader never has to read SQL to name a column; an index the engine stated
+                        // no columns for is stored as no list, not as an empty one.
+                        Columns = i.Columns.Count > 0 ? i.Columns : null,
                         NativeDefinition = Native(
                             i.Definition,
                             "pg_get_indexdef",

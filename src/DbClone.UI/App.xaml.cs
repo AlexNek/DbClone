@@ -179,6 +179,15 @@ public partial class App : System.Windows.Application, IDisposable
                     services.AddSingleton<StoreRestore.Validators.IWorkflowValidator, StoreRestore.Validators.WorkflowValidator>();
                     services.AddSingleton<StoreRestore.Services.ICatalogPathResolver, StoreRestore.Services.CatalogPathResolver>();
 
+                    // Feature 07: the relationship view. The three stages, the workflow that orders them
+                    // and the shell opener are all resolved by MainViewModel, so none of them may be
+                    // missing here — a gap is a startup failure, not a feature that fails when clicked.
+                    services.AddSingleton<Services.CatalogGraphAnalyzer>();
+                    services.AddSingleton<Services.GraphLayout.GraphLayoutEngine>();
+                    services.AddSingleton<Services.CatalogGraphHtmlRenderer>();
+                    services.AddSingleton<Services.IHtmlFileOpener, Services.WpfHtmlFileOpener>();
+                    services.AddSingleton<StoreRestore.Handlers.IRelationshipViewHandler, StoreRestore.Handlers.RelationshipViewHandler>();
+
                     services.AddTransient<ITableCatalogService, TableCatalogService>();
                     services.AddTransient<IComparisonService, ComparisonService>();
                     services.AddTransient<ICopyWorkflow, CopyWorkflow>();

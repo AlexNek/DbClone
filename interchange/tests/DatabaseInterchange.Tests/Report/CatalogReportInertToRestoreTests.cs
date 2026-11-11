@@ -238,6 +238,7 @@ public sealed class CatalogReportInertToRestoreTests : IDisposable
             _catalogPath,
             ReportModel.Statistics(snapshot),
             ReportModel.MapOf(snapshot),
+            null,
             new List<InterchangeIssue>(),
             CancellationToken.None);
     }

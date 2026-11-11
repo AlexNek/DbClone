@@ -146,6 +146,21 @@ public class DatabaseModelMapperTests
     }
 
     [Fact]
+    public void Map_IndexCarriesItsKeyColumnsAsData()
+    {
+        // The metadata reader selects an index's key columns, and a catalog that throws them away forces
+        // every consumer to read the engine's DDL to name one column. So the list is stored beside the
+        // captured text, in the index's own order.
+        var customers = MapFull().Tables.Single(t => t.Name == "customers");
+
+        customers.Indexes.Single(i => i.Name == "ix_customers_name").Columns.Should().Equal("name");
+        customers.Indexes.Single(i => i.Name == "pk_customers").Columns.Should().Equal("id");
+        customers.Indexes.Should().OnlyContain(
+            i => i.Columns != null && i.Columns.Count > 0,
+            "the mapper stores no empty list: an index either names its columns or names none");
+    }
+
+    [Fact]
     public void Map_ForeignKeyPointsAtTheReferencedTableAndKeepsTheRulesVerbatim()
     {
         var snapshot = MapFull();

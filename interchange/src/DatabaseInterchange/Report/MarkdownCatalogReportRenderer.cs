@@ -1,5 +1,7 @@
 using System.Text;
 
+using DatabaseInterchange.Script;
+
 namespace DatabaseInterchange.Report;
 
 /// <summary>
@@ -27,8 +29,12 @@ internal sealed class MarkdownCatalogReportRenderer
     /// </summary>
     /// <param name="statistics">The measured account of the catalog.</param>
     /// <param name="map">The relation facts analysed from the same snapshot.</param>
+    /// <param name="scripts">
+    /// What the SQL script pass produced, or <see langword="null"/> when the option was off — the section that
+    /// names the files is present exactly when the pass ran (FR7, D9).
+    /// </param>
     /// <returns>The Markdown text, ending in a newline.</returns>
-    public string Render(CatalogStatistics statistics, RelationMap map)
+    public string Render(CatalogStatistics statistics, RelationMap map, ScriptResult? scripts = null)
     {
         ArgumentNullException.ThrowIfNull(statistics);
         ArgumentNullException.ThrowIfNull(map);
@@ -42,6 +48,7 @@ internal sealed class MarkdownCatalogReportRenderer
             RenderSchemaStatistics(statistics),
             RenderTableStatistics(statistics),
             RenderMetadataFiles(statistics),
+            RenderSqlScripts(scripts),
             _relationships.Render(map, statistics),
         };
 
@@ -271,5 +278,90 @@ internal sealed class MarkdownCatalogReportRenderer
         rows.Add([ReportText.Cell("total"), ReportText.Bytes(group.TotalBytes)]);
 
         return ReportText.Table([ReportText.Cell(group.Label), "bytes"], rows);
+    }
+
+    /// <summary>
+    /// Renders what the SQL script pass wrote (FR7, D9), or nothing at all when the option was off.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// The section describes files rather than measuring them, so it sits after <c>## Metadata files</c> and
+    /// before the relationships. It is present whenever the pass ran — a refusal is one sentence naming the
+    /// reason, because a reader who asked for scripts and got none deserves that reason where they look — and
+    /// absent when nothing was asked for, where a section saying "nothing" would only raise a question.
+    /// </para>
+    /// <para>
+    /// The last line is FR9's: the scripts describe the catalog rather than belong to it, so the byte measures
+    /// above are the folder's size with them and without them (D10). A reader comparing the two would
+    /// otherwise conclude that one of them is wrong.
+    /// </para>
+    /// </remarks>
+    private static string RenderSqlScripts(ScriptResult? scripts)
+    {
+        if (scripts is null)
+        {
+            return string.Empty;
+        }
+
+        if (scripts.Refusal is { } refusal)
+        {
+            return "## SQL scripts\n" + ReportText.EscapeCell(refusal.Reason);
+        }
+
+        if (scripts.Cancelled)
+        {
+            return "## SQL scripts\nno script was written — the pass was cancelled";
+        }
+
+        var rows = new List<IReadOnlyList<string>>(2);
+
+        if (scripts.SchemaPath is { } schemaPath)
+        {
+            rows.Add([
+                ReportText.Cell(schemaPath),
+                ReportText.Bytes(scripts.SchemaBytes),
+                ReportText.Number(scripts.SchemaStatements),
+                ReportText.NotStated,
+            ]);
+        }
+
+        if (scripts.DataPath is { } dataPath)
+        {
+            rows.Add([
+                ReportText.Cell(dataPath),
+                ReportText.Bytes(scripts.DataBytes),
+                ReportText.Number(scripts.DataStatements),
+                ReportText.Number(scripts.Rows),
+            ]);
+        }
+
+        if (rows.Count == 0)
+        {
+            return "## SQL scripts\nno script was written";
+        }
+
+        // The tail — key validation and the materialized-view refresh — belongs to the last file written, so
+        // the sentence has to name that file rather than assume there are two (D2).
+        var last = ReportText.Code(scripts.DataPath ?? scripts.SchemaPath ?? string.Empty);
+
+        var payload = scripts.PayloadBytes > 0 && scripts.DataPath is { } data
+            ? $"{ReportText.Code(data)} inlines {ReportText.Number(scripts.PayloadBytes)} bytes of binary "
+              + "payloads as base64, which is why it can be larger than the data it describes."
+            : string.Empty;
+
+        return string.Join('\n', new[]
+        {
+            "## SQL scripts",
+            string.Empty,
+            ReportText.Table(["file", "bytes", "statements", "rows"], rows),
+            string.Empty,
+            "Every statement in these files may be run again: the second run creates no object and adds no row.",
+            $"Foreign keys are added unvalidated and validated at the end of {last}.",
+            payload,
+            "A table that already exists is left as it is — no column, key or check is reconciled.",
+            "A sequence keeps the position its own declaration gives it — a catalog records no current value.",
+            "No role, grant or policy is written. Not a substitute for Restore, which also verifies the catalog.",
+            "These files are not part of the catalog bytes above: they describe the catalog, they do not belong to it.",
+        }.Where(line => line.Length > 0));
     }
 }

@@ -55,6 +55,13 @@ public sealed class StoreRestoreOptions
     /// <summary>Whether the store writes the human-readable summary file into the catalog folder.</summary>
     public bool WriteSummaryMarkdown { get; set; } = true;
 
+    /// <summary>
+    /// Whether the store also writes the catalog's SQL scripts beside it. On by default: the files are
+    /// the reason a catalog can be handed to any client, and a user who never opens the settings should
+    /// still get them.
+    /// </summary>
+    public bool SqlScripts { get; set; } = true;
+
     /// <summary>Snapshot consistency mode passed to the product (e.g. "consistent").</summary>
     public string SnapshotConsistency { get; set; } = "consistent";
 

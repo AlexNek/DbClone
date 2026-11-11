@@ -8,6 +8,8 @@ using DbAdapter.Definitions.Interchange;
 
 using DatabaseInterchange.Format;
 using DatabaseInterchange.Report;
+using DatabaseInterchange.Script;
+using DatabaseInterchange.Tests.Script;
 using DatabaseInterchange.Transform;
 
 using FluentAssertions;
@@ -154,7 +156,139 @@ public sealed class SnapshotExporterCatalogReportTests : IDisposable
         _frames.Should().HaveCount(summaryIndex + 2);
     }
 
-    private async Task<ExportResult> ExportAsync(ExportOptions options, string? cancelAtStage = null)
+    [Fact]
+    public async Task ExportAsync_WithTheScriptOption_WritesBothFiles_AndStillReportsTheSummary()
+    {
+        // Act
+        var result = await ExportAsync(new ExportOptions { MaxRowsPerChunk = 2, IncludeSqlScripts = true });
+
+        // Assert (FR1, FR7) — the store names what it wrote instead of leaving the user to open the folder.
+        result.Success.Should().BeTrue();
+        result.Issues.Should().BeEmpty();
+        result.ReportRelativePath.Should().Be(CatalogReportWriter.ReportFileName);
+        result.SqlScripts.Should().NotBeNull();
+        result.SqlScripts!.Succeeded.Should().BeTrue();
+        result.SqlScripts.SchemaPath.Should().Be(CatalogScriptWriter.SchemaRelativePath);
+        result.SqlScripts.DataPath.Should().Be(CatalogScriptWriter.DataRelativePath);
+        result.SqlScripts.SchemaBytes.Should().BeGreaterThan(0);
+        result.SqlScripts.SchemaStatements.Should().BeGreaterThan(0);
+        result.SqlScripts.Rows.Should().Be(5, "every row the catalog captured is written into the data file");
+        File.Exists(ScriptPath(CatalogScriptWriter.SchemaFileName)).Should().BeTrue();
+        File.Exists(ScriptPath(CatalogScriptWriter.DataFileName)).Should().BeTrue();
+
+        // Assert (D9) — the summary describes the files rather than counting them into itself.
+        ReadReport().Should().Contain("## SQL scripts");
+
+        // Assert — the scripts sit beside a catalog the verifier still accepts (FR14, D10).
+        var verification = await new CatalogVerifier().VerifyAsync(_catalogPath);
+        verification.IsValid.Should().BeTrue(string.Join("; ", verification.Issues));
+    }
+
+    [Fact]
+    public async Task ExportAsync_WithTheOptionOff_WritesNeitherScript_AndSaysNothingAboutThem()
+    {
+        // Act — the product default: a caller that asks for nothing gets today's catalog (FR10).
+        var result = await ExportAsync(new ExportOptions { MaxRowsPerChunk = 2 });
+
+        // Assert — the pass never ran, so there is neither a file nor a section nor a stage.
+        result.Success.Should().BeTrue();
+        result.SqlScripts.Should().BeNull();
+        File.Exists(ScriptPath(CatalogScriptWriter.SchemaFileName)).Should().BeFalse();
+        File.Exists(ScriptPath(CatalogScriptWriter.DataFileName)).Should().BeFalse();
+        ReadReport().Should().NotContain("## SQL scripts");
+        _frames.Should().NotContain(frame => frame.Stage == "Writing SQL scripts");
+    }
+
+    [Fact]
+    public async Task ExportAsync_TheScriptsAreNotPartOfTheCatalogsOwnMeasures()
+    {
+        // Arrange — the same source and the same options but for the scripts, into the same folder.
+        var withoutScripts = await ExportAsync(new ExportOptions { MaxRowsPerChunk = 2 });
+
+        Directory.Delete(_catalogPath, recursive: true);
+        _frames.Clear();
+
+        // Act
+        var withScripts = await ExportAsync(new ExportOptions { MaxRowsPerChunk = 2, IncludeSqlScripts = true });
+
+        // Assert (FR9, D10) — a file that describes the catalog does not change what the catalog is: the
+        // three measures are the writer's own facts, taken while the catalog was being written.
+        withScripts.Success.Should().BeTrue();
+        withScripts.CatalogBytes.Should().Be(withoutScripts.CatalogBytes);
+        withScripts.DataBytes.Should().Be(withoutScripts.DataBytes);
+        withScripts.MetadataBytes.Should().Be(withoutScripts.MetadataBytes);
+    }
+
+    [Fact]
+    public async Task ExportAsync_WhenTheRendererSpeaksAnotherDialect_CompletesTheStore_AndWarns()
+    {
+        // Arrange — a catalog whose recorded dialect this installation cannot write (D11).
+        var act = () => ExportAsync(
+            new ExportOptions { MaxRowsPerChunk = 2, IncludeSqlScripts = true },
+            scriptDialect: "mysql");
+
+        // Assert (FR8) — the refusal is one warning and no file, and the catalog is what it would have been.
+        var result = await act.Should().NotThrowAsync();
+        result.Subject.Success.Should().BeTrue();
+        result.Subject.SqlScripts!.Succeeded.Should().BeFalse();
+        result.Subject.SqlScripts.Refusal!.Code.Should().Be(CatalogScriptWriter.RefusalCode);
+        result.Subject.Issues.Should().ContainSingle(issue =>
+            issue.Code == CatalogScriptWriter.RefusalCode && issue.Severity == EIssueSeverity.Warning);
+        Directory.Exists(Path.Combine(_catalogPath, CatalogScriptWriter.DirectoryName)).Should().BeFalse(
+            "a pass that refused before writing leaves no folder behind");
+
+        var verification = await new CatalogVerifier().VerifyAsync(_catalogPath);
+        verification.IsValid.Should().BeTrue(string.Join("; ", verification.Issues));
+    }
+
+    [Fact]
+    public async Task ExportAsync_WhenTheScriptRoleCannotBeBuilt_CompletesTheStore_AndWarns()
+    {
+        // Arrange — an adapter whose script role cannot even be constructed: the failure happens outside the
+        // writer's own handling, and the store has already succeeded by then (FR8).
+        var act = () => ExportAsync(
+            new ExportOptions { MaxRowsPerChunk = 2, IncludeSqlScripts = true },
+            rendererFactory: () => throw new NotSupportedException("This adapter writes no script."));
+
+        // Assert — one warning, no file, and a catalog that is exactly what the store would have written.
+        var result = await act.Should().NotThrowAsync();
+        result.Subject.Success.Should().BeTrue();
+        result.Subject.SqlScripts!.Succeeded.Should().BeFalse();
+        result.Subject.SqlScripts.Refusal!.Code.Should().Be(CatalogScriptWriter.WriteFailureCode);
+        result.Subject.Issues.Should().ContainSingle(issue =>
+            issue.Code == CatalogScriptWriter.WriteFailureCode && issue.Severity == EIssueSeverity.Warning);
+        Directory.Exists(Path.Combine(_catalogPath, CatalogScriptWriter.DirectoryName)).Should().BeFalse();
+
+        var verification = await new CatalogVerifier().VerifyAsync(_catalogPath);
+        verification.IsValid.Should().BeTrue(string.Join("; ", verification.Issues));
+    }
+
+    [Fact]
+    public async Task ExportAsync_WithTheScripts_AnnouncesThemBeforeTheTotalsThatMeasureTheFolder()
+    {
+        // Act
+        await ExportAsync(new ExportOptions { MaxRowsPerChunk = 2, IncludeSqlScripts = true });
+
+        // Assert (D8, FR12) — the pass finishes before the totals are read, so what the summary measures is
+        // the folder as it stands, and the bar only moves forward.
+        _frames.Select(frame => frame.Percentage).Should().BeInAscendingOrder();
+
+        var completing = _frames.FindIndex(frame => frame.Stage == "Completing");
+        var scripts = _frames.FindIndex(frame => frame.Stage == "Writing SQL scripts");
+        var summary = _frames.FindIndex(frame => frame.Stage == "Writing summary");
+
+        completing.Should().BeGreaterThanOrEqualTo(0);
+        scripts.Should().BeGreaterThan(completing, "the scripts are a pass after the catalog is closed");
+        _frames[scripts].Percentage.Should().Be(96);
+        summary.Should().BeGreaterThan(scripts, "the summary describes a folder the script pass has finished with");
+        _frames[summary].Percentage.Should().Be(97);
+    }
+
+    private async Task<ExportResult> ExportAsync(
+        ExportOptions options,
+        string? cancelAtStage = null,
+        string scriptDialect = "postgresql",
+        Func<ISqlScriptRenderer>? rendererFactory = null)
     {
         using var source = new CancellationTokenSource();
 
@@ -164,6 +298,12 @@ public sealed class SnapshotExporterCatalogReportTests : IDisposable
         adapter.Info.Returns(new AdapterInfo("org.test.adapter", "postgresql", "*", "1.0.0"));
         adapter.ProviderName.Returns("Test Engine");
         adapter.OpenReader(Arg.Any<DatabaseTarget>(), Arg.Any<ExportOptions>()).Returns(new StubReader());
+
+        // The script role answers the same way the PostgreSQL one would: one statement per object, in the
+        // dialect the catalog records, so a mismatch is the only thing a test has to arrange. The factory is
+        // invoked per call, which is what lets a test fail the role's construction itself.
+        adapter.CreateScriptRenderer().Returns(
+            _ => rendererFactory is null ? new RecordingScriptRenderer(scriptDialect) : rendererFactory());
 
         _frames.Clear();
         var exporter = new SnapshotExporter(adapter, NullLogger<SnapshotExporter>.Instance);
@@ -182,6 +322,10 @@ public sealed class SnapshotExporterCatalogReportTests : IDisposable
     }
 
     private string ReportPath() => Path.Combine(_catalogPath, CatalogReportWriter.ReportFileName);
+
+    /// <summary>One of the two files the script pass writes, at the path the catalog folder gives it.</summary>
+    private string ScriptPath(string fileName) =>
+        Path.Combine(_catalogPath, CatalogScriptWriter.DirectoryName, fileName);
 
     /// <summary>The chunk files the writer actually landed in the folder.</summary>
     private int ChunkFilesOnDisk() =>

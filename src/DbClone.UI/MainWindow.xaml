@@ -241,6 +241,32 @@
                                     </StackPanel>
                                 </ui:Button.Content>
                             </ui:Button>
+
+                            <!--  Relationship view: the last store's catalog, and any catalog on disk (feature 07)  -->
+                            <StackPanel
+                                Margin="0,8,0,0"
+                                HorizontalAlignment="Center"
+                                Orientation="Horizontal">
+                                <ui:Button
+                                    Appearance="Secondary"
+                                    Command="{Binding DataContext.ViewRelationshipsCommand, RelativeSource={RelativeSource AncestorType=Window}}"
+                                    ToolTip="Open the relationship view of the catalog the last store wrote">
+                                    <ui:Button.Content>
+                                        <StackPanel Orientation="Horizontal">
+                                            <ui:SymbolIcon Symbol="Document16" Margin="0,0,6,0" />
+                                            <TextBlock Text="View relationships" />
+                                        </StackPanel>
+                                    </ui:Button.Content>
+                                </ui:Button>
+                                <ui:Button
+                                    Margin="6,0,0,0"
+                                    Padding="6"
+                                    Appearance="Transparent"
+                                    Command="{Binding DataContext.BrowseRelationshipsCommand, RelativeSource={RelativeSource AncestorType=Window}}"
+                                    ToolTip="Open the relationship view of another stored catalog">
+                                    <ui:SymbolIcon Symbol="FolderOpen16" FontSize="16" />
+                                </ui:Button>
+                            </StackPanel>
                         </StackPanel>
 
                         <!--  Group action buttons  -->

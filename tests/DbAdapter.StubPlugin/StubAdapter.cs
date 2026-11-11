@@ -86,6 +86,10 @@ public sealed class StubAdapter : IDatabaseAdapter
     public ICopySession CreateCopySession() => new StubCopySession(_loggerFactory);
 
     /// <inheritdoc />
+    public ISqlScriptRenderer CreateScriptRenderer() =>
+        throw new NotSupportedException("The stub adapter writes no SQL scripts.");
+
+    /// <inheritdoc />
     public IDatabaseReader OpenReader(DatabaseTarget target, ExportOptions options) =>
         throw new NotSupportedException("The stub adapter does not support interchange operations.");
 

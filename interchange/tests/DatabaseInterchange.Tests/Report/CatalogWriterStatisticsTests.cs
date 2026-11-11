@@ -139,6 +139,27 @@ public sealed class CatalogWriterStatisticsTests : IDisposable
     }
 
     [Fact]
+    public async Task ExportJson_StampsTheInstantToTheWholeSecond_SoTheCatalogBytesDoNotFollowTheClock()
+    {
+        // Arrange — the same source written twice, which is what a second store of one database is.
+        var first = await CaptureAsync(TextTable("orders", 1));
+        var firstStamp = Length(Path.Combine(_catalogPath, InterchangeFormat.ExportFileName));
+        Directory.Delete(_catalogPath, recursive: true);
+
+        var second = await CaptureAsync(TextTable("orders", 1));
+
+        // Assert — the stamp's text is a fixed width: JsonSerializer trims the fraction's trailing zeros,
+        // so a sub-second stamp would make export.json one to eight bytes longer or shorter from run to
+        // run, and the catalog's own byte measures (FR3) are its facts, not a reading of the clock.
+        var export = await JsonFile.ReadDocumentAsync<ExportMetadata>(
+            Path.Combine(_catalogPath, InterchangeFormat.ExportFileName), CancellationToken.None);
+        (export!.CreatedAt.Ticks % TimeSpan.TicksPerSecond).Should().Be(
+            0, "the instant is stamped to the second, which is the resolution the report prints");
+        Length(Path.Combine(_catalogPath, InterchangeFormat.ExportFileName)).Should().Be(firstStamp);
+        second.RootJsonBytes.Should().Be(first.RootJsonBytes);
+    }
+
+    [Fact]
     public async Task CatalogBytes_AreDataPlusMetadata_AndEveryFileInTheFolderExceptTheReport()
     {
         // Arrange — a catalog that has data, blobs, sections and an empty table, plus the two report files

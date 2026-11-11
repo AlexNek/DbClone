@@ -35,6 +35,12 @@ public sealed record ExportOptions
     /// </summary>
     public bool IncludeCatalogReport { get; init; } = true;
 
+    /// <summary>
+    /// Gets or sets whether the writer also produces the catalog's own SQL scripts (<c>sql/schema.sql</c>
+    /// and <c>sql/data.sql</c>) beside it. Off by default: the pass is asked for, never assumed, so an
+    /// export that builds default options writes exactly the catalog it wrote before the pass existed.
+    /// </summary>
+    public bool IncludeSqlScripts { get; init; }
 }
 
 /// <summary>

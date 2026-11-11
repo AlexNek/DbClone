@@ -132,7 +132,7 @@ public sealed class CatalogReportOverwriteTests : IDisposable
         var issues = new List<InterchangeIssue>();
 
         var path = await _sut.WriteAsync(
-            _catalogPath, statistics, ReportModel.MapOf(snapshot), issues, CancellationToken.None);
+            _catalogPath, statistics, ReportModel.MapOf(snapshot), null, issues, CancellationToken.None);
 
         path.Should().Be(CatalogReportWriter.ReportFileName);
         issues.Should().BeEmpty("the folder was writable throughout; nothing here is a failure case");

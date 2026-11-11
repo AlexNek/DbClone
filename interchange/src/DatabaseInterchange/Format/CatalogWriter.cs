@@ -683,10 +683,13 @@ public sealed class CatalogWriter : IAsyncDisposable
             Sha256 = catalogHash,
         });
 
-        // Write export.json
+        // Write export.json. The instant is stamped to the whole second because a fraction makes the
+        // file's own text a length the clock decides — JsonSerializer trims the fraction's trailing
+        // zeros — and the catalog's byte measures are its own facts, not a reading of the wall. The
+        // report names the export time to the second, so nothing a reader sees loses precision.
         var export = new ExportMetadata
         {
-            CreatedAt = DateTimeOffset.UtcNow,
+            CreatedAt = DateTimeOffset.FromUnixTimeSeconds(DateTimeOffset.UtcNow.ToUnixTimeSeconds()),
             Producer = _producer,
         };
 

@@ -106,6 +106,9 @@ public sealed class PostgreSqlAdapter : IDatabaseAdapter
     public ICopySession CreateCopySession() => new CopySessionAdapter(_copyEngine);
 
     /// <inheritdoc />
+    public ISqlScriptRenderer CreateScriptRenderer() => new PostgreSqlScriptRenderer(Info.Dialect);
+
+    /// <inheritdoc />
     public IDatabaseReader OpenReader(DatabaseTarget target, ExportOptions options)
     {
         var metadataSource = CreateMetadataSource(target);

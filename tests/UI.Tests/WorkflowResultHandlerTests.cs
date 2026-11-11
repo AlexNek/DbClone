@@ -1,5 +1,6 @@
 using CanonicalModel.Enums;
 
+using DbClone.Application.Interchange;
 using DbClone.UI.StoreRestore.Handlers;
 using DbClone.UI.StoreRestore.Workflows;
 using DbClone.UI.ViewModels;
@@ -24,6 +25,10 @@ public sealed class WorkflowResultHandlerTests
     private const string CatalogPath = @"C:\temp\testdb.catalog.rdbx";
 
     private const string SummaryPath = CatalogPath + "\\summary.md";
+
+    private const string SchemaScriptPath = CatalogPath + "\\sql\\schema.sql";
+
+    private const string DataScriptPath = CatalogPath + "\\sql\\data.sql";
 
     private readonly WorkflowResultHandler _sut = new();
 
@@ -95,7 +100,57 @@ public sealed class WorkflowResultHandlerTests
         state.BannerSeverity.Should().Be(Wpf.Ui.Controls.InfoBarSeverity.Warning);
     }
 
-    private static StoreResult StoreResult(bool withSummary, bool summaryRequested = true) =>
+    [Fact]
+    public void HandleStoreResult_LogsOneLineForEachScriptFile()
+    {
+        // Arrange
+        var state = new WorkflowState();
+
+        // Act
+        _sut.HandleStoreResult(state, StoreResult(withSummary: true, scripts: Scripts(), scriptsRequested: true));
+
+        // Assert (FR1) — a user who ran the store for the script learns where it is and what it holds,
+        // without opening the folder and without the log naming a catalog file of its own.
+        Messages(state).Should().ContainInOrder(
+            $"        SQL schema: {SchemaScriptPath} (12 statements, 2048 bytes)",
+            $"        SQL data: {DataScriptPath} (3 statements, 12 rows, 4096 bytes)");
+    }
+
+    [Fact]
+    public void HandleStoreResult_WarnsWhenTheScriptsWereAskedForAndNotWritten()
+    {
+        // Arrange — the shape a refusal leaves behind: a finished catalog, no path, one warning issue.
+        var state = new WorkflowState();
+
+        // Act
+        _sut.HandleStoreResult(state, StoreResult(withSummary: true, scripts: null, scriptsRequested: true));
+
+        // Assert (FR8) — the missing file is stated as a warning beside the catalog, and the store keeps
+        // its success: nothing about the catalog is incomplete.
+        Messages(state).Should().Contain("SQL scripts: not written");
+        state.StatusBarSummary.Should().Be("Store succeeded — 2 tables");
+        state.LastError.Should().BeEmpty("a declined courtesy file is not a failure");
+    }
+
+    [Fact]
+    public void HandleStoreResult_SaysNothingAboutTheScripts_WhenTheOptionWasOff()
+    {
+        // Arrange
+        var state = new WorkflowState();
+
+        // Act
+        _sut.HandleStoreResult(state, StoreResult(withSummary: true, scripts: null, scriptsRequested: false));
+
+        // Assert — a preference the user switched off must not read like a problem.
+        Messages(state).Should().NotContain(message => message.Contains("SQL", StringComparison.Ordinal));
+        state.LogMessages.Should().NotContain(entry => entry.Level == ELogLevel.Warning);
+    }
+
+    private static StoreResult StoreResult(
+        bool withSummary,
+        bool summaryRequested = true,
+        SqlScriptPaths? scripts = null,
+        bool scriptsRequested = false) =>
         new(
             Success: true,
             Message: withSummary
@@ -108,7 +163,21 @@ public sealed class WorkflowResultHandlerTests
             HasIssues: false,
             VerificationPassed: true,
             SummaryPath: withSummary ? SummaryPath : null,
-            SummaryRequested: summaryRequested);
+            SummaryRequested: summaryRequested,
+            SqlScripts: scripts,
+            SqlScriptsRequested: scriptsRequested);
+
+    /// <summary>The pair of scripts a store with the option on reports, with their measures.</summary>
+    private static SqlScriptPaths Scripts() =>
+        new(
+            SchemaPath: SchemaScriptPath,
+            DataPath: DataScriptPath,
+            SchemaBytes: 2048,
+            DataBytes: 4096,
+            SchemaStatements: 12,
+            DataStatements: 3,
+            Rows: 12,
+            PayloadBytes: 0);
 
     private static IEnumerable<string> Messages(WorkflowState state) =>
         state.LogMessages.Select(entry => entry.Message);
