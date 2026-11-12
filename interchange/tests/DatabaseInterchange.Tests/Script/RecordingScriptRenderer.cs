@@ -44,10 +44,19 @@ internal sealed class RecordingScriptRenderer : ISqlScriptRenderer
     internal IReadOnlyList<string> Calls => _calls;
 
     /// <summary>
-    /// Gets the row count the writer stated for each table it asked about, which is the catalog's own count
+    /// Gets the row count the writer stated for each table it opened, which is the catalog's own count
     /// rather than the number of rows handed over.
     /// </summary>
     internal Dictionary<string, long> DeclaredRowCounts { get; } = [];
+
+    /// <summary>Gets how many rows one yielded statement carries; the whole table when not set.</summary>
+    internal int BatchRows { get; init; } = int.MaxValue;
+
+    /// <summary>Gets how many filler characters every insert statement carries, so a test can make its bytes tell.</summary>
+    internal int StatementPadding { get; init; }
+
+    /// <summary>Gets how many filler characters the tail statement carries, so a test can make its bytes tell.</summary>
+    internal int TailPadding { get; init; }
 
     /// <inheritdoc />
     public IReadOnlyList<string> HeaderStatements() => ["SET TIME ZONE 'UTC';"];
@@ -73,13 +82,23 @@ internal sealed class RecordingScriptRenderer : ISqlScriptRenderer
     }
 
     /// <inheritdoc />
-    public async IAsyncEnumerable<string> InsertStatements(
+    public IReadOnlyList<string> BeginTableBlock(TableDefinition table, long rowCount, ScriptBlockPart part)
+    {
+        var name = Name(table);
+
+        DeclaredRowCounts[name] = rowCount;
+        _calls.Add(part.IsPart ? $"begin {name}:part{part.Number}" : $"begin {name}");
+
+        return [$"BEGIN {name};"];
+    }
+
+    /// <inheritdoc />
+    public async IAsyncEnumerable<(string Statement, int Rows)> InsertStatements(
         TableDefinition table,
         IAsyncEnumerable<DataValue[]> rows,
-        long rowCount,
         [EnumeratorCancellation] CancellationToken ct = default)
     {
-        var name = $"{table.SchemaRef.ObjectName()}.{table.Name}";
+        var name = Name(table);
 
         if (string.Equals(table.Name, UnscriptableRows, StringComparison.Ordinal))
         {
@@ -88,18 +107,29 @@ internal sealed class RecordingScriptRenderer : ISqlScriptRenderer
 
         // The rows are counted as they pass, which is what proves the writer streams a table rather than
         // holding it: the double sees the stream, not a list.
-        var seen = 0L;
+        var batch = 0;
 
         await foreach (var _ in rows.WithCancellation(ct))
         {
-            seen++;
+            batch++;
+
+            if (batch >= BatchRows)
+            {
+                _calls.Add($"data {name}:{batch}");
+                yield return (Insert(name, batch), batch);
+                batch = 0;
+            }
         }
 
-        _calls.Add($"data {name}:{seen}");
-        DeclaredRowCounts[name] = rowCount;
-
-        yield return $"INSERT INTO {name} ({seen} row(s));";
+        if (batch > 0)
+        {
+            _calls.Add($"data {name}:{batch}");
+            yield return (Insert(name, batch), batch);
+        }
     }
+
+    /// <inheritdoc />
+    public IReadOnlyList<string> EndTableBlock() => ["COMMIT BLOCK;"];
 
     /// <inheritdoc />
     public IReadOnlyList<string> TailStatements(
@@ -108,6 +138,11 @@ internal sealed class RecordingScriptRenderer : ISqlScriptRenderer
     {
         _calls.Add("tail");
 
-        return ["VALIDATE ALL KEYS;"];
+        return ["VALIDATE ALL KEYS;" + (TailPadding > 0 ? new string('x', TailPadding) : string.Empty)];
     }
+
+    private static string Name(TableDefinition table) => $"{table.SchemaRef.ObjectName()}.{table.Name}";
+
+    private string Insert(string name, int rows) =>
+        $"INSERT INTO {name} ({rows} row(s));" + (StatementPadding > 0 ? new string('x', StatementPadding) : string.Empty);
 }

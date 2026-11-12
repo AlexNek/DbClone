@@ -69,6 +69,10 @@ public sealed class InterchangeService : IInterchangeService
                     .ToHashSet(),
                 IncludeCatalogReport = request.IncludeSummaryReport,
                 IncludeSqlScripts = request.IncludeSqlScripts,
+
+                // The one conversion from the unit a user picks to the unit the product reasons with: the
+                // product never sees a megabyte, and the request never carries a byte (D11).
+                SqlScriptMaxDataFileBytes = request.SqlScriptsMaxFileMb * 1024L * 1024L,
             };
 
             var exportRequest = new ExportRequest
@@ -129,15 +133,22 @@ public sealed class InterchangeService : IInterchangeService
                     ? null
                     : Path.Combine(result.CatalogDirectory, result.ReportRelativePath),
 
-                // The same rule for the scripts, which the product names twice over (schema and data).
+                // The same rule for the scripts, which the product names once per file: this wrapper is the
+                // one place that knows where the catalog folder is, so it forms every absolute path here.
                 SqlScripts: result.SqlScripts is { } scripts
                     ? new SqlScriptPaths(
                         SchemaPath: ToAbsolute(result.CatalogDirectory, scripts.SchemaPath),
-                        DataPath: ToAbsolute(result.CatalogDirectory, scripts.DataPath),
+                        DataFiles: scripts.DataFiles
+                            .Select(file => new SqlScriptFile(
+                                Path.Combine(result.CatalogDirectory, file.RelativePath),
+                                file.Bytes,
+                                file.Statements,
+                                file.Rows,
+                                file.IsPartOf))
+                            .ToList(),
+                        LoadPath: ToAbsolute(result.CatalogDirectory, scripts.LoadPath),
                         SchemaBytes: scripts.SchemaBytes,
-                        DataBytes: scripts.DataBytes,
                         SchemaStatements: scripts.SchemaStatements,
-                        DataStatements: scripts.DataStatements,
                         Rows: scripts.Rows,
                         PayloadBytes: scripts.PayloadBytes)
                     : null);

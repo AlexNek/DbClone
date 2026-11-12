@@ -5,6 +5,8 @@ using CanonicalModel.Interchange;
 using DatabaseInterchange.Report;
 using DatabaseInterchange.Script;
 
+using DbAdapter.Definitions;
+
 using FluentAssertions;
 
 using Xunit;
@@ -275,16 +277,15 @@ public sealed class MarkdownCatalogReportRendererTests
             SchemaPath = "sql/schema.sql",
             SchemaBytes = 120,
             SchemaStatements = 7,
-            DataPath = "sql/data.sql",
-            DataBytes = 340,
-            DataStatements = 9,
+            DataFiles = [new ScriptDataFile("sql/data.sql", 340, 9, 20, null)],
             Rows = 20,
         };
 
         // Act
         var document = ReportModel.Document(TwoTables(), scripts: scripts);
 
-        // Assert (FR7, D9) — a file the pass wrote is a fact; the row states its size and what it holds.
+        // Assert (FR7, D9, D10) — a file the pass wrote is a fact; the row states its size and what it
+        // holds, and the S1 layout stays the two-row table it was before a family existed.
         Section(document, "## SQL scripts").Should().Equal(
             "| file | bytes | statements | rows |",
             "| --- | --- | --- | --- |",
@@ -292,10 +293,109 @@ public sealed class MarkdownCatalogReportRendererTests
             "| sql/data.sql | 340 | 9 | 20 |",
             "Every statement in these files may be run again: the second run creates no object and adds no row.",
             "Foreign keys are added unvalidated and validated at the end of `sql/data.sql`.",
+            "The per-file budget is 0, so the rows are written in one file.",
+            "Load it with `psql -f sql/schema.sql`, then `psql -f sql/data.sql`.",
             "A table that already exists is left as it is — no column, key or check is reconciled.",
             "A sequence keeps the position its own declaration gives it — a catalog records no current value.",
             "No role, grant or policy is written. Not a substitute for Restore, which also verifies the catalog.",
             "These files are not part of the catalog bytes above: they describe the catalog, they do not belong to it.");
+    }
+
+    [Fact]
+    public void Render_ForAFamily_PrintsEveryFileAndLoadsThroughTheDriver()
+    {
+        // Arrange — a catalog whose largest table was split, so the pass wrote numbered files and a driver.
+        var scripts = new ScriptResult
+        {
+            SchemaPath = "sql/schema.sql",
+            SchemaBytes = 31_190,
+            SchemaStatements = 153,
+            DataFiles =
+            [
+                new ScriptDataFile("sql/data/0001.sql", 204_800, 120, 2_000, "public.big"),
+                new ScriptDataFile("sql/data/0002.sql", 204_800, 120, 2_000, "public.big"),
+                new ScriptDataFile("sql/data/0003.sql", 90_000, 41, 1_387, "public.big"),
+            ],
+            LoadPath = "sql/load.psql",
+            Profile = EScriptProfile.Giants,
+            BudgetBytes = 204_800,
+            LargestTable = new TableRef("public", "big"),
+            LargestTableBytes = 4_194_304,
+            Rows = 5_387,
+        };
+
+        // Act
+        var document = ReportModel.Document(TwoTables(), scripts: scripts);
+
+        // Assert (FR7, FR10, D10) — one row per file, the tail named by the file that carries it, the
+        // profile stated with the number it reasoned with, and the one command that loads them all.
+        Section(document, "## SQL scripts").Should().Equal(
+            "| file | bytes | statements | rows |",
+            "| --- | --- | --- | --- |",
+            "| sql/schema.sql | 31190 | 153 | - |",
+            "| sql/data/0001.sql | 204800 | 120 | 2000 |",
+            "| sql/data/0002.sql | 204800 | 120 | 2000 |",
+            "| sql/data/0003.sql | 90000 | 41 | 1387 |",
+            "Every statement in these files may be run again: the second run creates no object and adds no row.",
+            "Foreign keys are added unvalidated and validated at the end of `sql/data/0003.sql`.",
+            "The largest table, `public.big` (4.0 MiB), is larger than the 200.0 KiB per-file budget, so it is "
+            + "written in 3 parts.",
+            "Load it with `psql -f sql/load.psql`, which includes the files in the order they run.",
+            "A table that already exists is left as it is — no column, key or check is reconciled.",
+            "A sequence keeps the position its own declaration gives it — a catalog records no current value.",
+            "No role, grant or policy is written. Not a substitute for Restore, which also verifies the catalog.",
+            "These files are not part of the catalog bytes above: they describe the catalog, they do not belong to it.");
+    }
+
+    [Fact]
+    public void Render_ForAWholeCatalogThatDoesNotFit_StatesTheBudgetAndThePackedFiles()
+    {
+        // Arrange — every table is within the budget, but together they are not (D2's third profile).
+        var scripts = new ScriptResult
+        {
+            SchemaPath = "sql/schema.sql",
+            SchemaBytes = 120,
+            SchemaStatements = 7,
+            DataFiles =
+            [
+                new ScriptDataFile("sql/data/0001.sql", 200_000, 40, 500, null),
+                new ScriptDataFile("sql/data/0002.sql", 150_000, 30, 400, null),
+            ],
+            LoadPath = "sql/load.psql",
+            Profile = EScriptProfile.ManySmall,
+            BudgetBytes = 204_800,
+            LargestTable = new TableRef("public", "a"),
+            LargestTableBytes = 100_000,
+            Rows = 900,
+        };
+
+        // Act
+        var document = ReportModel.Document(TwoTables(), scripts: scripts);
+
+        // Assert — the sentence says why the files exist at all, not just how many there are.
+        Section(document, "## SQL scripts").Should().Contain(
+            "The largest table, `public.a` (97.7 KiB), is within the 200.0 KiB per-file budget and the catalog "
+            + "does not fit one file, so its tables are packed into 2 files.");
+    }
+
+    [Fact]
+    public void Render_ForASchemaOnlyCatalog_SaysTheRowsAreWhatIsMissing()
+    {
+        // Arrange — the catalog was captured without rows, so the pass wrote the schema file alone.
+        var scripts = new ScriptResult
+        {
+            SchemaPath = "sql/schema.sql",
+            SchemaBytes = 120,
+            SchemaStatements = 7,
+            Profile = EScriptProfile.NoRows,
+        };
+
+        // Act
+        var document = ReportModel.Document(TwoTables(), scripts: scripts);
+
+        // Assert (D2) — the profile is stated rather than left for the reader to infer from an absent file.
+        Section(document, "## SQL scripts").Should().Contain(
+            "The catalog holds no rows, so no data file was written.");
     }
 
     [Fact]
@@ -307,9 +407,7 @@ public sealed class MarkdownCatalogReportRendererTests
             SchemaPath = "sql/schema.sql",
             SchemaBytes = 120,
             SchemaStatements = 7,
-            DataPath = "sql/data.sql",
-            DataBytes = 4096,
-            DataStatements = 9,
+            DataFiles = [new ScriptDataFile("sql/data.sql", 4096, 9, 20, null)],
             Rows = 20,
             PayloadBytes = 3072,
         };

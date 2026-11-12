@@ -85,12 +85,36 @@ public sealed class InterchangeStoreSqlScriptTests : IDisposable
     }
 
     [Fact]
+    public async Task TheSizeTheUserPicksReachesTheProductInBytes()
+    {
+        // Act — the settings field is sized in megabytes; the product reasons in bytes.
+        await StoreAsync(includeSqlScripts: true, renderer: new StubRenderer(), sqlScriptsMaxFileMb: 32);
+
+        // Assert (D11) — one conversion, on this side of the boundary: 32 MB is 33 554 432 bytes, and the
+        // product is never handed a unit a user picked.
+        _lastOptions.Should().NotBeNull();
+        _lastOptions!.SqlScriptMaxDataFileBytes.Should().Be(33_554_432);
+    }
+
+    [Fact]
+    public async Task ZeroMeansOneFile_AndTheProductIsToldZero()
+    {
+        // Act — "one file whatever the size" is a real choice, not a missing value.
+        await StoreAsync(includeSqlScripts: true, renderer: new StubRenderer(), sqlScriptsMaxFileMb: 0);
+
+        // Assert — the budget travels as 0; a default that became non-zero here would split a catalog
+        // the user asked to keep whole.
+        _lastOptions.Should().NotBeNull();
+        _lastOptions!.SqlScriptMaxDataFileBytes.Should().Be(0);
+    }
+
+    [Fact]
     public async Task TheResultNamesBothFiles_WithTheSizesThePassMeasured()
     {
         // Act
         var result = await StoreAsync(includeSqlScripts: true, renderer: new StubRenderer());
 
-        // Assert — both paths are absolute and inside the catalog the user chose, and both files are
+        // Assert — every path is absolute and inside the catalog the user chose, and every file is
         // there: the app never learns what the catalog calls them, only where they are (FR13).
         result.Outcome.Should().Be(EStoreOutcome.Success);
         result.Issues.Should().BeEmpty();
@@ -99,14 +123,21 @@ public sealed class InterchangeStoreSqlScriptTests : IDisposable
         scripts.Should().NotBeNull();
         scripts!.Written.Should().BeTrue();
         Path.GetDirectoryName(scripts.SchemaPath).Should().Be(Path.Combine(_catalogPath, "sql"));
-        Path.GetDirectoryName(scripts.DataPath).Should().Be(Path.Combine(_catalogPath, "sql"));
         File.Exists(scripts.SchemaPath).Should().BeTrue();
-        File.Exists(scripts.DataPath).Should().BeTrue();
         scripts.SchemaBytes.Should().Be(new FileInfo(scripts.SchemaPath!).Length);
-        scripts.DataBytes.Should().Be(new FileInfo(scripts.DataPath!).Length);
         scripts.SchemaStatements.Should().BeGreaterThan(0);
-        scripts.DataStatements.Should().BeGreaterThan(0);
+
+        // The rows fit one file, so there is one data file and nothing to drive.
+        var data = scripts.DataFiles.Should().ContainSingle().Subject;
+        Path.GetDirectoryName(data.Path).Should().Be(Path.Combine(_catalogPath, "sql"));
+        Path.IsPathRooted(data.Path).Should().BeTrue();
+        File.Exists(data.Path).Should().BeTrue();
+        data.Bytes.Should().Be(new FileInfo(data.Path).Length);
+        data.Statements.Should().BeGreaterThan(0);
+        data.IsPartOf.Should().BeNull("no table was split");
+        scripts.LoadPath.Should().BeNull("one data file is run by its own name");
         scripts.Rows.Should().Be(4, "two rows in each of the two tables the source captured");
+        data.Rows.Should().Be(scripts.Rows);
     }
 
     [Fact]
@@ -139,14 +170,18 @@ public sealed class InterchangeStoreSqlScriptTests : IDisposable
         result.Subject.SqlScripts.Should().NotBeNull();
         result.Subject.SqlScripts!.Written.Should().BeFalse();
         result.Subject.SqlScripts.SchemaPath.Should().BeNull();
-        result.Subject.SqlScripts.DataPath.Should().BeNull();
+        result.Subject.SqlScripts.DataFiles.Should().BeEmpty();
+        result.Subject.SqlScripts.LoadPath.Should().BeNull();
 
         result.Subject.SummaryPath.Should().NotBeNull("the summary still describes a catalog that was finished");
         File.Exists(result.Subject.SummaryPath).Should().BeTrue();
     }
 
     /// <summary>Runs one store over the temp folder with the given app-level options.</summary>
-    private async Task<InterchangeStoreResult> StoreAsync(bool includeSqlScripts, ISqlScriptRenderer renderer)
+    private async Task<InterchangeStoreResult> StoreAsync(
+        bool includeSqlScripts,
+        ISqlScriptRenderer renderer,
+        int sqlScriptsMaxFileMb = 0)
     {
         _adapter.OpenReader(Arg.Any<DatabaseTarget>(), Arg.Any<ExportOptions>())
             .Returns(call =>
@@ -170,7 +205,8 @@ public sealed class InterchangeStoreSqlScriptTests : IDisposable
                 UnsupportedFeaturePolicy: "warn",
                 VerifyAfterStore: true,
                 IncludeSummaryReport: true,
-                IncludeSqlScripts: includeSqlScripts),
+                IncludeSqlScripts: includeSqlScripts,
+                SqlScriptsMaxFileMb: sqlScriptsMaxFileMb),
             progress: null,
             CancellationToken.None);
     }
@@ -266,21 +302,29 @@ public sealed class InterchangeStoreSqlScriptTests : IDisposable
         public IReadOnlyList<string> SchemaStatements(SchemaStage stage, IReadOnlyList<ISchemaObject> objects) =>
             [.. objects.Select(target => $"CREATE {stage} {target.Name};")];
 
-        public async IAsyncEnumerable<string> InsertStatements(
+        public IReadOnlyList<string> BeginTableBlock(
+            TableDefinition table, long rowCount, ScriptBlockPart part) =>
+            [
+                $"-- {table.Name}: {rowCount} row(s){(part.IsPart ? $", part {part.Number}" : string.Empty)}",
+                "BEGIN;",
+            ];
+
+        public async IAsyncEnumerable<(string Statement, int Rows)> InsertStatements(
             TableDefinition table,
             IAsyncEnumerable<DataValue[]> rows,
-            long rowCount,
             [EnumeratorCancellation] CancellationToken ct = default)
         {
-            var seen = 0L;
+            var seen = 0;
 
             await foreach (var _ in rows.WithCancellation(ct))
             {
                 seen++;
             }
 
-            yield return $"INSERT INTO {table.Name} ({seen} row(s));";
+            yield return ($"INSERT INTO {table.Name} ({seen} row(s));", seen);
         }
+
+        public IReadOnlyList<string> EndTableBlock() => ["COMMIT;"];
 
         public IReadOnlyList<string> TailStatements(
             IReadOnlyList<TableDefinition> tables,

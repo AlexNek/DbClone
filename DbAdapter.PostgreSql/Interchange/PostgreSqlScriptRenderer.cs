@@ -27,6 +27,12 @@ namespace DbAdapter.PostgreSql.Interchange;
 /// </remarks>
 internal sealed class PostgreSqlScriptRenderer : ISqlScriptRenderer
 {
+    /// <summary>The session setting every timestamp literal in a script is read under (D2).</summary>
+    private const string UtcSetting = "SET LOCAL TIME ZONE 'UTC';";
+
+    /// <summary>The session setting every quoted literal in a script is read under (D2).</summary>
+    private const string StringsSetting = "SET LOCAL standard_conforming_strings = 'on';";
+
     private readonly string _dialect;
 
     /// <summary>
@@ -72,15 +78,29 @@ internal sealed class PostgreSqlScriptRenderer : ISqlScriptRenderer
     }
 
     /// <inheritdoc />
+    public IReadOnlyList<string> BeginTableBlock(
+        TableDefinition table,
+        long rowCount,
+        ScriptBlockPart part)
+    {
+        ArgumentNullException.ThrowIfNull(table);
+
+        var tableName = TableName(table);
+
+        return part.IsPart
+            ? [$"-- {tableName}: {rowCount} row(s).", $"-- part {part.Number}", "BEGIN;", UtcSetting, StringsSetting]
+            : [$"-- {tableName}: {rowCount} row(s).", "BEGIN;", UtcSetting, StringsSetting];
+    }
+
+    /// <inheritdoc />
     /// <remarks>
-    /// The block is written as it is built: the banner and the transaction open it, one statement leaves
-    /// per batch, and the commit closes it. Only the batch being filled is held, which is the budget the
-    /// restore's own data pass uses, so a table larger than memory still writes one statement at a time.
+    /// Only the batch being filled is held, which is the budget the restore's own data pass uses, so a table
+    /// larger than memory still writes one statement at a time. Where the block is cut is the product's
+    /// decision, so this call writes no transaction of its own: it answers the batch's rows with it.
     /// </remarks>
-    public async IAsyncEnumerable<string> InsertStatements(
+    public async IAsyncEnumerable<(string Statement, int Rows)> InsertStatements(
         TableDefinition table,
         IAsyncEnumerable<DataValue[]> rows,
-        long rowCount,
         [EnumeratorCancellation] CancellationToken ct = default)
     {
         ArgumentNullException.ThrowIfNull(table);
@@ -102,11 +122,6 @@ internal sealed class PostgreSqlScriptRenderer : ISqlScriptRenderer
             targets.Select(t => PgIdentifierQuoter.QuoteIdentifier(t.Column)));
         var arbitrated = HasArbiter(table);
 
-        yield return $"-- {tableName}: {rowCount} row(s).";
-        yield return "BEGIN;";
-        yield return "SET LOCAL TIME ZONE 'UTC';";
-        yield return "SET LOCAL standard_conforming_strings = 'on';";
-
         var batch = new List<DataValue[]>();
         var length = 0;
 
@@ -120,7 +135,7 @@ internal sealed class PostgreSqlScriptRenderer : ISqlScriptRenderer
                 && (batch.Count >= PostgreSqlWriter.MaxBatchRows
                     || length + rowLength > PostgreSqlWriter.MaxBatchTextLength))
             {
-                yield return InsertStatement(tableName, columns, targets, batch, arbitrated);
+                yield return (InsertStatement(tableName, columns, targets, batch, arbitrated), batch.Count);
                 batch.Clear();
                 length = 0;
             }
@@ -131,11 +146,12 @@ internal sealed class PostgreSqlScriptRenderer : ISqlScriptRenderer
 
         if (batch.Count > 0)
         {
-            yield return InsertStatement(tableName, columns, targets, batch, arbitrated);
+            yield return (InsertStatement(tableName, columns, targets, batch, arbitrated), batch.Count);
         }
-
-        yield return "COMMIT;";
     }
+
+    /// <inheritdoc />
+    public IReadOnlyList<string> EndTableBlock() => ["COMMIT;"];
 
     /// <inheritdoc />
     /// <remarks>

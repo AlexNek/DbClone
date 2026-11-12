@@ -483,7 +483,8 @@ public sealed partial class MainViewModel : ObservableObject
             UnsupportedFeaturePolicy: options.UnsupportedFeaturePolicy,
             TableSelection: _tableSelectionService.OperationSpec,
             IncludeSummaryReport: options.WriteSummaryMarkdown,
-            IncludeSqlScripts: options.SqlScripts);
+            IncludeSqlScripts: options.SqlScripts,
+            SqlScriptsMaxFileMb: options.SqlScriptsMaxFileMb);
 
         var result = await _storeWorkflow.ExecuteAsync(request, ct);
         _resultHandler.HandleStoreResult(StoreRestoreState, result);

@@ -481,6 +481,26 @@
                                 Content="Write SQL scripts (schema and data)"
                                 IsChecked="{Binding Settings.StoreRestore.SqlScripts}"
                                 ToolTip="Write the catalog's own SQL scripts beside it, ready to run in any client" />
+                            <Grid Margin="0,2,0,6">
+                                <Grid.ColumnDefinitions>
+                                    <ColumnDefinition Width="*" />
+                                    <ColumnDefinition Width="88" />
+                                </Grid.ColumnDefinitions>
+                                <TextBlock
+                                    Grid.Column="0"
+                                    VerticalAlignment="Center"
+                                    FontSize="11"
+                                    Foreground="{ui:ThemeResource TextFillColorSecondaryBrush}"
+                                    Text="Largest data script file (MB), 0 = one file"
+                                    TextWrapping="Wrap" />
+                                <ui:NumberBox
+                                    Grid.Column="1"
+                                    Margin="6,0,0,0"
+                                    Minimum="0"
+                                    SmallChange="1"
+                                    Value="{Binding Settings.StoreRestore.SqlScriptsMaxFileMb, UpdateSourceTrigger=PropertyChanged}"
+                                    ToolTip="The budget only sets how many files the rows are written into; 0 keeps one file." />
+                            </Grid>
                             <TextBlock
                                 Margin="0,8,0,4"
                                 FontSize="11"

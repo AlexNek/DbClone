@@ -107,6 +107,33 @@ reproducible.
    *replace only the selected tables* / *clear entire destination* when the
    cleanup dialog appears.
 
+## Loading a stored catalog's SQL scripts
+
+The **Store SQL scripts** option writes a script beside its catalog, not beside this
+folder, so this is the manual check for that output rather than part of the fixtures
+above. A catalog's `sql/` folder holds one of two shapes — the single file or the numbered family:
+
+| Store size | Files | How to load |
+|------------|-------|-------------|
+| `0` (one file) | `schema.sql`, `data.sql` | `psql -f sql/schema.sql -f sql/data.sql` |
+| a size the rows fit | `schema.sql`, `data.sql` | the same — the setting changes nothing |
+| a size the rows do not fit | `schema.sql`, `data/0001.sql …`, `load.psql` | `psql -f sql/load.psql` |
+
+The shape follows the estimate, not the setting alone: a size whose rows fit one file keeps
+`data.sql`. A family that ends up as one file writes no driver, and a `load.psql` an earlier
+store left is removed with the rest of the other shape, so read the folder rather than trusting
+the setting's value.
+
+The driver includes each file by a path relative to its own folder, in the order the
+store wrote them, with `schema.sql` first. It deliberately does not set
+`ON_ERROR_STOP`, so pass `-v ON_ERROR_STOP=1` when a failed statement should stop the
+load. Every table block is one transaction, so a table written in several parts is
+several of them; running the scripts twice is expected to return the same state.
+
+> **Not run in this environment.** This machine has PostgreSQL services but no `psql`
+> on `PATH` and no disposable database, so the two-run proof of a split family stays
+> unproven here — the same gap feature 08 recorded for its single file.
+
 ## Notes
 
 - Do not point these scripts at production databases — teardown drops the

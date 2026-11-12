@@ -9,8 +9,10 @@ namespace DbAdapter.Definitions;
 /// <remarks>
 /// The statements are the text the restore already produces, guarded so a second run creates no object
 /// (the store writes them out; the restore executes them). The product owns the catalog layout, the file
-/// names and the ordering; this role owns every word of the SQL, because only the adapter speaks the
-/// engine's dialect.
+/// names, the ordering and — since feature 10 — where a table's block is cut, because only it knows how full
+/// the file it is filling has become. This role owns every word of the SQL, because only the adapter speaks
+/// the engine's dialect: the block is opened, filled and closed through three calls, and the adapter writes
+/// all four of those parts.
 /// </remarks>
 public interface ISqlScriptRenderer
 {
@@ -33,8 +35,22 @@ public interface ISqlScriptRenderer
     IReadOnlyList<string> SchemaStatements(SchemaStage stage, IReadOnlyList<ISchemaObject> objects);
 
     /// <summary>
-    /// One table's rows as re-runnable <c>INSERT</c> statements, wrapped in the transaction and the
-    /// settings the literals assume: skipping a row that is already there, never overwriting one.
+    /// Opens one table's block: the banner naming the table, its recorded row count and — when the product
+    /// split it — the part, then the transaction and the settings its literals assume.
+    /// </summary>
+    /// <remarks>
+    /// The product calls this again in the next file when a table's rows outgrow the file being written, so
+    /// one table may be several blocks; each is a transaction of its own (D4).
+    /// </remarks>
+    /// <param name="table">The table the block writes.</param>
+    /// <param name="rowCount">How many rows the catalog records for the table, for the banner.</param>
+    /// <param name="part">The part this block is, or <see cref="ScriptBlockPart.Whole"/> for an unsplit table.</param>
+    /// <returns>The statements that open the block, in the order they must run.</returns>
+    IReadOnlyList<string> BeginTableBlock(TableDefinition table, long rowCount, ScriptBlockPart part);
+
+    /// <summary>
+    /// One table's rows as re-runnable <c>INSERT</c> statements — the block's contents only, with no
+    /// transaction of their own.
     /// </summary>
     /// <remarks>
     /// Both directions are streams. The rows arrive as the catalog reads them and the statements leave as
@@ -44,14 +60,19 @@ public interface ISqlScriptRenderer
     /// </remarks>
     /// <param name="table">The table the rows belong to.</param>
     /// <param name="rows">The rows, in the order the catalog stored them.</param>
-    /// <param name="rowCount">How many rows the catalog records for the table, for the block's banner.</param>
     /// <param name="ct">Cancellation token, honoured between rows.</param>
-    /// <returns>The table's block: its banner, the transaction, the statements and the commit.</returns>
-    IAsyncEnumerable<string> InsertStatements(
+    /// <returns>
+    /// Each statement with the number of rows it carries, which is what lets the product state a file's row
+    /// count exactly rather than estimate it (D9).
+    /// </returns>
+    IAsyncEnumerable<(string Statement, int Rows)> InsertStatements(
         TableDefinition table,
         IAsyncEnumerable<DataValue[]> rows,
-        long rowCount,
         CancellationToken ct = default);
+
+    /// <summary>Closes one table's block: the commit that makes what was inserted there true (D4, FR5).</summary>
+    /// <returns>The statements that close the block, in the order they must run.</returns>
+    IReadOnlyList<string> EndTableBlock();
 
     /// <summary>
     /// The statements that make the schema true after the data — key validation and materialized-view

@@ -41,6 +41,13 @@ public sealed record ExportOptions
     /// export that builds default options writes exactly the catalog it wrote before the pass existed.
     /// </summary>
     public bool IncludeSqlScripts { get; init; }
+
+    /// <summary>
+    /// Gets or sets the largest a data script file may become, in bytes, before the pass opens the next one.
+    /// <c>0</c> — the default — writes the single <c>sql/data.sql</c> the pass wrote before this number
+    /// existed, so a consumer that builds default options gets today's layout (FR13).
+    /// </summary>
+    public long SqlScriptMaxDataFileBytes { get; init; }
 }
 
 /// <summary>

@@ -1,6 +1,7 @@
 using System.Security.Cryptography;
 using CanonicalModel.Interchange;
 using DbAdapter.Definitions;
+using DatabaseInterchange.Script;
 
 namespace DatabaseInterchange.Format;
 
@@ -364,6 +365,126 @@ public sealed class CatalogReader : IAsyncDisposable
 
         var tableManifest = await JsonFile.ReadDocumentAsync<TableManifest>(tableManifestPath, ct);
         return tableManifest?.RowCount;
+    }
+
+    /// <summary>
+    /// Measures every table of the catalog without reading a row of it: the row count the table's own
+    /// <c>table.json</c> recorded, and the length of every file the table folder's <c>checksums.sha256</c>
+    /// lists, its <c>data.*.csv</c> chunks and its <c>blobs/</c> payloads kept apart by that path prefix (FR3).
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// The catalog records no length for a chunk or a blob — the manifest lists metadata files only — so the
+    /// list the writer already produced is what says which files belong to a table, and the filesystem says how
+    /// long each one is. Nothing is opened: a measure that had to read a chunk to answer could not run before
+    /// the pass decided its layout.
+    /// </para>
+    /// <para>
+    /// A table with no folder, or a folder written before the checksums list existed, still answers: the first
+    /// is measured as zero bytes and zero rows, the second by the files that are there. The result keeps the
+    /// order it was asked in, which is the load order the plan depends on (FR7).
+    /// </para>
+    /// </remarks>
+    /// <param name="tables">The catalog's tables, in the order they are measured.</param>
+    /// <param name="ct">Cancellation token.</param>
+    /// <returns>One measure per table, in the same order.</returns>
+    internal async Task<IReadOnlyList<TableFootprint>> ReadTableFootprintsAsync(
+        IReadOnlyList<TableDefinition> tables,
+        CancellationToken ct = default)
+    {
+        ObjectDisposedException.ThrowIf(_disposed, this);
+        ArgumentNullException.ThrowIfNull(tables);
+
+        var footprints = new List<TableFootprint>(tables.Count);
+
+        foreach (var table in tables)
+        {
+            ct.ThrowIfCancellationRequested();
+
+            var schemaName = table.SchemaRef.ObjectName();
+
+            if (string.IsNullOrWhiteSpace(schemaName) || ResolveTableDirectory(schemaName, table.Name) is not { } tableDir)
+            {
+                footprints.Add(new TableFootprint(table, 0, 0, 0));
+                continue;
+            }
+
+            var rows = await ReadTableRowCountAsync(schemaName, table.Name, ct) ?? 0;
+            var (rowBytes, payloadBytes) = await MeasureTableAsync(tableDir, ct);
+
+            footprints.Add(new TableFootprint(table, rows, rowBytes, payloadBytes));
+        }
+
+        return footprints;
+    }
+
+    /// <summary>
+    /// Adds up one table folder's chunk bytes and payload bytes from the files the folder's own checksums list
+    /// names.
+    /// </summary>
+    /// <param name="tableDir">The table's data folder.</param>
+    /// <param name="ct">Cancellation token.</param>
+    /// <returns>The chunk bytes and the payload bytes.</returns>
+    private static async Task<(long RowBytes, long PayloadBytes)> MeasureTableAsync(
+        string tableDir,
+        CancellationToken ct)
+    {
+        long rowBytes = 0;
+        long payloadBytes = 0;
+        var checksumsPath = Path.Combine(tableDir, "checksums.sha256");
+
+        if (File.Exists(checksumsPath))
+        {
+            foreach (var line in await File.ReadAllLinesAsync(checksumsPath, ct))
+            {
+                // Format: <relative-path>\t<sha256>
+                var tab = line.IndexOf('\t');
+
+                if (tab <= 0)
+                {
+                    continue;
+                }
+
+                var relative = line[..tab];
+                var path = Path.Combine(tableDir, relative.Replace('/', Path.DirectorySeparatorChar));
+                var length = File.Exists(path) ? new FileInfo(path).Length : 0;
+
+                Classify(relative, length, ref rowBytes, ref payloadBytes);
+            }
+
+            return (rowBytes, payloadBytes);
+        }
+
+        // A folder written before the checksums list existed: the files themselves are the list, in the same
+        // two shapes — a chunk at the folder root, a payload under blobs/.
+        foreach (var path in Directory.EnumerateFiles(tableDir, "*", SearchOption.AllDirectories))
+        {
+            var relative = Path.GetRelativePath(tableDir, path).Replace(Path.DirectorySeparatorChar, '/');
+
+            Classify(relative, new FileInfo(path).Length, ref rowBytes, ref payloadBytes);
+        }
+
+        return (rowBytes, payloadBytes);
+    }
+
+    /// <summary>
+    /// Sorts one listed file into the rows it holds or the payload it carries. Anything else a table folder
+    /// holds — <c>table.json</c>, the checksums list itself — describes the data rather than being it.
+    /// </summary>
+    private static void Classify(string relative, long length, ref long rowBytes, ref long payloadBytes)
+    {
+        if (relative.StartsWith("data.", StringComparison.Ordinal)
+            && relative.EndsWith(".csv", StringComparison.Ordinal)
+            && !relative.Contains('/'))
+        {
+            rowBytes += length;
+            return;
+        }
+
+        if (relative.StartsWith("blobs/", StringComparison.Ordinal))
+        {
+            payloadBytes += length;
+        }
     }
 
     /// <summary>

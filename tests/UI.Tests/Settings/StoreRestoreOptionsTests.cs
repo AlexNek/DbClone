@@ -55,6 +55,34 @@ public class StoreRestoreOptionsTests
     }
 
     [Fact]
+    public void SqlScriptsMaxFileMb_defaults_to_a_size_a_client_can_open()
+    {
+        // A beginner who never opens the settings still gets data files an editor can load, rather
+        // than one script the size of the catalog (D11).
+        new StoreRestoreOptions().SqlScriptsMaxFileMb.Should().Be(32);
+    }
+
+    [Fact]
+    public void SqlScriptsMaxFileMb_survives_the_round_trip_and_an_older_file_leaves_the_default()
+    {
+        // Arrange — a settings file written before the size existed.
+        const string olderFile = """{ "StoreRestore": { "SqlScripts": true } }""";
+
+        // Act
+        var fromOlderFile = JsonSerializer.Deserialize<UserSettings>(olderFile);
+
+        // Assert — the upgrade splits at the default rather than writing one unbounded file.
+        fromOlderFile!.StoreRestore.SqlScriptsMaxFileMb.Should().Be(32);
+
+        // Act — "one file" is a real choice and has to come back as one, not as the default.
+        var saved = JsonSerializer.Serialize(new StoreRestoreOptions { SqlScriptsMaxFileMb = 0 });
+        var reloaded = JsonSerializer.Deserialize<StoreRestoreOptions>(saved);
+
+        // Assert
+        reloaded!.SqlScriptsMaxFileMb.Should().Be(0);
+    }
+
+    [Fact]
     public void DefaultCatalogDirectory_is_under_MyDocuments()
     {
         var options = new StoreRestoreOptions();

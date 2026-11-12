@@ -30,6 +30,12 @@ public sealed class WorkflowResultHandlerTests
 
     private const string DataScriptPath = CatalogPath + "\\sql\\data.sql";
 
+    private const string FirstPartPath = CatalogPath + "\\sql\\data\\0001.sql";
+
+    private const string SecondPartPath = CatalogPath + "\\sql\\data\\0002.sql";
+
+    private const string LoadScriptPath = CatalogPath + "\\sql\\load.psql";
+
     private readonly WorkflowResultHandler _sut = new();
 
     [Fact]
@@ -117,6 +123,40 @@ public sealed class WorkflowResultHandlerTests
     }
 
     [Fact]
+    public void HandleStoreResult_LogsEveryFileOfAFamilyAndTheDriverThatIncludesThem()
+    {
+        // Arrange
+        var state = new WorkflowState();
+
+        // Act
+        _sut.HandleStoreResult(
+            state,
+            StoreResult(withSummary: true, scripts: Family(), scriptsRequested: true));
+
+        // Assert (FR10) — the split is visible as files, and the log names the one command that runs
+        // them in order rather than leaving the user to guess it.
+        Messages(state).Should().ContainInOrder(
+            $"        SQL schema: {SchemaScriptPath} (12 statements, 2048 bytes)",
+            $"        SQL data: {FirstPartPath} (3 statements, 6 rows, 4096 bytes)",
+            $"        SQL data: {SecondPartPath} (2 statements, 6 rows, 2048 bytes)",
+            $"        SQL load: {LoadScriptPath} (includes 2 files)");
+    }
+
+    [Fact]
+    public void HandleStoreResult_DoesNotNameADriverForASingleDataFile()
+    {
+        // Arrange
+        var state = new WorkflowState();
+
+        // Act
+        _sut.HandleStoreResult(state, StoreResult(withSummary: true, scripts: Scripts(), scriptsRequested: true));
+
+        // Assert — one file is run by its own name; a driver line would be noise pointing at a file
+        // the user does not need.
+        Messages(state).Should().NotContain(message => message.Contains("SQL load:", StringComparison.Ordinal));
+    }
+
+    [Fact]
     public void HandleStoreResult_WarnsWhenTheScriptsWereAskedForAndNotWritten()
     {
         // Arrange — the shape a refusal leaves behind: a finished catalog, no path, one warning issue.
@@ -171,11 +211,25 @@ public sealed class WorkflowResultHandlerTests
     private static SqlScriptPaths Scripts() =>
         new(
             SchemaPath: SchemaScriptPath,
-            DataPath: DataScriptPath,
+            DataFiles: [new SqlScriptFile(DataScriptPath, 4096, 3, 12, null)],
+            LoadPath: null,
             SchemaBytes: 2048,
-            DataBytes: 4096,
             SchemaStatements: 12,
-            DataStatements: 3,
+            Rows: 12,
+            PayloadBytes: 0);
+
+    /// <summary>The same scripts when the rows did not fit one file: two parts and their driver.</summary>
+    private static SqlScriptPaths Family() =>
+        new(
+            SchemaPath: SchemaScriptPath,
+            DataFiles:
+            [
+                new SqlScriptFile(FirstPartPath, 4096, 3, 6, "public.big"),
+                new SqlScriptFile(SecondPartPath, 2048, 2, 6, null),
+            ],
+            LoadPath: LoadScriptPath,
+            SchemaBytes: 2048,
+            SchemaStatements: 12,
             Rows: 12,
             PayloadBytes: 0);
 

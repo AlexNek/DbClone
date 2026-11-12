@@ -169,7 +169,9 @@ public sealed class SnapshotExporterCatalogReportTests : IDisposable
         result.SqlScripts.Should().NotBeNull();
         result.SqlScripts!.Succeeded.Should().BeTrue();
         result.SqlScripts.SchemaPath.Should().Be(CatalogScriptWriter.SchemaRelativePath);
-        result.SqlScripts.DataPath.Should().Be(CatalogScriptWriter.DataRelativePath);
+        result.SqlScripts.DataFiles.Should().ContainSingle().Which.RelativePath
+            .Should().Be(CatalogScriptWriter.DataRelativePath);
+        result.SqlScripts.LoadPath.Should().BeNull("a family of one file needs no driver");
         result.SqlScripts.SchemaBytes.Should().BeGreaterThan(0);
         result.SqlScripts.SchemaStatements.Should().BeGreaterThan(0);
         result.SqlScripts.Rows.Should().Be(5, "every row the catalog captured is written into the data file");
@@ -180,6 +182,36 @@ public sealed class SnapshotExporterCatalogReportTests : IDisposable
         ReadReport().Should().Contain("## SQL scripts");
 
         // Assert — the scripts sit beside a catalog the verifier still accepts (FR14, D10).
+        var verification = await new CatalogVerifier().VerifyAsync(_catalogPath);
+        verification.IsValid.Should().BeTrue(string.Join("; ", verification.Issues));
+    }
+
+    [Fact]
+    public async Task ExportAsync_WithABudget_WritesAFamilyAndStillReportsTheSummary()
+    {
+        // Act — a budget far below the fixture's data, so the pass must cut the rows into parts.
+        var result = await ExportAsync(
+            new ExportOptions { MaxRowsPerChunk = 2, IncludeSqlScripts = true, SqlScriptMaxDataFileBytes = 128 });
+
+        // Assert (FR9, FR10) — the budget reached the pass, and the family still leaves the store a
+        // complete catalog with its summary and no issue at all.
+        result.Success.Should().BeTrue();
+        result.Issues.Should().BeEmpty();
+        result.ReportRelativePath.Should().Be(CatalogReportWriter.ReportFileName);
+        result.SqlScripts.Should().NotBeNull();
+        result.SqlScripts!.BudgetBytes.Should().Be(128);
+        result.SqlScripts.DataFiles.Should().NotBeEmpty();
+        result.SqlScripts.Rows.Should().Be(5, "a cut file still inserts every row the catalog captured");
+        result.SqlScripts.DataFiles.Should().OnlyContain(file => file.Bytes > 0);
+        result.SqlScripts.DataFiles.Select(file => file.RelativePath).Should().OnlyHaveUniqueItems();
+
+        // Assert — the driver exists exactly when there is more than one file to include (D7).
+        (result.SqlScripts.LoadPath is not null).Should().Be(result.SqlScripts.DataFiles.Count > 1);
+        result.SqlScripts.DataFiles.Should().OnlyContain(
+            file => File.Exists(Path.Combine(_catalogPath, file.RelativePath)));
+
+        ReadReport().Should().Contain("## SQL scripts");
+
         var verification = await new CatalogVerifier().VerifyAsync(_catalogPath);
         verification.IsValid.Should().BeTrue(string.Join("; ", verification.Issues));
     }

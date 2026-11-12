@@ -13,6 +13,9 @@ namespace DbClone.Application.Interchange;
 /// <c>IncludeSqlScripts</c> follows the same rule and defaults to <see langword="false"/> at this
 /// boundary: the pass is opt-in at the product edge, and it is the application preference that makes it
 /// on for a user, so a caller that builds a request without thinking about it gets today's catalog.
+/// <c>SqlScriptsMaxFileMb</c> is the size a user picks in megabytes, and defaults to <c>0</c> here — the
+/// behaviour a caller had before the split existed. The wrapper converts it to the product's bytes once,
+/// so no UI unit is ever handed down.
 /// </remarks>
 public sealed record InterchangeStoreRequest(
     ConnectionInfo Connection,
@@ -25,4 +28,5 @@ public sealed record InterchangeStoreRequest(
     string UnsupportedFeaturePolicy,
     bool VerifyAfterStore,
     bool IncludeSummaryReport = true,
-    bool IncludeSqlScripts = false);
+    bool IncludeSqlScripts = false,
+    int SqlScriptsMaxFileMb = 0);

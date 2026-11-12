@@ -398,7 +398,7 @@ public sealed class SnapshotExporter
     }
 
     /// <summary>
-    /// Writes <c>sql/schema.sql</c> and <c>sql/data.sql</c> when the caller asked for them (D8).
+    /// Writes <c>sql/schema.sql</c> and the data family when the caller asked for them (D8).
     /// </summary>
     /// <remarks>
     /// The whole pass is contained: a failure the writer does not expect — a renderer this adapter cannot
@@ -431,6 +431,7 @@ public sealed class SnapshotExporter
                 _adapter.CreateScriptRenderer(),
                 relations?.CyclicGroups ?? [],
                 issues,
+                request.Options.SqlScriptMaxDataFileBytes,
                 ct);
         }
         catch (OperationCanceledException)

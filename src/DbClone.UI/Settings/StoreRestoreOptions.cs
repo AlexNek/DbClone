@@ -62,6 +62,14 @@ public sealed class StoreRestoreOptions
     /// </summary>
     public bool SqlScripts { get; set; } = true;
 
+    /// <summary>
+    /// The largest a data script file may become, in megabytes; <c>0</c> writes one file whatever the size.
+    /// On by default at 32 MB: a beginner who never opens the settings still gets files a client, an
+    /// editor and a chat window can open. The product never sees this unit — the application converts it
+    /// once (D11).
+    /// </summary>
+    public int SqlScriptsMaxFileMb { get; set; } = 32;
+
     /// <summary>Snapshot consistency mode passed to the product (e.g. "consistent").</summary>
     public string SnapshotConsistency { get; set; } = "consistent";
 

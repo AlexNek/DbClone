@@ -145,38 +145,65 @@ public class PostgreSqlScriptRendererTests
     }
 
     [Fact]
-    public async Task InsertStatements_Block_IsOneTableInItsOwnTransaction()
+    public void BeginTableBlock_IsTheBannerAndTheTransactionTheRestoreOpens()
     {
-        var statements = await Render(Orders(), Row(1, "12.50", "first"));
+        // The banner, BEGIN and both LOCAL settings are the block's, so the product can close and reopen them
+        // wherever it cuts a file (D4).
+        var statements = Renderer().BeginTableBlock(Orders(), 4321, ScriptBlockPart.Whole);
 
-        statements[0].Should().Be("-- public.orders: 1 row(s).");
-        statements[1].Should().Be("BEGIN;");
-        statements[2].Should().Be("SET LOCAL TIME ZONE 'UTC';");
-        statements[3].Should().Be("SET LOCAL standard_conforming_strings = 'on';");
-        statements[^1].Should().Be("COMMIT;");
+        statements.Should().Equal(
+            "-- public.orders: 4321 row(s).",
+            "BEGIN;",
+            "SET LOCAL TIME ZONE 'UTC';",
+            "SET LOCAL standard_conforming_strings = 'on';");
+        statements.Should().NotContain(statement => statement.StartsWith("-- part", StringComparison.Ordinal));
     }
 
     [Fact]
-    public async Task InsertStatements_Banner_IsTheCataloguedCountAndComesBeforeTheFirstRowIsRead()
+    public void BeginTableBlock_OfAPart_SaysWhichPartItContinues()
     {
-        // The count is the catalog's own, so the banner is written before a row is pulled: a table larger
-        // than memory is never held to state its total, and the count still matches the rows that follow.
-        var pulled = false;
+        // A table larger than one file is several transactions, so each says which part it is (D4, D7).
+        var statements = Renderer().BeginTableBlock(Orders(), 120, new ScriptBlockPart(3));
 
-        async IAsyncEnumerable<DataValue[]> Rows()
-        {
-            pulled = true;
-            yield return Row(1, "1.00", "a");
-            await Task.CompletedTask;
-        }
+        statements.Should().Equal(
+            "-- public.orders: 120 row(s).",
+            "-- part 3",
+            "BEGIN;",
+            "SET LOCAL TIME ZONE 'UTC';",
+            "SET LOCAL standard_conforming_strings = 'on';");
+    }
 
-        await using var statements = Renderer()
-            .InsertStatements(Orders(), Rows(), 4321)
-            .GetAsyncEnumerator();
+    [Fact]
+    public void EndTableBlock_ClosesTheTransactionTheBlockOpened()
+    {
+        Renderer().EndTableBlock().Should().Equal("COMMIT;");
+    }
 
-        (await statements.MoveNextAsync()).Should().BeTrue();
-        statements.Current.Should().Be("-- public.orders: 4321 row(s).");
-        pulled.Should().BeFalse("the total is what the catalog recorded, so no row has to be read for it");
+    [Fact]
+    public async Task InsertStatements_CarryNoTransactionAndNoBannerOfTheirOwn()
+    {
+        // Where a block is cut is the product's decision, so the inserts never open or close one: a file the
+        // product cuts must not gain a second BEGIN, and a continuation must not repeat the banner (D4).
+        var statements = await Render(Orders(), Row(1, "12.50", "first"));
+
+        statements.Should().ContainSingle("one batch is one insert and nothing else");
+        statements[0].Should().StartWith("INSERT INTO public.orders");
+        statements[0].Should().EndWith("ON CONFLICT DO NOTHING;");
+        statements.Should().NotContain(statement => statement == "BEGIN;" || statement == "COMMIT;");
+        statements.Should().NotContain(statement => statement.Contains("SET LOCAL", StringComparison.Ordinal));
+        statements.Should().NotContain(statement => statement.StartsWith("-- public.orders:", StringComparison.Ordinal));
+    }
+
+    [Fact]
+    public async Task InsertStatements_PairsEveryStatementWithTheRowsItsBatchCarries()
+    {
+        // The count is what lets the product attribute a file's rows without a second pass over the data (D9).
+        var batches = await CollectBatches(
+            Renderer().InsertStatements(Orders(), ToAsync([Row(1, "1.00", "a"), Row(2, "2.00", "b")])));
+
+        batches.Should().ContainSingle();
+        batches[0].Rows.Should().Be(2);
+        batches[0].Statement.Should().StartWith("INSERT INTO public.orders");
     }
 
     [Fact]
@@ -467,16 +494,15 @@ public class PostgreSqlScriptRendererTests
     private static PostgreSqlScriptRenderer Renderer() => new(DialectName);
 
     /// <summary>The statements one table's block is made of, read out of the stream the renderer answers.</summary>
-    private static Task<IReadOnlyList<string>> Render(TableDefinition table, params DataValue[][] rows) =>
-        Collect(Renderer().InsertStatements(table, ToAsync(rows), rows.LongLength));
+    private static async Task<IReadOnlyList<string>> Render(TableDefinition table, params DataValue[][] rows) =>
+        (await CollectBatches(Renderer().InsertStatements(table, ToAsync(rows))))
+            .Select(batch => batch.Statement)
+            .ToList();
 
-    /// <summary>The single insert statement a block writes, leaving out its banner and its transaction.</summary>
-    private static async Task<string> SingleInsert(TableDefinition table, params DataValue[][] rows) =>
-        (await Render(table, rows)).Single(s => s.StartsWith("INSERT", StringComparison.Ordinal));
-
-    private static async Task<IReadOnlyList<string>> Collect(IAsyncEnumerable<string> statements)
+    private static async Task<List<(string Statement, int Rows)>> CollectBatches(
+        IAsyncEnumerable<(string Statement, int Rows)> statements)
     {
-        var collected = new List<string>();
+        var collected = new List<(string Statement, int Rows)>();
 
         await foreach (var statement in statements)
         {
@@ -485,6 +511,10 @@ public class PostgreSqlScriptRendererTests
 
         return collected;
     }
+
+    /// <summary>The single insert statement a block writes, leaving out its banner and its transaction.</summary>
+    private static async Task<string> SingleInsert(TableDefinition table, params DataValue[][] rows) =>
+        (await Render(table, rows)).Single(s => s.StartsWith("INSERT", StringComparison.Ordinal));
 
     private static async IAsyncEnumerable<DataValue[]> ToAsync(IReadOnlyList<DataValue[]> rows)
     {

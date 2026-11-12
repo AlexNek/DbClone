@@ -291,6 +291,11 @@ internal sealed class MarkdownCatalogReportRenderer
     /// absent when nothing was asked for, where a section saying "nothing" would only raise a question.
     /// </para>
     /// <para>
+    /// One row per file the pass wrote, and the profile, the budget and the largest table the plan reasoned
+    /// with: the files are what happened, the plan facts are why (FR12, D10). The single-file catalog keeps
+    /// the two-row table it always had.
+    /// </para>
+    /// <para>
     /// The last line is FR9's: the scripts describe the catalog rather than belong to it, so the byte measures
     /// above are the folder's size with them and without them (D10). A reader comparing the two would
     /// otherwise conclude that one of them is wrong.
@@ -325,13 +330,13 @@ internal sealed class MarkdownCatalogReportRenderer
             ]);
         }
 
-        if (scripts.DataPath is { } dataPath)
+        foreach (var dataFile in scripts.DataFiles)
         {
             rows.Add([
-                ReportText.Cell(dataPath),
-                ReportText.Bytes(scripts.DataBytes),
-                ReportText.Number(scripts.DataStatements),
-                ReportText.Number(scripts.Rows),
+                ReportText.Cell(dataFile.RelativePath),
+                ReportText.Bytes(dataFile.Bytes),
+                ReportText.Number(dataFile.Statements),
+                ReportText.Number(dataFile.Rows),
             ]);
         }
 
@@ -341,13 +346,11 @@ internal sealed class MarkdownCatalogReportRenderer
         }
 
         // The tail — key validation and the materialized-view refresh — belongs to the last file written, so
-        // the sentence has to name that file rather than assume there are two (D2).
-        var last = ReportText.Code(scripts.DataPath ?? scripts.SchemaPath ?? string.Empty);
-
-        var payload = scripts.PayloadBytes > 0 && scripts.DataPath is { } data
-            ? $"{ReportText.Code(data)} inlines {ReportText.Number(scripts.PayloadBytes)} bytes of binary "
-              + "payloads as base64, which is why it can be larger than the data it describes."
-            : string.Empty;
+        // the sentence has to name that file rather than assume how many there are (D2, FR9).
+        var last = ReportText.Code(
+            scripts.DataFiles.Count > 0
+                ? scripts.DataFiles[^1].RelativePath
+                : scripts.SchemaPath ?? string.Empty);
 
         return string.Join('\n', new[]
         {
@@ -357,11 +360,93 @@ internal sealed class MarkdownCatalogReportRenderer
             string.Empty,
             "Every statement in these files may be run again: the second run creates no object and adds no row.",
             $"Foreign keys are added unvalidated and validated at the end of {last}.",
-            payload,
+            DescribeProfile(scripts),
+            DescribeLoad(scripts),
+            DescribePayloads(scripts),
             "A table that already exists is left as it is — no column, key or check is reconciled.",
             "A sequence keeps the position its own declaration gives it — a catalog records no current value.",
             "No role, grant or policy is written. Not a substitute for Restore, which also verifies the catalog.",
             "These files are not part of the catalog bytes above: they describe the catalog, they do not belong to it.",
         }.Where(line => line.Length > 0));
+    }
+
+    /// <summary>
+    /// States the profile the plan chose and the number it reasoned with, which is what makes the layout
+    /// explainable rather than arbitrary (FR12, D10).
+    /// </summary>
+    private static string DescribeProfile(ScriptResult scripts)
+    {
+        var budget = ReportText.HumanSize(scripts.BudgetBytes);
+        var largest = scripts.LargestTable is { } table
+            ? $"{ReportText.Code(table.ToString())} ({ReportText.HumanSize(scripts.LargestTableBytes)})"
+            : "which the catalog records";
+
+        return scripts.Profile switch
+        {
+            EScriptProfile.NoRows => scripts.DataFiles.Count == 0
+                ? "The catalog holds no rows, so no data file was written."
+                : "The catalog holds no rows the data files could write.",
+            EScriptProfile.Fits => scripts.BudgetBytes > 0
+                ? $"The whole catalog fits one file: its largest table, {largest}, is within the {budget} per-file budget."
+                : "The per-file budget is 0, so the rows are written in one file.",
+            EScriptProfile.ManySmall =>
+                $"The largest table, {largest}, is within the {budget} per-file budget and the catalog does not "
+                + $"fit one file, so its tables are packed into {ReportText.Number(scripts.DataFiles.Count)} files.",
+            _ => DescribeGiant(scripts, largest, budget),
+        };
+    }
+
+    /// <summary>States how many parts the largest table's block was actually written in (D10).</summary>
+    private static string DescribeGiant(ScriptResult scripts, string largest, string budget)
+    {
+        var name = scripts.LargestTable?.ToString();
+        var parts = name is null
+            ? 0
+            : scripts.DataFiles.Count(file => string.Equals(file.IsPartOf, name, StringComparison.Ordinal));
+
+        return parts > 1
+            ? $"The largest table, {largest}, is larger than the {budget} per-file budget, so it is written in "
+              + $"{ReportText.Number(parts)} parts."
+            : $"The largest table, {largest}, is larger than the {budget} per-file budget, so its block is cut "
+              + "wherever the file no longer holds the next statement.";
+    }
+
+    /// <summary>
+    /// Names the one command that loads the catalog, built from the files that exist rather than from the plan
+    /// (FR10, FR12).
+    /// </summary>
+    private static string DescribeLoad(ScriptResult scripts)
+    {
+        if (scripts.LoadPath is { } driver)
+        {
+            return $"Load it with {ReportText.Code("psql -f " + driver)}, which includes the files in the order they run.";
+        }
+
+        if (scripts.DataFiles.Count == 1 && scripts.SchemaPath is { } schema)
+        {
+            return $"Load it with {ReportText.Code("psql -f " + schema)}, then "
+                + $"{ReportText.Code("psql -f " + scripts.DataFiles[0].RelativePath)}.";
+        }
+
+        return scripts.SchemaPath is { } path
+            ? $"Load it with {ReportText.Code("psql -f " + path)}."
+            : string.Empty;
+    }
+
+    /// <summary>States why the files can be larger than the data they describe, when they carry payloads (D5).</summary>
+    private static string DescribePayloads(ScriptResult scripts)
+    {
+        if (scripts.PayloadBytes <= 0)
+        {
+            return string.Empty;
+        }
+
+        var bytes = ReportText.Number(scripts.PayloadBytes);
+
+        return scripts.DataFiles.Count == 1
+            ? $"{ReportText.Code(scripts.DataFiles[0].RelativePath)} inlines {bytes} bytes of binary payloads as "
+              + "base64, which is why it can be larger than the data it describes."
+            : $"The data files inline {bytes} bytes of binary payloads as base64, which is why they can be "
+              + "larger than the data they describe.";
     }
 }

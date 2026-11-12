@@ -218,11 +218,10 @@ public sealed class StoreWorkflowServiceTests
         var catalogPath = @"C:\temp\testdb.catalog.rdbx";
         var scripts = new SqlScriptPaths(
             SchemaPath: Path.Combine(catalogPath, "sql", "schema.sql"),
-            DataPath: Path.Combine(catalogPath, "sql", "data.sql"),
+            DataFiles: [new SqlScriptFile(Path.Combine(catalogPath, "sql", "data.sql"), 4096, 3, 12, null)],
+            LoadPath: null,
             SchemaBytes: 2048,
-            DataBytes: 4096,
             SchemaStatements: 12,
-            DataStatements: 3,
             Rows: 12,
             PayloadBytes: 0);
         var interchange = Substitute.For<IInterchangeService>();
@@ -269,6 +268,78 @@ public sealed class StoreWorkflowServiceTests
         result.Message.Should().Contain("Store succeeded").And.NotContain("not usable");
     }
 
+    [Theory]
+    [InlineData(0)]
+    [InlineData(32)]
+    public async Task ExecuteAsync_carries_the_script_size_preference_into_the_interchange_request(
+        int sqlScriptsMaxFileMb)
+    {
+        // Arrange
+        InterchangeStoreRequest? sent = null;
+        var interchange = Substitute.For<IInterchangeService>();
+        interchange
+            .StoreAsync(
+                Arg.Any<InterchangeStoreRequest>(),
+                Arg.Any<IProgress<InterchangeProgressView>?>(),
+                Arg.Any<CancellationToken>())
+            .Returns(call =>
+            {
+                sent = call.Arg<InterchangeStoreRequest>();
+
+                return Task.FromResult(StoreReportWritten());
+            });
+
+        // Act
+        await new StoreWorkflowService(
+                interchange, NullLogger<StoreWorkflowService>.Instance)
+            .ExecuteAsync(
+                Request(includeSqlScripts: true, sqlScriptsMaxFileMb: sqlScriptsMaxFileMb),
+                CancellationToken.None);
+
+        // Assert (D11) — the size the user picked reaches the boundary in the unit the user picked it
+        // in; the single conversion to bytes belongs to the service on the other side.
+        sent.Should().NotBeNull();
+        sent!.SqlScriptsMaxFileMb.Should().Be(sqlScriptsMaxFileMb);
+    }
+
+    [Fact]
+    public async Task ExecuteAsync_defaults_the_script_size_to_the_preferences_own()
+    {
+        // Arrange
+        InterchangeStoreRequest? sent = null;
+        var interchange = Substitute.For<IInterchangeService>();
+        interchange
+            .StoreAsync(
+                Arg.Any<InterchangeStoreRequest>(),
+                Arg.Any<IProgress<InterchangeProgressView>?>(),
+                Arg.Any<CancellationToken>())
+            .Returns(call =>
+            {
+                sent = call.Arg<InterchangeStoreRequest>();
+
+                return Task.FromResult(StoreReportWritten());
+            });
+
+        // Act
+        await new StoreWorkflowService(
+                interchange, NullLogger<StoreWorkflowService>.Instance)
+            .ExecuteAsync(
+                new StoreRequest(
+                    new DbClone.Application.DTOs.ConnectionInfo(
+                        "test.example.com", 5432, "testdb", "test_user", "fake-password", "Prefer"),
+                    @"C:\temp\testdb.catalog.rdbx",
+                    ChunkBytes: 32 * 1024 * 1024,
+                    RowsPerChunk: 100_000,
+                    IncludeData: true,
+                    SnapshotConsistency: "snapshot",
+                    UnsupportedFeaturePolicy: "warn",
+                    TableSelection: TableSelectionSpec.All),
+                CancellationToken.None);
+
+        // Assert — a caller that says nothing gets the split the settings screen shows.
+        sent!.SqlScriptsMaxFileMb.Should().Be(32);
+    }
+
     /// <summary>A completed store of a small catalog, with or without the report's path.</summary>
     private static InterchangeStoreResult StoreReportWritten(
         string? catalogPath = null,
@@ -292,7 +363,9 @@ public sealed class StoreWorkflowServiceTests
             SqlScripts: scripts);
 
     private static StoreRequest Request(
-        bool includeSummaryReport = true, bool includeSqlScripts = false) =>
+        bool includeSummaryReport = true,
+        bool includeSqlScripts = false,
+        int sqlScriptsMaxFileMb = 32) =>
         new(
             new DbClone.Application.DTOs.ConnectionInfo(
                 "test.example.com", 5432, "testdb", "test_user", "fake-password", "Prefer"),
@@ -304,5 +377,6 @@ public sealed class StoreWorkflowServiceTests
             UnsupportedFeaturePolicy: "warn",
             TableSelection: TableSelectionSpec.All,
             IncludeSummaryReport: includeSummaryReport,
-            IncludeSqlScripts: includeSqlScripts);
+            IncludeSqlScripts: includeSqlScripts,
+            SqlScriptsMaxFileMb: sqlScriptsMaxFileMb);
 }

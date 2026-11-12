@@ -1,0 +1,23 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <!--
+    Scratch driver for feature 10 §10: re-scripts one finished catalog folder at the budgets it is given and
+    prints what each pass wrote, so two runs can be compared by hand. Not shipped, not referenced by DbClone,
+    not part of DbClone.slnx and not a test project (it reads a catalog outside the repository, which the
+    hermetic suites may not do). Built and run on its own, with three arguments: the catalog folder, the folder
+    the adapter reads platforms/postgresql from, and the budget in bytes. The budget is
+    `ExportOptions.SqlScriptMaxDataFileBytes`; `0` is the single-file shape, and several budgets run in the
+    order they are given, so `0,204800,0` states a shape switch and the return to it in one command.
+  -->
+
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <IsPackable>false</IsPackable>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\..\src\DatabaseInterchange\DatabaseInterchange.csproj" />
+    <ProjectReference Include="..\..\..\DbAdapter.PostgreSql\DbAdapter.PostgreSql.csproj" />
+  </ItemGroup>
+
+</Project>

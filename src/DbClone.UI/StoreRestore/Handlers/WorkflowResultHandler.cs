@@ -42,8 +42,18 @@ public sealed class WorkflowResultHandler : IWorkflowResultHandler
         if (result.SqlScripts is { } scripts && scripts.SchemaPath is { } schemaScript)
         {
             state.LogDetail($"SQL schema: {schemaScript} ({scripts.SchemaStatements} statements, {scripts.SchemaBytes} bytes)");
-            if (scripts.DataPath is { } dataScript)
-                state.LogDetail($"SQL data: {dataScript} ({scripts.DataStatements} statements, {scripts.Rows} rows, {scripts.DataBytes} bytes)");
+
+            foreach (var file in scripts.DataFiles)
+            {
+                state.LogDetail($"SQL data: {file.Path} ({file.Statements} statements, {file.Rows} rows, {file.Bytes} bytes)");
+            }
+
+            // A family is loaded by its driver, so the log names the one command rather than leaving the
+            // user to run the files by hand and get the order wrong (FR10).
+            if (scripts.IsFamily && scripts.LoadPath is { } load)
+            {
+                state.LogDetail($"SQL load: {load} (includes {scripts.DataFiles.Count} files)");
+            }
         }
         else if (result.SqlScriptsRequested)
         {

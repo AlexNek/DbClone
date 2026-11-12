@@ -48,7 +48,11 @@ Binary values (`bytea` columns) are always stored in individual files under the 
 ├── summary.md.tmp         left only by a write that was interrupted; harmless, and you may delete it
 ├── sql/                   the catalog as the source engine's own SQL — see [The catalog's own SQL](#the-catalogs-own-sql)
 │   ├── schema.sql         every object, in the order a restore creates them, re-runnable
-│   └── data.sql           one block per table in dependency order, re-runnable, ending with the key validation
+│   ├── data.sql           one block per table in dependency order, re-runnable, ending with the key validation
+│   ├── data/              the same rows when they do not fit one file — either this or data.sql, never both
+│   │   ├── 0001.sql       the rows in load order; the file boundary falls where the size you set is reached
+│   │   └── 0002.sql       a table that outgrew the previous file continues here, in its own transaction
+│   └── load.psql          written only when there is a data/ family: includes its files in the order they run
 ├── schema/                one JSON file per section:
 │   ├── schemas.json       schemas
 │   ├── tables.json        tables, columns, keys, constraints, indexes, triggers, partitions
@@ -81,7 +85,7 @@ Restore checks every file against the checksums in `manifest.json` before it tou
 | **Catalog observations** | The few things worth knowing before the numbers: tables with no primary key, the tables the rest of the catalog leans on, the cyclic groups, foreign keys that point outside the catalog, tables that take part in no foreign-key relationship, and pairs joined by more than one constraint. Each line is a count plus a pointer to the section that lists the items in full. A catalog with nothing unusual says so in one line |
 | **Global statistics** | Three figures in bytes that mean different things: *data bytes* (the CSV rows and the binary files), *metadata bytes* (the JSON that describes the objects, `manifest.json` and `export.json` included), and **catalog bytes** — the two together. **Catalog bytes** is the number to compare against the folder. A file manager will report slightly more, because it also counts `summary.md`, the `sql/` scripts and rounds every file up to the disk's cluster size |
 | **Statistics per table** | One row for every table the catalog holds — its rows, its bytes, its chunk files, and the order its rows were stored in |
-| **SQL scripts** | The two files the store wrote beside the catalog, each with its size, statement count and rows, the guarantee that they may be run twice, and what they deliberately do not do — see [The catalog's own SQL](#the-catalogs-own-sql). Absent when the option is off, and one sentence naming the reason when nothing was written |
+| **SQL scripts** | One row for every file the store wrote beside the catalog — the schema, then each data file — with its size, statement count and rows, which of them the keys are validated at the end of, the layout the store chose and why, the command that loads them, the guarantee that they may be run twice, and what they deliberately do not do — see [The catalog's own SQL](#the-catalogs-own-sql). Absent when the option is off, and one sentence naming the reason when nothing was written |
 | **Relationships** | Every foreign key the catalog captured, once per constraint in a register you can search, and again in the card of each table it joins. Cyclic groups, heavily referenced tables and duplicated pairs are named |
 
 A table listed under `row order: sourceOrder` did have its rows captured — all of them. What is not promised is the order they come back out in next time, because the table has no key to read by. The rows are there; only their sequence may differ between two stores.
@@ -108,9 +112,35 @@ Stopping a store while the summary is being written stops only the report. The c
 
 ## The catalog's own SQL
 
-With **Write SQL scripts** on — the default — a store also writes the catalog as SQL beside it, in `sql/schema.sql` and `sql/data.sql`. Both files are written in the dialect the source database speaks: its own type names, the index, view, trigger and function text the store captured from the server, and the same `'text'::type` literals a restore already sends. A catalog can therefore be handed to `psql` or any SQL client on a machine that has no DbClone.
+With **Write SQL scripts** on — the default — a store also writes the catalog as SQL beside it, in `sql/schema.sql` and `sql/data.sql`; when the rows do not fit the size you picked, `data.sql` becomes a numbered family under `sql/data/`. Both shapes are written in the dialect the source database speaks: its own type names, the index, view, trigger and function text the store captured from the server, and the same `'text'::type` literals a restore already sends. A catalog can therefore be handed to `psql` or any SQL client on a machine that has no DbClone.
 
-Run `schema.sql` first and `data.sql` second. A catalog that holds no rows gets no `data.sql`; the closing statements then sit at the end of `schema.sql`, so running the files in name order always finishes the job.
+Run `schema.sql` first and `data.sql` second. A catalog that holds no rows gets no data file; the closing statements then sit at the end of `schema.sql`, so running the files in name order always finishes the job.
+
+### One file, or a numbered family
+
+`sql/data.sql` is written when the rows fit the **Largest data script file** size — 32 MB unless you change it. When they do not fit, the same rows are written as a numbered family instead, beside a `load.psql` that runs them in order:
+
+```
+sql/
+├── schema.sql
+├── load.psql
+└── data/
+    ├── 0001.sql
+    ├── 0002.sql
+    └── 0003.sql
+```
+
+The two shapes never appear together: a store that writes the family removes the `data.sql` an earlier store left there, and a store that writes one file removes the `data/` folder the same way. Both hold the same statements in the same order — only where the file boundary falls changes.
+
+What decides it: the store estimates the `INSERT` bytes each table's rows will take, packs whole tables into a file in load order — a table the rest of the rows depend on comes first — and opens the next file as soon as the next statement would take the current one past the size. A table whose own estimate exceeds the size is written in parts: its block is closed, the next file started, and the block reopened with `-- part N` in its banner. The size bounds the file itself, not just its rows: the preamble and header at the top of the first file and the key validation at the end of the last one count against it too, so no file passes the size — with one exception, a single `INSERT` bigger than the size is written whole into a file of its own rather than cut in half. And because the shape follows that estimate, a store whose rows fit one file keeps `data.sql` even when the finished file turns out larger than the size.
+
+**`0` means one file.** Set the size to `0` and the store writes `sql/data.sql` exactly as it did before the setting existed, whatever the catalog weighs.
+
+**Load it** with one command — `psql -f sql/load.psql`. The driver includes `schema.sql` and then each numbered file in the order the store wrote them, resolving every include against its own folder. It deliberately sets no `ON_ERROR_STOP`: add `-v ON_ERROR_STOP=1` yourself when you want a run to stop at the first error. With a single `data.sql` there is no driver and no include to get wrong — `psql -f sql/schema.sql` then `psql -f sql/data.sql`.
+
+**Each part is its own transaction.** A table written in several files commits part by part, so a failure part-way through leaves every earlier part — and every earlier file — applied and re-runnable, and the same `psql -f` command picks up where it stopped without duplicating a row. It is never all-or-nothing across the whole catalog; a catalog loaded this way is complete only when the run finishes.
+
+**What the size is not for.** It is the size a client, an editor and a chat window can open; it is not a substitute for a real dump of a multi-gigabyte database, which belongs in `pg_dump` and its custom format. The bound this setting respects is the editor that opens the file, not the server that loads it: PostgreSQL accepts a statement of up to 1 GB, and DbClone closes its own batch at 1 000 rows or about 2 MB of text, so the size you pick is nowhere near a limit the server has.
 
 Every statement may be run again: a second run creates no object and adds no row.
 
@@ -124,7 +154,7 @@ Every statement may be run again: a second run creates no object and adds no row
 | Trigger | `DROP TRIGGER IF EXISTS`, then the captured statement |
 | Table rows | `INSERT … ON CONFLICT DO NOTHING` when the table has a primary key or a unique key that every row must fill — every column of it declared `NOT NULL`, and no `WHERE` narrowing it; `INSERT … SELECT … WHERE NOT EXISTS` otherwise, so the whole row is the identity |
 
-Each table's rows form one block with its own transaction, and the blocks are written in dependency order: a table the rows of a later block point at comes first, whatever the names sort like. A failure therefore leaves every earlier table complete and the file re-runnable from its start. The two settings the literals depend on — `TIME ZONE 'UTC'` and `standard_conforming_strings = 'on'` — are set at the top of each file and again inside every table block. The rows are read from the catalog and handed to the file one batch at a time, so a table larger than memory still writes one statement after another instead of being held to the end.
+Each table's rows form a block with its own transaction — a table written in parts is one transaction per part — and the blocks are written in dependency order: a table the rows of a later block point at comes first, whatever the names sort like. A failure therefore leaves every earlier block complete and the file re-runnable from its start. The two settings the literals depend on — `TIME ZONE 'UTC'` and `standard_conforming_strings = 'on'` — are set at the top of each file and again inside every table block. The rows are read from the catalog and handed to the file one batch at a time, so a table larger than memory still writes one statement after another instead of being held to the end.
 
 What the files deliberately do **not** do:
 
@@ -132,13 +162,13 @@ What the files deliberately do **not** do:
 - **Write roles, grants, policies or ownership.** A script that silently created roles and grants would be a privilege change disguised as a dump.
 - **Create extensions.** The catalog records them, but no stage of the format creates one.
 - **Restore a sequence's position.** A catalog records a sequence's declaration, not its current value, so a script-created sequence starts where its own `START WITH` puts it.
-- **Load a foreign-key cycle unattended.** Each table is its own transaction, so the first block of a cycle needs rows a later block has not committed; `data.sql` names each cycle in a header comment, and the key validation at the end reports a cycle whose data truly disagrees.
+- **Load a foreign-key cycle unattended.** Each block is its own transaction, so the first block of a cycle needs rows a later block has not committed; `data.sql` names each cycle in a header comment, and the key validation at the end reports a cycle whose data truly disagrees.
 - **Leave a binary value out.** A `bytea` value is inlined as `decode('<base64>', 'base64')::<type>`, which is why `data.sql` can be larger than the catalog's own data; the summary states how many bytes were inlined.
 
-`summary.md` gains an **SQL scripts** section that names both files with their sizes, statement and row counts, the guarantee and each of the limits above. The scripts are not part of the catalog's bytes and are not hashed: like the summary, deleting or editing them cannot break a catalog, and a restore never reads them.
+`summary.md` gains an **SQL scripts** section that names every file — the schema, then each data file — with its size, statement and row counts, the layout the store chose and why, the command that loads them, the guarantee and each of the limits above. The scripts are not part of the catalog's bytes and are not hashed: like the summary, deleting or editing them cannot break a catalog, and a restore never reads them.
 
 !!! note "When nothing is written"
-    The pass refuses rather than writing half a script — a catalog recorded by another engine's adapter, a catalog in the direct format, or an object the restore itself cannot create. The store still completes: the reason is one warning in the log and one sentence in the summary, and the catalog is exactly the catalog it would have been with the option off. Both files are built under temporary names and moved into place only once they are complete, so a cancelled or failed pass leaves a pair an earlier store wrote exactly as it found it.
+    The pass refuses rather than writing half a script — a catalog recorded by another engine's adapter, a catalog in the direct format, or an object the restore itself cannot create. The store still completes: the reason is one warning in the log and one sentence in the summary, and the catalog is exactly the catalog it would have been with the option off. Every file is built under a temporary name and all of them are moved into place only once the whole pass is complete — and a failure while moving them back leaves the scripts an earlier store wrote exactly as it found them.
 
 ## Viewing the relationships
 
@@ -259,6 +289,7 @@ The preserved PostgreSQL-only statements are applied only when the target report
 | **Include table data** | Off stores the schema only, and restoring such a catalog writes the structure and no rows. On stores the rows and the restore writes them back |
 | **Write summary.md (statistics and relations)** | On writes the plain-text account described under [Reading the catalog summary](#reading-the-catalog-summary) into the catalog folder. Off stores the catalog alone — the folder is complete without it, and a restore needs neither file |
 | **Write SQL scripts (schema and data)** | On writes the catalog's own SQL beside it — see [The catalog's own SQL](#the-catalogs-own-sql). Off stores the catalog alone; the folder is complete either way, and a restore never reads the scripts |
+| **Largest data script file (MB), 0 = one file** | The largest `sql/data.sql` may become before the rows are written as a numbered family under `sql/data/` instead. `32` unless you change it; `0` writes one file whatever the catalog weighs. It changes only where the file boundary falls, never a statement |
 
 These values live in `settings.json` under `StoreRestore`. Catalogs are currently stored as directories. ZIP packaging is a separate planned feature and is not currently exposed as a Store option.
 
@@ -269,7 +300,8 @@ These values live in `settings.json` under `StoreRestore`. Catalogs are currentl
 | `SnapshotConsistency` | `consistent` | The row read uses a consistent snapshot across all tables when set to `consistent`, or read-committed isolation when set to `readCommitted` |
 | `UnsupportedFeaturePolicy` | `fail` | When `fail`, an unsupported object stops the restore before any write; when `warn`, the restore skips it and records an issue |
 | `WriteSummaryMarkdown` | `true` | Whether Store writes `summary.md` into the catalog folder. It is an app preference: the setting decides, and nothing about the catalog itself changes |
-| `SqlScripts` | `true` | Whether Store also writes the catalog's own SQL (`schema.sql` and `data.sql`) beside it. On by default, so the files are there without opening the settings; turning it off leaves the catalog byte for byte as it was |
+| `SqlScripts` | `true` | Whether Store also writes the catalog's own SQL (`schema.sql`, then `data.sql` or a numbered family) beside it. On by default, so the files are there without opening the settings; turning it off leaves the catalog byte for byte as it was |
+| `SqlScriptsMaxFileMb` | `32` | The largest a data script file may become, in megabytes, before the rows are written as a numbered family. `0` writes one file whatever the size. The application converts it to bytes once; it changes the file boundaries and no statement |
 
 !!! note "Table selection narrows a catalog"
     A [table selection](connections/table-selection.md) is applied end-to-end: the catalog captures only the tables the selection includes, and the log names the excluded tables when Store starts.
