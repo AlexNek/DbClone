@@ -16,7 +16,7 @@ Store writes a connected database into a **catalog** — a folder of files on di
 | **Stop** | Toolbar, enabled while a Store or Restore operation runs; Store and Restore do not yet support pausing or resuming a partial catalog |
 | ++ctrl+shift+s++ / ++ctrl+shift+r++ | Start Store / Start Restore — see [Keyboard Shortcuts](keyboard-shortcuts.md) |
 
-Both operations need a connection that names a **specific database**. A connection that points at a server only is refused with a banner saying so; open the [Connection Manager](connections/managing-connections.md) and pick the database first.
+Both operations need a connection to a server. Store needs a **specific source database**. Restore can use a specific destination database, or a server-only destination when you choose to create a new restore database.
 
 ## Storing a catalog
 
@@ -258,25 +258,28 @@ The panel states the table's key, unique constraints, indexes and check constrai
 
 ## Restoring a catalog
 
-1. Select the destination connection — an **empty** database.
+1. Select the destination connection — it may name an existing database, or it may point only to the destination server if you want Restore to create a new database.
 2. Press **Restore** (++ctrl+shift+r++).
 3. In the folder browser, select the catalog folder **itself**, not the folder that contains it.
-4. DbClone verifies the files, checks that the target is empty, then applies the catalog.
+4. DbClone verifies the files and checks the selected target before applying the catalog. If the target contains user objects, it asks whether to update that database or create a new one.
 
 | Result you see | Meaning |
 |----------------|---------|
 | **Restore Complete** (green) | The catalog was applied and the check after it found nothing to report; the banner gives the object count, the rows written and the elapsed time |
 | **Restore Complete** with warnings | Objects were applied, and the restore recorded notes about what it did not carry — read them in the log |
 | **Restore Complete** with warnings naming counts | The objects were applied, but the check after the data found the target holding a different number than the catalog recorded. Each difference is an error line in the log naming both numbers |
-| **Restore FAILED** — target is not empty | The log names what the database already holds. A restore never cleans a target; empty the database first, or restore into a new one |
+| **Update selected database** | After explicit confirmation, DbClone removes the selected database's user objects and restores the catalog into that same database. If cleanup fails, the restore is not started |
+| **Create new database** | DbClone creates a new uniquely named database without replacing an existing database, then restores the catalog into it |
+| **Restore cancelled** | No cleanup, database creation, or restore was started |
+| **Restore refused** | The product's final empty-target safety check found user objects. This can happen if the target changed after the preflight; no restore objects are applied |
 | **Restore FAILED** — "…object(s) this restore cannot create…" | The catalog holds a publication or a subscription. **Nothing was written** — the target is untouched, and the log names every such object |
 
-!!! note "Reading a failed restore"
-    A restore that ends in failure reports `Restore FAILED` in the status bar and writes the exact reason — the objects it refused, or what the target already contains — as an error line in the log pane.
+!!! note "Restore safety"
+    The product still refuses a populated target as a final backstop. The UI's **Update selected database** choice performs cleanup first; the **Create new database** choice never drops or replaces an existing database.
 
 ## Current state of the restore
 
-The restore is being finished in stages, and it refuses rather than reporting a success it did not achieve. Today:
+The restore keeps the product's refusal safety rule, while the UI offers an explicit choice before a populated target is changed. Today:
 
 | Catalog content | On restore |
 |-----------------|-----------|

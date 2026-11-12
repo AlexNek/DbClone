@@ -51,6 +51,13 @@ public interface ITableCatalogService
         Action<string> logMessage,
         CancellationToken ct);
 
+    /// <summary>Creates a new database without replacing an existing database.</summary>
+    Task<bool> CreateRestoreDatabaseAsync(
+        ConnectionInfo connection,
+        string newDbName,
+        Action<string> logMessage,
+        CancellationToken ct);
+
     /// <summary>Creates a new database on the destination server.</summary>
     Task<bool> CreateBackupDatabaseAsync(
         ConnectionInfo connection,

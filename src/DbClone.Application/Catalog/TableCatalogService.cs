@@ -85,6 +85,17 @@ public sealed class TableCatalogService : ITableCatalogService
     }
 
     /// <inheritdoc />
+    public async Task<bool> CreateRestoreDatabaseAsync(
+        ConnectionInfo connection,
+        string newDbName,
+        Action<string> logMessage,
+        CancellationToken ct)
+    {
+        var admin = AdapterFor(connection).CreateAdmin(_targetFactory.Create(connection));
+        return await admin.CreateDatabaseIfNotExistsAsync(newDbName, logMessage, ct);
+    }
+
+    /// <inheritdoc />
     public async Task<bool> CreateBackupDatabaseAsync(
         ConnectionInfo connection,
         string newDbName,

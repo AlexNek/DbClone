@@ -11,6 +11,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Database engines are now loaded as plugins from a `plugins` folder next to the application and are no longer compiled into it; adding a new engine means dropping its adapter into that folder — no code change in the application or UI
 - Store / Restore operation — writes a connected database into a `.rdbx` catalog and restores one into a connected database, built on the DatabaseInterchange product contract
   - Store button on the Source connection panel and Restore button on the Destination connection panel — always visible, clicking either button sets the direction and starts the operation; keyboard shortcuts Ctrl+Shift+S and Ctrl+Shift+R
+  - Restore asks what to do when the selected database already contains user objects: update the selected database after explicit confirmation, or create a new uniquely named database and restore there; cancelling leaves the destination unchanged
   - Pause/Stop controls always visible in the toolbar, enabled when a Store/Restore operation is running
   - Source and Destination are drawn as equal columns, so the two panels are the same width and reserve the same height whatever each one's own rows hold
   - Progress, log, and notification banner automatically show Store/Restore state when an operation is running, otherwise show the active mode (Copy / Compare) state

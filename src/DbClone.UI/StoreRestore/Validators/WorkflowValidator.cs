@@ -34,12 +34,10 @@ public sealed class WorkflowValidator : IWorkflowValidator
 
     public bool ValidateDestinationConnection(ConnectionViewModel destination, WorkflowState state)
     {
-        if (!string.IsNullOrWhiteSpace(destination.DatabaseName)) return true;
-
-        state.BeginNewRun();
-        state.LogError("Destination connection has no database name. Restore requires a specific database.");
-        state.ShowBanner("Restore blocked", "The destination connection has no database name.", InfoBarSeverity.Error);
-        return false;
+        // A server-only destination is valid for Restore: the workflow can create a new
+        // database after the user confirms that choice. A named database is still checked
+        // for connectivity and populated-target handling by RestoreWorkflowService.
+        return true;
     }
 
     public bool ValidateDirectoryExists(string path, WorkflowState state)
