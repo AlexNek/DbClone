@@ -26,15 +26,8 @@ public sealed class CopyContext
     /// </summary>
     public ServerCapabilities? DestinationCapabilities { get; set; }
 
-    /// <summary>
-    /// Gets or sets the destination database connection (provider-specific).
-    /// </summary>
-    public object? DestinationConnection { get; set; }
-
-    /// <summary>
-    /// Gets or sets the destination connection string (for reopening connections).
-    /// </summary>
-    public string? DestinationConnectionString { get; set; }
+    /// <summary>Gets or sets the destination adapter-owned connection.</summary>
+    public ICopyConnection? DestinationConnection { get; set; }
 
     /// <summary>
     /// Gets the list of errors accumulated during the pipeline.
@@ -91,15 +84,8 @@ public sealed class CopyContext
     /// </summary>
     public ServerCapabilities? SourceCapabilities { get; set; }
 
-    /// <summary>
-    /// Gets or sets the source database connection (provider-specific).
-    /// </summary>
-    public object? SourceConnection { get; set; }
-
-    /// <summary>
-    /// Gets or sets the source connection string (for reopening connections).
-    /// </summary>
-    public string? SourceConnectionString { get; set; }
+    /// <summary>Gets or sets the source adapter-owned connection.</summary>
+    public ICopyConnection? SourceConnection { get; set; }
 
     /// <summary>
     /// Gets or sets the source database model.

@@ -64,7 +64,16 @@ public sealed class CopyWorkflow : ICopyWorkflow
         CancellationToken cancellationToken)
     {
         ConnectionInfo? backupDestination = null;
-        var adapter = _targetFactory.ResolveAdapter(source.Engine);
+        var sourceAdapter = _targetFactory.ResolveAdapter(source.Engine);
+        var destinationAdapter = _targetFactory.ResolveAdapter(destination.Engine);
+        if (!string.Equals(sourceAdapter.Info.Dialect, destinationAdapter.Info.Dialect, StringComparison.OrdinalIgnoreCase))
+        {
+            listener.OnPhaseChanged(ECopyOperationPhase.Failed);
+            listener.OnStatusMessageChanged("Source and destination engines must match");
+            listener.OnLogMessage($"Copy rejected: source engine '{sourceAdapter.Info.Dialect}' does not match destination engine '{destinationAdapter.Info.Dialect}'.");
+            return new CopyWorkflowResult { Success = false, ErrorMessage = "Source and destination engines must match" };
+        }
+
         try
         {
             _logger.LogInformation("Copy operation started");
@@ -72,10 +81,10 @@ public sealed class CopyWorkflow : ICopyWorkflow
 
             var sourceTarget = _targetFactory.Create(source);
             var destTarget = _targetFactory.Create(destination);
-            var sourceAdmin = adapter.CreateAdmin(sourceTarget);
-            var destAdmin = adapter.CreateAdmin(destTarget);
-            var destCleaner = adapter.CreateCleaner(destTarget);
-            var sourceMetadata = adapter.CreateMetadataSource(sourceTarget);
+            var sourceAdmin = sourceAdapter.CreateAdmin(sourceTarget);
+            var destAdmin = destinationAdapter.CreateAdmin(destTarget);
+            var destCleaner = destinationAdapter.CreateCleaner(destTarget);
+            var sourceMetadata = sourceAdapter.CreateMetadataSource(sourceTarget);
 
             // Step 1: Verify source connection
             listener.OnPhaseChanged(ECopyOperationPhase.CheckingSourceConnection);
@@ -198,7 +207,7 @@ public sealed class CopyWorkflow : ICopyWorkflow
             if (options.CopyMode != ECopyMode.Backup)
             {
                 listener.OnPhaseChanged(ECopyOperationPhase.CheckingDestination);
-                var destHasData = await adapter.CreateAdmin(destTargetToUse).HasDataAsync(cancellationToken);
+                var destHasData = await destinationAdapter.CreateAdmin(destTargetToUse).HasDataAsync(cancellationToken);
 
                 if (destHasData)
                 {
@@ -260,7 +269,7 @@ public sealed class CopyWorkflow : ICopyWorkflow
                     }
 
                     listener.OnPhaseChanged(ECopyOperationPhase.CleaningDestination);
-                    var latestCleaner = adapter.CreateCleaner(destTargetToUse);
+                    var latestCleaner = destinationAdapter.CreateCleaner(destTargetToUse);
                     bool cleaned;
                     if (clearAll)
                     {
@@ -328,7 +337,7 @@ public sealed class CopyWorkflow : ICopyWorkflow
             }
             else
             {
-                await using var session = adapter.CreateCopySession();
+                await using var session = sourceAdapter.CreateCopySession();
                 engineResult = await session.ExecuteAsync(
                                    step.Request!,
                                    progressHandler,

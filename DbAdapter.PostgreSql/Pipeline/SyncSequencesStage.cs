@@ -27,6 +27,8 @@ public sealed class SyncSequencesStage : ICopyStage
     /// <inheritdoc />
     public int Order => 110;
 
+    public bool IsCritical => false;
+
     /// <summary>Initializes a new instance.</summary>
     public SyncSequencesStage(
         PgDdlGenerator ddl,
@@ -53,8 +55,8 @@ public sealed class SyncSequencesStage : ICopyStage
 
         var model = context.SourceModel!;
 
-        var sourceExec = _executorFactory.Create((NpgsqlConnection)context.SourceConnection!);
-        var destExec = _executorFactory.Create((NpgsqlConnection)context.DestinationConnection!);
+        var sourceExec = _executorFactory.Create(PgCopyConnection.Require(context.SourceConnection, "source"));
+        var destExec = _executorFactory.Create(PgCopyConnection.Require(context.DestinationConnection, "destination"));
 
         var synced = 0;
         var skipped = 0;

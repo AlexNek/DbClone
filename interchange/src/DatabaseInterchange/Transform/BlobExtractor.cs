@@ -57,9 +57,7 @@ public sealed class BlobExtractor
         {
             ct.ThrowIfCancellationRequested();
 
-            var tableDir = Path.Combine(
-                dataDir,
-                tableFolder.Folder.Replace('/', Path.DirectorySeparatorChar));
+            var tableDir = ResolveCatalogTableDirectory(dataDir, tableFolder.Folder);
             var tableJsonPath = Path.Combine(tableDir, "table.json");
 
             if (!File.Exists(tableJsonPath))
@@ -176,7 +174,8 @@ public sealed class BlobExtractor
             return new BlobExtractionResult(0, 0, 0, sw.Elapsed);
         }
 
-        Directory.CreateDirectory(request.OutputDirectory);
+        var outputDirectory = Path.GetFullPath(request.OutputDirectory);
+        Directory.CreateDirectory(outputDirectory);
 
         var totalExtracted = 0;
         var totalBytes = 0L;
@@ -213,7 +212,7 @@ public sealed class BlobExtractor
                         value.Binary,
                         rowIndex,
                         request.Table,
-                        request.OutputDirectory,
+                        outputDirectory,
                         suffix,
                         ct).ConfigureAwait(false);
                 }
@@ -223,7 +222,7 @@ public sealed class BlobExtractor
                         value.Value,
                         rowIndex,
                         request.Table,
-                        request.OutputDirectory);
+                        outputDirectory);
                 }
                 else
                 {
@@ -264,16 +263,14 @@ public sealed class BlobExtractor
             string.Equals(entry.Schema, schemaName, StringComparison.Ordinal)
             && string.Equals(entry.Table, tableName, StringComparison.Ordinal));
 
+        var dataRoot = Path.GetFullPath(Path.Combine(catalogPath, InterchangeFormat.DataDirectory));
         var relativeFolder = folder is null
             ? Path.Combine(
                 NameEncoder.EncodeSegment(schemaName),
                 NameEncoder.EncodeSegment(tableName))
-            : folder.Folder.Replace('/', Path.DirectorySeparatorChar);
+            : folder.Folder;
 
-        var tableDir = Path.Combine(
-            catalogPath,
-            InterchangeFormat.DataDirectory,
-            relativeFolder);
+        var tableDir = ResolveCatalogTableDirectory(dataRoot, relativeFolder);
         if (!Directory.Exists(tableDir))
         {
             throw new InterchangeFormatException(
@@ -291,7 +288,9 @@ public sealed class BlobExtractor
         string suffix,
         CancellationToken ct)
     {
-        var outputPath = Path.Combine(outputDir, $"{tableStem}_{rowIndex}.{suffix}");
+        var safeStem = NameEncoder.EncodeSegment(tableStem);
+        var safeSuffix = ValidateSuffix(suffix);
+        var outputPath = ResolveContainedOutputPath(outputDir, $"{safeStem}_{rowIndex}.{safeSuffix}");
         await using var source = payload.OpenRead();
         await using var destination = new FileStream(
             outputPath,
@@ -318,10 +317,47 @@ public sealed class BlobExtractor
         }
 
         var suffix = DetectFormatFromBytes(bytes);
-        var outputPath = Path.Combine(outputDir, $"{tableStem}_{rowIndex}.{suffix}");
+        var safeStem = NameEncoder.EncodeSegment(tableStem);
+        var outputPath = ResolveContainedOutputPath(outputDir, $"{safeStem}_{rowIndex}.{suffix}");
         File.WriteAllBytes(outputPath, bytes);
 
         return (outputPath, bytes.Length);
+    }
+
+    private static string ResolveCatalogTableDirectory(string dataRoot, string relativeFolder)
+    {
+        if (string.IsNullOrWhiteSpace(relativeFolder) || Path.IsPathRooted(relativeFolder) || relativeFolder.Contains(':'))
+            throw new InterchangeFormatException($"Catalog table folder is not a relative path: {relativeFolder}");
+
+        var normalized = relativeFolder.Replace('/', Path.DirectorySeparatorChar);
+        var root = Path.GetFullPath(dataRoot).TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar)
+                   + Path.DirectorySeparatorChar;
+        var candidate = Path.GetFullPath(Path.Combine(root, normalized));
+        var comparison = OperatingSystem.IsWindows() ? StringComparison.OrdinalIgnoreCase : StringComparison.Ordinal;
+        if (!candidate.StartsWith(root, comparison))
+            throw new InterchangeFormatException($"Catalog table folder escapes the data directory: {relativeFolder}");
+
+        return candidate;
+    }
+
+    private static string ResolveContainedOutputPath(string outputDir, string fileName)
+    {
+        var root = Path.GetFullPath(outputDir).TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar)
+                   + Path.DirectorySeparatorChar;
+        var candidate = Path.GetFullPath(Path.Combine(root, fileName));
+        var comparison = OperatingSystem.IsWindows() ? StringComparison.OrdinalIgnoreCase : StringComparison.Ordinal;
+        if (!candidate.StartsWith(root, comparison))
+            throw new InterchangeFormatException($"Extraction output escapes the requested directory: {fileName}");
+
+        return candidate;
+    }
+
+    private static string ValidateSuffix(string suffix)
+    {
+        if (string.IsNullOrWhiteSpace(suffix) || suffix.Any(c => !char.IsLetterOrDigit(c)))
+            throw new InterchangeFormatException($"Invalid binary format suffix: {suffix}");
+
+        return suffix;
     }
 
     private static string DetectFormatFromBytes(byte[] bytes)

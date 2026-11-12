@@ -271,6 +271,12 @@ public sealed class TableSelectionPresetStore : ITableSelectionPresetStore
         }
         catch (Exception ex)
         {
+            if (ex is JsonException)
+            {
+                try { AtomicFileWriter.Quarantine(_storePath); }
+                catch (Exception quarantineEx) { Log.Warning(quarantineEx, "[TableSelectionPresetStore.Load] Could not quarantine corrupt file {Path}", _storePath); }
+            }
+
             Log.Warning(
                 ex,
                 "[TableSelectionPresetStore.Load] Failed to load presets from {Path}, starting fresh",
@@ -294,7 +300,7 @@ public sealed class TableSelectionPresetStore : ITableSelectionPresetStore
                 json = JsonSerializer.Serialize(snapshot, JsonOptions);
             }
 
-            File.WriteAllText(_storePath, json);
+            AtomicFileWriter.WriteAllText(_storePath, json);
         }
         catch (Exception ex)
         {

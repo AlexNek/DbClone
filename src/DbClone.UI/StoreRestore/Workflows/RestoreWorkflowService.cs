@@ -47,7 +47,8 @@ public sealed class RestoreWorkflowService : IWorkflowService<RestoreRequest, Re
             WasCancelled: result.Outcome == ERestoreOutcome.Cancelled,
             WasRefused: result.Outcome == ERestoreOutcome.Refused,
             RowCountMismatches: result.RowCountMismatches,
-            LastCompletedChunk: result.LastCompletedChunk);
+            LastCompletedChunk: result.LastCompletedChunk,
+            Issues: result.Issues);
     }
 
     private static string BuildMessage(InterchangeRestoreResult result)
@@ -58,7 +59,8 @@ public sealed class RestoreWorkflowService : IWorkflowService<RestoreRequest, Re
             ERestoreOutcome.CompletedWithIssues => $"Restore completed with issues: {result.ObjectsApplied} objects",
             ERestoreOutcome.Cancelled => $"Restore cancelled after {result.ObjectsApplied} objects",
             ERestoreOutcome.Refused => "Restore refused — target database not empty",
-            _ => "Unknown outcome"
+            ERestoreOutcome.Failed => $"Restore failed: {result.Issues.Count} issue(s)",
+            _ => "Restore outcome unavailable"
         };
     }
 }

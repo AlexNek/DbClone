@@ -138,22 +138,8 @@ public sealed class ConnectionImportService : IConnectionImportService
         var warnings = new List<ImportWarning>();
 
         if (string.IsNullOrEmpty(connection.Password))
-        {
-            if (connection.Options.ContainsKey("SupabaseProjectRef"))
-            {
-                var projectRef = connection.Options["SupabaseProjectRef"];
-                warnings.Add(
-                    new ImportWarning(
-                        EWarningLevel.Warning,
-                        $"Password is missing. Find it in Supabase Dashboard → Settings → Database → Connection string (https://supabase.com/dashboard/project/{projectRef}/settings/database)",
-                        "Password"));
-            }
-            else
-            {
-                warnings.Add(
-                    new ImportWarning(EWarningLevel.Warning, "Password is missing.", "Password"));
-            }
-        }
+            warnings.Add(
+                new ImportWarning(EWarningLevel.Warning, "Password is missing.", "Password"));
 
         if (string.IsNullOrEmpty(connection.Database))
             warnings.Add(

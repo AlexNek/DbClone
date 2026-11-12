@@ -55,13 +55,23 @@ public sealed class ComparisonService : IComparisonService
     {
         var sourceTarget = _targetFactory.Create(source);
         var destTarget = _targetFactory.Create(destination);
-        var adapter = _targetFactory.ResolveAdapter(source.Engine);
-        var metadata = adapter.CreateMetadataSource(sourceTarget);
-        var comparer = adapter.CreateComparer();
+        var sourceAdapter = _targetFactory.ResolveAdapter(source.Engine);
+        var destinationAdapter = _targetFactory.ResolveAdapter(destination.Engine);
+        if (!string.Equals(sourceAdapter.Info.Dialect, destinationAdapter.Info.Dialect, StringComparison.OrdinalIgnoreCase))
+        {
+            log(ELogLevel.Error,
+                $"Comparison rejected: source engine '{sourceAdapter.Info.Dialect}' does not match destination engine '{destinationAdapter.Info.Dialect}'.");
+            return new CompareDatabasesResult(
+                Items: [], TotalIdentical: 0, TotalNotices: 0, TotalDifferent: 0,
+                TotalMissingSource: 0, TotalMissingDest: 0, TotalSkipped: 0, TotalErrors: 1);
+        }
+
+        var metadata = sourceAdapter.CreateMetadataSource(sourceTarget);
+        var comparer = sourceAdapter.CreateComparer();
         // The seven provider-neutral comparers arrive from the host; the engine-specific ones
         // (TableDdlComparer today) come from the adapter, appended last — the same set in the
         // same order the host registered before adapters became plugins (refactors/09 P6).
-        var modelComparers = _modelComparers.Concat(adapter.CreateModelComparers()).ToList();
+        var modelComparers = _modelComparers.Concat(sourceAdapter.CreateModelComparers()).ToList();
 
         // ─── Log effective compare settings ───
         log(ELogLevel.Info,
@@ -93,7 +103,7 @@ public sealed class ComparisonService : IComparisonService
             TotalTables = 0
         });
 
-        var destMetadata = adapter.CreateMetadataSource(destTarget);
+        var destMetadata = destinationAdapter.CreateMetadataSource(destTarget);
         log(ELogLevel.Info,
             $"Reading database model from destination ({destination.Host}:{destination.Port}/{destination.DatabaseName})...");
 

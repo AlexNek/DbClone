@@ -3,7 +3,7 @@
 Store writes a connected database into a **catalog** — a folder of files on disk. Restore reads such a folder back into a connected database. The two operations are the file-based route, next to the live database-to-database [Copy modes](copy-modes/overview.md): you can archive a database, move it between machines that cannot talk to each other directly, or inspect what a source contains before applying anything.
 
 !!! info "Store / Restore is not a mode"
-    The mode switch stays on **Copy** or **Compare**. Store and Restore are operations you start from the connection panels; while one runs, the progress area, the log, and the notification banner show its state, and they return to the active mode when it finishes.
+    The mode switch stays on **Copy** or **Compare**. Store and Restore are operations you start from the connection panels; while one runs, the log and notification banner show its state, and the progress area remains indeterminate because row, byte, and resume checkpoints are not yet exposed by the interchange product.
 
 ## Where the controls are
 
@@ -13,7 +13,7 @@ Store writes a connected database into a **catalog** — a folder of files on di
 | **Restore** button | Below the **destination** connection panel — the database a catalog is applied to |
 | **View relationships** | Below **both** connection panels — the source panel's button opens the source database's relationships, the destination panel's the target's. Either one reads that database live, so nothing has to be stored first. The folder button beside **Store** opens any catalog already on disk — see [Viewing the relationships](#viewing-the-relationships) |
 | **Store Options** | Toolbar popup: catalog location, subfolder pattern, data inclusion, packing |
-| **Pause / Resume**, **Stop** | Toolbar, enabled while a Store or Restore operation runs |
+| **Stop** | Toolbar, enabled while a Store or Restore operation runs; Store and Restore do not yet support pausing or resuming a partial catalog |
 | ++ctrl+shift+s++ / ++ctrl+shift+r++ | Start Store / Start Restore — see [Keyboard Shortcuts](keyboard-shortcuts.md) |
 
 Both operations need a connection that names a **specific database**. A connection that points at a server only is refused with a banner saying so; open the [Connection Manager](connections/managing-connections.md) and pick the database first.

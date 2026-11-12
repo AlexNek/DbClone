@@ -25,6 +25,8 @@ public sealed class CreateFunctionsStage : ICopyStage
     /// <inheritdoc />
     public int Order => 68;
 
+    public bool IsCritical => false;
+
     /// <summary>Initializes a new instance.</summary>
     public CreateFunctionsStage(PgDdlGenerator ddl, ILoggerFactory loggerFactory)
     {
@@ -55,7 +57,7 @@ public sealed class CreateFunctionsStage : ICopyStage
 
         var model = context.SourceModel!;
         var logger = _loggerFactory.CreateLogger<CreateFunctionsStage>();
-        var conn = (NpgsqlConnection)context.DestinationConnection!;
+        var conn = PgCopyConnection.Require(context.DestinationConnection, "destination");
         var executor = new PgSqlExecutor(conn, _loggerFactory.CreateLogger<PgSqlExecutor>());
 
         // Disable body checking so functions referencing not-yet-created objects

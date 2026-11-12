@@ -250,6 +250,8 @@ public sealed class StubAdapter : IDatabaseAdapter
 
         public int Order => _order;
 
+        public bool IsCritical => false;
+
         public Task<StageResult> ExecuteAsync(CopyContext context, CancellationToken cancellationToken = default) =>
             Task.FromResult(new StageResult(Name, Success: true, TimeSpan.FromMilliseconds(1), ObjectsProcessed: 0, Details: []));
     }

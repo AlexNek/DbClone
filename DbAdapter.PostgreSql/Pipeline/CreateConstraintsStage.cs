@@ -23,6 +23,8 @@ public sealed class CreateConstraintsStage : ICopyStage
     /// <inheritdoc />
     public int Order => 100;
 
+    public bool IsCritical => false;
+
     /// <summary>Initializes a new instance.</summary>
     public CreateConstraintsStage(PgDdlGenerator ddl, ILoggerFactory loggerFactory)
     {

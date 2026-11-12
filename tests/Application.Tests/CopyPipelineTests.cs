@@ -149,10 +149,13 @@ public class CopyPipelineTests
 
         public int Order { get; }
 
+        public bool IsCritical { get; }
+
         public TestStage(ECopyStage name, int order, bool success, TimeSpan delay = default)
         {
             Name = name;
             Order = order;
+            IsCritical = name is ECopyStage.Connect or ECopyStage.DetectCapabilities or ECopyStage.ReadMetadata or ECopyStage.CopyData;
             _success = success;
             _delay = delay;
         }

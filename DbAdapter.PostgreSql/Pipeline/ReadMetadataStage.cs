@@ -20,6 +20,8 @@ public sealed class ReadMetadataStage : ICopyStage
     /// <inheritdoc />
     public int Order => 30;
 
+    public bool IsCritical => true;
+
     /// <summary>Initializes a new instance.</summary>
     /// <remarks>
     /// The logger factory is kept as a dependency although this stage no longer reads

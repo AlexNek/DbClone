@@ -206,24 +206,18 @@ public sealed class InterchangeService : IInterchangeService
 
         _logger.LogInformation("Plan restore started: catalog={CatalogPath}", catalogPath);
 
-        // Open catalog to read metadata — no adapter needed for planning
-        await using var reader = await CatalogReader.OpenAsync(catalogPath, cancellationToken);
-
-        var schemas = await reader.ReadSectionAsync<SchemaDefinition>("schemas", cancellationToken);
-        var tables = await reader.ReadSectionAsync<TableDefinition>("tables", cancellationToken);
-        var views = await reader.ReadSectionAsync<ViewDefinition>("views", cancellationToken);
-        var routines = await reader.ReadSectionAsync<RoutineDefinition>("routines", cancellationToken);
-        var sequences = await reader.ReadSectionAsync<SequenceDefinition>("sequences", cancellationToken);
-
-        var totalObjects = schemas.Count + tables.Count + views.Count + routines.Count + sequences.Count;
-        var stages = 6; // schemas, sequences, tables, views, routines, data
+        var adapter = _targetFactory.ResolveAdapter(null);
+        var planner = DatabaseInterchangeRuntime.Create(adapter).CreatePlanner();
+        var plan = await planner.PlanAsync(catalogPath, cancellationToken);
 
         return new InterchangePlanView(
-            Stages: stages,
-            ObjectCount: totalObjects,
-            RefusedObjectCount: 0, // TODO: Check adapter capabilities when available
-            RefusedObjects: [], // TODO: Check adapter capabilities when available
-            DependencyCycles: []); // TODO: Implement cycle detection when DependencyPlan is available
+            Stages: plan.Stages.Count,
+            ObjectCount: plan.TotalObjects,
+            RefusedObjectCount: plan.RefusedObjects.Count,
+            RefusedObjects: plan.RefusedObjects,
+            DependencyCycles: plan.Cycles
+                .Select(cycle => string.Join(" -> ", cycle))
+                .ToList());
     }
 
     /// <inheritdoc />
@@ -328,53 +322,18 @@ public sealed class InterchangeService : IInterchangeService
         var manifest = reader.Manifest;
         var index = reader.Index;
 
-        // Read sections to count objects
-        var schemas = await reader.ReadSectionAsync<SchemaDefinition>("schemas", cancellationToken);
-        var tables = await reader.ReadSectionAsync<TableDefinition>("tables", cancellationToken);
-        var views = await reader.ReadSectionAsync<ViewDefinition>("views", cancellationToken);
-        var routines = await reader.ReadSectionAsync<RoutineDefinition>("routines", cancellationToken);
-        var sequences = await reader.ReadSectionAsync<SequenceDefinition>("sequences", cancellationToken);
-        var extensions = await reader.ReadSectionAsync<ExtensionDefinition>("extensions", cancellationToken);
-
-        // R9: Inspection never re-reads data. Row counts come from the manifest, not from iterating rows.
-        // The manifest's counts are recorded during the write pass (R8), so they are truthful.
         var totalRows = manifest.Counts.Rows;
         var totalChunks = manifest.Counts.Chunks;
-
-        // Count preservation levels
-        var preservationCounts = new Dictionary<string, int>
-        {
-            ["Full"] = tables.Count + views.Count + routines.Count,
-            ["NativeOnly"] = 0,
-            ["Omitted"] = 0,
-        };
-
-        // Count security objects
-        var securityCounts = new Dictionary<string, int>
-        {
-            ["Roles"] = 0,
-            ["Ownerships"] = 0,
-            ["Policies"] = 0,
-            ["Grants"] = 0,
-        };
-
-        var producerIssues = new List<InterchangeIssueView>(); // Manifest doesn't carry producer issues in v1
-
-        await Task.CompletedTask;
 
         return new CatalogSummary(
             FormatVersion: manifest.FormatVersion,
             Producer: manifest.Producer,
-            ExportTime: null, // Manifest doesn't carry export time in v1
             IsComplete: manifest.Complete,
             Sections: index.Sections.Count,
             Tables: index.TableCount,
             Rows: totalRows,
             Chunks: totalChunks,
-            Bytes: manifest.Files.Sum(f => f.Bytes),
-            PreservationCounts: preservationCounts,
-            SecurityCounts: securityCounts,
-            ProducerIssues: producerIssues);
+            Bytes: manifest.Files.Sum(f => f.Bytes));
     }
 
     /// <inheritdoc />
@@ -831,6 +790,7 @@ public sealed class InterchangeService : IInterchangeService
 
         var outcome = result.Success switch
         {
+            false when issues.Any(i => string.Equals(i.Code, "RestoreRefused", StringComparison.Ordinal)) => ERestoreOutcome.Refused,
             false => ERestoreOutcome.Failed,
             true when issues.Count > 0 || report is { Passed: false } => ERestoreOutcome.CompletedWithIssues,
             _ => ERestoreOutcome.Success,
@@ -864,8 +824,8 @@ public sealed class InterchangeService : IInterchangeService
             MapSeverity(issue.Severity),
             issue.Code,
             issue.Message,
-            string.Empty,
-            string.Empty);
+            issue.TargetRef == default ? string.Empty : issue.TargetRef.ToString(),
+            issue.Details);
 
     private static EInterchangeSeverity MapSeverity(EIssueSeverity severity) => severity switch
     {

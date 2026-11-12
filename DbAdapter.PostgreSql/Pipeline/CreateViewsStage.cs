@@ -27,6 +27,8 @@ public sealed class CreateViewsStage : ICopyStage
     /// <inheritdoc />
     public int Order => 120;
 
+    public bool IsCritical => false;
+
     /// <summary>Initializes a new instance.</summary>
     public CreateViewsStage(PgDdlGenerator ddl, ILoggerFactory loggerFactory)
     {
@@ -57,7 +59,7 @@ public sealed class CreateViewsStage : ICopyStage
 
         var model = context.SourceModel!;
         var logger = _loggerFactory.CreateLogger<CreateViewsStage>();
-        var conn = (NpgsqlConnection)context.DestinationConnection!;
+        var conn = PgCopyConnection.Require(context.DestinationConnection, "destination");
         var executor = new PgSqlExecutor(conn, _loggerFactory.CreateLogger<PgSqlExecutor>());
 
         var created = 0;

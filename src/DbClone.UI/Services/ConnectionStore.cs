@@ -164,10 +164,10 @@ public sealed class ConnectionStore : IConnectionStore
             var plain = ProtectedData.Unprotect(cipher, null, DataProtectionScope.CurrentUser);
             return Encoding.UTF8.GetString(plain);
         }
-        catch
+        catch (Exception ex)
         {
-            // Decryption failure (e.g. data was encrypted on another machine) — return empty
-            return string.Empty;
+            Log.Warning(ex, "[ConnectionStore] DPAPI password decryption failed");
+            throw new CryptographicException("A saved connection password could not be decrypted on this Windows user profile.", ex);
         }
     }
 
@@ -201,6 +201,13 @@ public sealed class ConnectionStore : IConnectionStore
         }
         catch (Exception ex)
         {
+            if (ex is JsonException or CryptographicException)
+            {
+                try { AtomicFileWriter.Quarantine(StorePath); }
+                catch (Exception quarantineEx) { Log.Warning(quarantineEx, "[ConnectionStore.Load] Could not quarantine corrupt file {Path}", StorePath); }
+                Log.Warning("[ConnectionStore.Load] Corrupt or unavailable encrypted data was quarantined at {Path}", StorePath);
+            }
+
             Log.Warning(
                 ex,
                 "[ConnectionStore.Load] Failed to load connections from {Path}, starting fresh",
@@ -221,7 +228,7 @@ public sealed class ConnectionStore : IConnectionStore
                 dtos = _connections.Select(ConnectionDto.FromModel).ToList();
 
             var json = JsonSerializer.Serialize(dtos, JsonOptions);
-            File.WriteAllText(StorePath, json);
+            AtomicFileWriter.WriteAllText(StorePath, json);
         }
         catch (Exception ex)
         {

@@ -23,18 +23,9 @@ public static class PgConnectionHelper
         ILogger logger,
         CancellationToken cancellationToken = default)
     {
-        var conn = await EnsureOpenAsync(
-                       context.DestinationConnection as NpgsqlConnection,
-                       context.DestinationConnectionString,
-                       ECompareSide.Destination,
-                       logger,
-                       cancellationToken);
-
-        // Update context if we created a new connection
-        if (!ReferenceEquals(conn, context.DestinationConnection))
-            context.DestinationConnection = conn;
-
-        return conn;
+        var handle = context.DestinationConnection as PgCopyConnection
+                     ?? throw new InvalidOperationException("Destination connection is not a PostgreSQL copy handle.");
+        return await EnsureOpenAsync(handle, ECompareSide.Destination, logger, cancellationToken);
     }
 
     /// <summary>
@@ -46,18 +37,9 @@ public static class PgConnectionHelper
         ILogger logger,
         CancellationToken cancellationToken = default)
     {
-        var conn = await EnsureOpenAsync(
-                       context.SourceConnection as NpgsqlConnection,
-                       context.SourceConnectionString,
-                       ECompareSide.Source,
-                       logger,
-                       cancellationToken);
-
-        // Update context if we created a new connection
-        if (!ReferenceEquals(conn, context.SourceConnection))
-            context.SourceConnection = conn;
-
-        return conn;
+        var handle = context.SourceConnection as PgCopyConnection
+                     ?? throw new InvalidOperationException("Source connection is not a PostgreSQL copy handle.");
+        return await EnsureOpenAsync(handle, ECompareSide.Source, logger, cancellationToken);
     }
 
     /// <summary>
@@ -91,40 +73,10 @@ public static class PgConnectionHelper
 
             try
             {
-                var oldConn = isSource
-                                  ? context.SourceConnection as NpgsqlConnection
-                                  : context.DestinationConnection as NpgsqlConnection;
-                if (oldConn is not null)
-                {
-                    try
-                    {
-                        await oldConn.CloseAsync();
-                    }
-                    catch
-                    {
-                    }
-
-                    try
-                    {
-                        await oldConn.DisposeAsync();
-                    }
-                    catch
-                    {
-                    }
-                }
-            }
-            catch
-            {
-            }
-
-            if (isSource) context.SourceConnection = null;
-            else context.DestinationConnection = null;
-
-            try
-            {
-                return isSource
-                           ? await EnsureSourceOpenAsync(context, logger, ct)
-                           : await EnsureDestinationOpenAsync(context, logger, ct);
+                var handle = (isSource ? context.SourceConnection : context.DestinationConnection) as PgCopyConnection
+                             ?? throw new InvalidOperationException($"{side} connection handle is missing.");
+                await handle.ReopenAsync(ct);
+                return handle.Current;
             }
             catch (Exception reopenEx)
             {
@@ -135,63 +87,25 @@ public static class PgConnectionHelper
     }
 
     private static async Task<NpgsqlConnection> EnsureOpenAsync(
-        NpgsqlConnection? connection,
-        string? connectionString,
+        PgCopyConnection handle,
         ECompareSide side,
         ILogger logger,
         CancellationToken cancellationToken)
     {
-        // Connection is already open and usable (guard against disposed)
         try
         {
-            if (connection is { State: ConnectionState.Open })
-                return connection;
+            if (handle.Current.State is ConnectionState.Open)
+                return handle.Current;
         }
         catch (ObjectDisposedException)
         {
-            // Connection was disposed (e.g. by PgDataCopier internal reopen) — treat as dead
             logger.LogWarning("{Side} connection was disposed, reopening", side);
         }
 
-        // Try to close existing connection if it's not already closed
-        if (connection is not null)
-        {
-            try
-            {
-                try
-                {
-                    if (connection.State is not ConnectionState.Closed)
-                    {
-                        logger.LogWarning(
-                            "{Side} connection is in {State} state, attempting to reopen",
-                            side,
-                            connection.State);
-                    }
-                }
-                catch (ObjectDisposedException)
-                {
-                    // Already disposed, skip close
-                }
-
-                await connection.CloseAsync();
-            }
-            catch
-            {
-                // Ignore errors on broken/disposed connections
-            }
-        }
-
-        // Reopen using stored connection string
-        if (string.IsNullOrEmpty(connectionString))
-            throw new InvalidOperationException(
-                $"Cannot reopen {side} connection: no connection string available");
-
         logger.LogInformation("Reopening {Side} connection", side);
-
-        var newConn = new NpgsqlConnection(connectionString);
-        await newConn.OpenAsync(cancellationToken);
-
+        await handle.ReopenAsync(cancellationToken);
         logger.LogInformation("{Side} connection reopened successfully", side);
-        return newConn;
+        return handle.Current;
     }
+
 }

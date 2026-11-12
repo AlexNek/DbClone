@@ -1,3 +1,5 @@
+using DbClone.Application.Interchange;
+
 namespace DbClone.UI.StoreRestore.Workflows;
 
 /// <summary>
@@ -13,4 +15,5 @@ public sealed record RestoreResult(
     bool WasCancelled,
     bool WasRefused,
     int RowCountMismatches,
-    string? LastCompletedChunk);
+    string? LastCompletedChunk,
+    IReadOnlyList<InterchangeIssueView>? Issues = null);

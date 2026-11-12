@@ -29,6 +29,8 @@ public sealed class DatabaseAdapterCatalog : IAdapterCatalog
 
         var loaded = Discover(pluginDirectory, loggerFactory, _logger);
         All = AcceptNonDuplicates(loaded, _logger);
+        if (All.Count == 0)
+            _logger.LogError("No database adapters were loaded from '{Directory}'. Database operations are unavailable until a plugin is installed.", pluginDirectory);
 
         Formats = All
             .SelectMany(adapter => adapter.Syntax.Formats)

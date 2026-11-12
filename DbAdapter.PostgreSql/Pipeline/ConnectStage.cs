@@ -1,3 +1,4 @@
+using DbAdapter.PostgreSql.Execution;
 using DbAdapter.PostgreSql.Platforms;
 
 using Microsoft.Extensions.Logging;
@@ -22,6 +23,8 @@ public sealed class ConnectStage : ICopyStage
 
     /// <inheritdoc />
     public int Order => 10;
+
+    public bool IsCritical => true;
 
     /// <summary>
     /// Initializes a new instance of the <see cref="ConnectStage"/> class.
@@ -102,10 +105,8 @@ public sealed class ConnectStage : ICopyStage
                 details);
         }
 
-        context.SourceConnection = sourceConn;
-        context.DestinationConnection = destConn;
-        context.SourceConnectionString = sourceConnStr;
-        context.DestinationConnectionString = destConnStr;
+        context.SourceConnection = new PgCopyConnection(sourceConn, sourceConnStr);
+        context.DestinationConnection = new PgCopyConnection(destConn, destConnStr);
 
         // Resolve platform definitions for both connections
         context.SourcePlatformResolution = _platformResolver.Resolve(
@@ -128,16 +129,16 @@ public sealed class ConnectStage : ICopyStage
         // Sending SELECT 1 between stages prevents the proxy from considering the connection idle.
         context.ConnectionHeartbeat = async (ctx, ct) =>
             {
-                if (ctx.SourceConnection is NpgsqlConnection src
-                    && src.State == System.Data.ConnectionState.Open)
+                var src = PgCopyConnection.Require(ctx.SourceConnection, "source");
+                if (src.State == System.Data.ConnectionState.Open)
                 {
                     await using var cmd = new NpgsqlCommand("SELECT 1", src);
                     cmd.CommandTimeout = 10;
                     await cmd.ExecuteScalarAsync(ct);
                 }
 
-                if (ctx.DestinationConnection is NpgsqlConnection dst
-                    && dst.State == System.Data.ConnectionState.Open)
+                var dst = PgCopyConnection.Require(ctx.DestinationConnection, "destination");
+                if (dst.State == System.Data.ConnectionState.Open)
                 {
                     await using var cmd = new NpgsqlCommand("SELECT 1", dst);
                     cmd.CommandTimeout = 10;

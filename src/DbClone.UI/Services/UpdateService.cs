@@ -2,6 +2,7 @@ using System.Diagnostics;
 using System.IO;
 using System.Net.Http;
 using System.Reflection;
+using System.Security.Cryptography;
 using System.Text.Json;
 using System.Threading.Tasks;
 using System.Xml;
@@ -242,6 +243,26 @@ public sealed class UpdateService : IUpdateService
                         new InstallProgressEventArgs(InstallProgressState.DownloadProgress, progressPercent: percent));
                 }
             }
+        }
+
+        await file.FlushAsync().ConfigureAwait(false);
+        file.Close();
+
+        var expectedText = await http.GetStringAsync(url + ".sha256").ConfigureAwait(false);
+        var expected = expectedText
+            .Split((char[]?)null, StringSplitOptions.RemoveEmptyEntries)
+            .FirstOrDefault(token => token.Length == 64 && token.All(Uri.IsHexDigit));
+        if (expected is null)
+            throw new CryptographicException("The release did not provide a valid installer SHA-256 checksum.");
+
+        await using var downloaded = File.OpenRead(target);
+        var actual = Convert.ToHexStringLower(await SHA256.HashDataAsync(downloaded).ConfigureAwait(false));
+        if (!CryptographicOperations.FixedTimeEquals(
+                Convert.FromHexString(expected),
+                Convert.FromHexString(actual)))
+        {
+            File.Delete(target);
+            throw new CryptographicException("The downloaded installer checksum does not match the release metadata.");
         }
 
         return target;

@@ -203,7 +203,7 @@ public class CreateTablesStageTests
         {
             Request = request,
             SourceModel = model,
-            DestinationConnection = DestConnection
+            DestinationConnection = new PgCopyConnection(DestConnection, string.Empty)
         };
     }
 

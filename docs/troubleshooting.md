@@ -187,17 +187,17 @@ If `false`, apply Solution B to `template1` as well.
 
 ## Log Files
 
-DbClone writes detailed logs to a `logs` folder in your roaming profile:
+DbClone writes detailed logs to a `logs` folder in your local profile:
 
 ```
-%APPDATA%\DbClone\logs\
+%LOCALAPPDATA%\DbClone\logs\
 ```
 
-Typical path: `C:\Users\{you}\AppData\Roaming\DbClone\logs\`
+Typical path: `C:\Users\{you}\AppData\Local\DbClone\logs\`
 
 (When running a Debug build from the source tree, logs are written next to the executable instead.)
 
-Log files are rotated daily. Each contains:
+Log files are rotated daily and capped in size: at most ten files of 10 MB each — about 100 MB in total — so a long copy cannot fill the disk. When the cap is reached the oldest file is removed first, and a run that outgrows one file continues in a numbered one. Each file contains:
 
 - Full pipeline execution trace
 - SQL statements executed (in Debug mode)

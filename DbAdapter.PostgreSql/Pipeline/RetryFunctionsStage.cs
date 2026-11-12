@@ -26,6 +26,8 @@ public sealed class RetryFunctionsStage : ICopyStage
     /// <inheritdoc />
     public int Order => 115;
 
+    public bool IsCritical => false;
+
     /// <summary>Initializes a new instance.</summary>
     public RetryFunctionsStage(PgDdlGenerator ddl, ILoggerFactory loggerFactory)
     {
@@ -68,7 +70,7 @@ public sealed class RetryFunctionsStage : ICopyStage
 
         var model = context.SourceModel!;
         var logger = _loggerFactory.CreateLogger<RetryFunctionsStage>();
-        var conn = (NpgsqlConnection)context.DestinationConnection!;
+        var conn = PgCopyConnection.Require(context.DestinationConnection, "destination");
         var executor = new PgSqlExecutor(conn, _loggerFactory.CreateLogger<PgSqlExecutor>());
 
         var stmts = _ddl.GenerateCreateFunctions(model.Functions);

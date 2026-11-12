@@ -94,8 +94,17 @@ public sealed class ImportPlanner
     }
 
     /// <summary>
-    /// Plans an import operation.
+    /// Plans an import from a catalog without requiring a target connection. The adapter is still
+    /// retained by this planner for capability-aware planning as those decisions are added.
     /// </summary>
+    public Task<ImportPlan> PlanAsync(string catalogDirectory, CancellationToken ct = default) =>
+        PlanAsync(new ImportRequest
+        {
+            CatalogDirectory = catalogDirectory,
+            Target = new DatabaseTarget(string.Empty, string.Empty),
+        }, ct);
+
+
     /// <param name="request">The import request.</param>
     /// <param name="ct">Cancellation token.</param>
     /// <returns>The import plan.</returns>
@@ -189,9 +198,23 @@ public sealed class SnapshotImporter
         // Open database writer
         await using var writer = _adapter.OpenWriter(request.Target, request.Options);
 
-        // Ensure target is empty
+        // Ensure target is empty. A non-empty target is a deliberate refusal, not an import failure.
         progress?.Report(new InterchangeProgress { Stage = "Checking target", Percentage = 10 });
-        await writer.EnsureEmptyTargetAsync(ct);
+        try
+        {
+            await writer.EnsureEmptyTargetAsync(ct);
+        }
+        catch (InvalidOperationException ex)
+        {
+            return new ImportResult
+            {
+                Success = false,
+                Issues = [new InterchangeIssue(
+                    "RestoreRefused",
+                    EIssueSeverity.Warning,
+                    ex.Message)]
+            };
+        }
 
         // Every section is read before any of them is applied. Objects carry their qualified-name
         // reference (Ref), so no separate name resolution is needed.

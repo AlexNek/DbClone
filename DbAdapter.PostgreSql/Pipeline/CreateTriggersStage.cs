@@ -25,6 +25,8 @@ public sealed class CreateTriggersStage : ICopyStage
     /// <inheritdoc />
     public int Order => 140;
 
+    public bool IsCritical => false;
+
     /// <summary>Initializes a new instance.</summary>
     public CreateTriggersStage(PgDdlGenerator ddl, ILoggerFactory loggerFactory)
     {
@@ -55,7 +57,7 @@ public sealed class CreateTriggersStage : ICopyStage
 
         var model = context.SourceModel!;
         var logger = _loggerFactory.CreateLogger<CreateTriggersStage>();
-        var conn = (NpgsqlConnection)context.DestinationConnection!;
+        var conn = PgCopyConnection.Require(context.DestinationConnection, "destination");
         var executor = new PgSqlExecutor(conn, _loggerFactory.CreateLogger<PgSqlExecutor>());
 
         // Create each trigger individually so one failure (e.g. missing table or

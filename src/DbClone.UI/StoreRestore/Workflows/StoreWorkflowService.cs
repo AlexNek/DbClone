@@ -62,7 +62,8 @@ public sealed class StoreWorkflowService : IWorkflowService<StoreRequest, StoreR
             SummaryPath: result.SummaryPath,
             SummaryRequested: summaryRequested,
             SqlScripts: result.SqlScripts,
-            SqlScriptsRequested: sqlScriptsRequested);
+            SqlScriptsRequested: sqlScriptsRequested,
+            Issues: result.Issues);
     }
 
     private static string BuildMessage(InterchangeStoreResult result)

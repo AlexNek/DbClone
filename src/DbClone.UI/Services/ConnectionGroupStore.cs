@@ -90,6 +90,12 @@ public sealed class ConnectionGroupStore : IConnectionGroupStore
         }
         catch (Exception ex)
         {
+            if (ex is JsonException)
+            {
+                try { AtomicFileWriter.Quarantine(StorePath); }
+                catch (Exception quarantineEx) { Log.Warning(quarantineEx, "[ConnectionGroupStore.Load] Could not quarantine corrupt file {Path}", StorePath); }
+            }
+
             Log.Warning(
                 ex,
                 "[ConnectionGroupStore.Load] Failed to load groups from {Path}",
@@ -110,7 +116,7 @@ public sealed class ConnectionGroupStore : IConnectionGroupStore
                 snapshot = [.. _groups];
 
             var json = JsonSerializer.Serialize(snapshot, JsonOptions);
-            File.WriteAllText(StorePath, json);
+            AtomicFileWriter.WriteAllText(StorePath, json);
         }
         catch (Exception ex)
         {

@@ -90,7 +90,7 @@ public partial class App : System.Windows.Application, IDisposable
             // D10: the fallback's single file never outlives the session that wrote it.
             RelationshipViewFile.TryDelete();
 
-            _host = BuildHost();
+            _host = BuildHost(settingsService);
 
             Log.Information("**** DbClone starting up ****");
             _host.StartAsync().GetAwaiter().GetResult();
@@ -129,9 +129,11 @@ public partial class App : System.Windows.Application, IDisposable
         }
     }
 
-    private static IHost BuildHost()
+    private static IHost BuildHost(SettingsService settingsService)
     {
+        ArgumentNullException.ThrowIfNull(settingsService);
         return Host.CreateDefaultBuilder()
+            .UseContentRoot(AppContext.BaseDirectory)
             .UseEnvironment(
 #if DEBUG
                 "Development"
@@ -139,12 +141,6 @@ public partial class App : System.Windows.Application, IDisposable
                 "Production"
 #endif
             )
-            .ConfigureAppConfiguration((context, config) =>
-                {
-                    config.SetBasePath(AppContext.BaseDirectory);
-                    config.AddJsonFile("appsettings.json", optional: false, reloadOnChange: true);
-                })
-            .UseSerilog(Log.Logger)
             .ConfigureServices((_, services) =>
                 {
                     // The plugin catalog is the single route from a connection to an adapter
@@ -229,7 +225,7 @@ public partial class App : System.Windows.Application, IDisposable
                     services.AddTransient<IModelComparer, TriggerComparer>();
                     services.AddTransient<IModelComparer, TypeComparer>();
 
-                    services.AddSingleton<ISettingsService, SettingsService>();
+                    services.AddSingleton<ISettingsService>(settingsService);
                     services.AddReportGenerators();
                     services.AddSingleton<ReportExportService>();
                     services.AddSingleton<IUpdateService, UpdateService>();

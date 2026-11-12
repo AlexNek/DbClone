@@ -30,4 +30,5 @@ public sealed record StoreResult(
     string? SummaryPath = null,
     bool SummaryRequested = false,
     SqlScriptPaths? SqlScripts = null,
-    bool SqlScriptsRequested = false);
+    bool SqlScriptsRequested = false,
+    IReadOnlyList<InterchangeIssueView>? Issues = null);

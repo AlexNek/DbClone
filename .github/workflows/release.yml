@@ -33,10 +33,29 @@ jobs:
         id: setup-env
         uses: ./.github/actions/setup-env
 
+      - name: Test application and adapter suites
+        run: |
+          dotnet test tests/Application.Tests --no-restore -c Release --verbosity normal
+          dotnet test tests/DbAdapter.PostgreSql.Tests --no-restore -c Release --verbosity normal
+
+      - name: Test interchange suite
+        run: dotnet test interchange/tests/DatabaseInterchange.Tests --no-restore -c Release --verbosity normal
+
+      - name: Test UI suite
+        run: dotnet test tests/UI.Tests --no-restore -c Release --verbosity normal
+
       - name: Build and upload installer
         uses: ./.github/actions/build-installer
         with:
           version: ${{ steps.setup-env.outputs.version }}
+
+      - name: Write installer checksums
+        shell: pwsh
+        run: |
+          Get-ChildItem "artifacts/DbClone-Setup-*.exe" | ForEach-Object {
+            $hash = (Get-FileHash $_.FullName -Algorithm SHA256).Hash.ToLowerInvariant()
+            Set-Content -Path ($_.FullName + ".sha256") -Value "$hash  $($_.Name)" -NoNewline
+          }
 
       - name: Determine release tag
         id: release-tag
@@ -79,5 +98,6 @@ jobs:
           body_path: release-notes.md
           files: |
             artifacts/DbClone-Setup-*.exe
+            artifacts/DbClone-Setup-*.exe.sha256
             artifacts/DbClone-*.msi
           generate_release_notes: true

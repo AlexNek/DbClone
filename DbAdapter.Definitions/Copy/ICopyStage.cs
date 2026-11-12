@@ -18,6 +18,9 @@ public interface ICopyStage
     /// </summary>
     int Order { get; }
 
+    /// <summary>Whether a failed stage must stop the pipeline.</summary>
+    bool IsCritical { get; }
+
     /// <summary>
     /// Executes this pipeline stage.
     /// </summary>

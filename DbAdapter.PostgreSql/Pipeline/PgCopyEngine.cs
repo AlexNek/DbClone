@@ -67,17 +67,11 @@ public sealed class PgCopyEngine : ICopyEngine
         finally
         {
             // Clean up connections
-            if (context.SourceConnection is NpgsqlConnection sourceConn)
-            {
-                await sourceConn.CloseAsync();
-                await sourceConn.DisposeAsync();
-            }
+            if (context.SourceConnection is not null)
+                await context.SourceConnection.DisposeAsync();
 
-            if (context.DestinationConnection is NpgsqlConnection destConn)
-            {
-                await destConn.CloseAsync();
-                await destConn.DisposeAsync();
-            }
+            if (context.DestinationConnection is not null)
+                await context.DestinationConnection.DisposeAsync();
         }
     }
 }

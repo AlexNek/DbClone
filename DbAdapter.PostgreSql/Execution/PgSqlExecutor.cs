@@ -77,6 +77,35 @@ public sealed class PgSqlExecutor : ISqlExecutor, IAsyncDisposable
         Func<ISqlExecutor, Task> action,
         CancellationToken cancellationToken = default)
     {
+        ArgumentNullException.ThrowIfNull(action);
+
+        for (var attempt = 0; ; attempt++)
+        {
+            try
+            {
+                await ExecuteTransactionAttemptAsync(action, cancellationToken);
+                return;
+            }
+            catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+            {
+                throw;
+            }
+            catch (NpgsqlException ex) when (attempt < _maxRetries && IsTransient(ex))
+            {
+                _logger.LogWarning(
+                    ex,
+                    "Transient transaction failure on attempt {Attempt}/{MaxRetries}; retrying the whole transaction",
+                    attempt + 1,
+                    _maxRetries);
+                await Task.Delay(_retryDelays[attempt], cancellationToken);
+            }
+        }
+    }
+
+    private async Task ExecuteTransactionAttemptAsync(
+        Func<ISqlExecutor, Task> action,
+        CancellationToken cancellationToken)
+    {
         await EnsureOpenAsync(cancellationToken);
         await using var transaction = await _connection.BeginTransactionAsync(cancellationToken);
         var txExecutor = new PgSqlExecutor(_connection, _logger, _commandTimeout);
@@ -89,7 +118,7 @@ public sealed class PgSqlExecutor : ISqlExecutor, IAsyncDisposable
         catch
         {
             _logger.LogWarning("Transaction rolling back");
-            await transaction.RollbackAsync(cancellationToken);
+            await transaction.RollbackAsync(CancellationToken.None);
             throw;
         }
     }

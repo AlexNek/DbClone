@@ -225,7 +225,5 @@ public sealed class CopyPipeline : ICopyPipeline
             Statistics: context.Statistics);
     }
 
-    private static bool IsCriticalStage(ICopyStage stage) =>
-        stage.Order <= 30
-        || stage.Name is ECopyStage.CopyData or ECopyStage.ApplyTableFilter;
+    private static bool IsCriticalStage(ICopyStage stage) => stage.IsCritical;
 }

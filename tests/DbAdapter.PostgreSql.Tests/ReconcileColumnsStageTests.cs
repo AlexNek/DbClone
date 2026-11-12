@@ -224,7 +224,7 @@ public class ReconcileColumnsStageTests
         {
             Request = request,
             SourceModel = model,
-            DestinationConnection = DestConnection
+            DestinationConnection = new PgCopyConnection(DestConnection, string.Empty)
         };
     }
 

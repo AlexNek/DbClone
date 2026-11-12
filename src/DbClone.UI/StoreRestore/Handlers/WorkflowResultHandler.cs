@@ -1,3 +1,4 @@
+using DbClone.Application.Interchange;
 using DbClone.UI.StoreRestore.Workflows;
 using DbClone.UI.ViewModels;
 
@@ -60,6 +61,8 @@ public sealed class WorkflowResultHandler : IWorkflowResultHandler
             state.LogWarning("SQL scripts: not written");
         }
 
+        LogIssues(state, result.Issues);
+
         if (!result.VerificationPassed && result.Success)
             state.LogWarning("Catalog verification did not pass.");
     }
@@ -72,6 +75,7 @@ public sealed class WorkflowResultHandler : IWorkflowResultHandler
         {
             state.StatusBarSummary = "Restore cancelled";
             state.LogWarning($"Restore cancelled after {result.ObjectsApplied} objects.");
+            LogIssues(state, result.Issues);
             if (!string.IsNullOrEmpty(result.LastCompletedChunk))
                 state.LogHint($"Resume point: {result.LastCompletedChunk}");
             return;
@@ -82,6 +86,7 @@ public sealed class WorkflowResultHandler : IWorkflowResultHandler
             state.StatusBarSummary = "Restore refused";
             state.ShowBanner("Restore Refused", result.Message, InfoBarSeverity.Warning);
             state.LogError("=== RESTORE REFUSED (no changes applied) ===");
+            LogIssues(state, result.Issues);
             return;
         }
 
@@ -89,8 +94,29 @@ public sealed class WorkflowResultHandler : IWorkflowResultHandler
         var severity = result.HasIssues ? InfoBarSeverity.Warning : (result.Success ? InfoBarSeverity.Success : InfoBarSeverity.Error);
         state.ShowBanner(result.Success ? "Restore Complete" : "Restore Failed", result.Message, severity);
 
+        LogIssues(state, result.Issues);
+
         if (result.RowCountMismatches > 0)
             state.LogWarning($"{result.RowCountMismatches} table(s) have a row-count mismatch.");
+    }
+
+    private static void LogIssues(WorkflowState state, IReadOnlyList<InterchangeIssueView>? issues)
+    {
+        if (issues is null)
+            return;
+
+        foreach (var issue in issues)
+        {
+            var location = string.IsNullOrWhiteSpace(issue.Location) ? string.Empty : $" [{issue.Location}]";
+            var details = string.IsNullOrWhiteSpace(issue.Details) ? string.Empty : $" Details: {issue.Details}";
+            var message = $"[{issue.Code}]{location} {issue.Sentence}{details}";
+            if (issue.Severity == EInterchangeSeverity.Error)
+                state.LogError(message);
+            else if (issue.Severity == EInterchangeSeverity.Warning)
+                state.LogWarning(message);
+            else
+                state.LogDetail(message);
+        }
     }
 
     public void HandleError(WorkflowState state, string operation, string message)

@@ -23,6 +23,8 @@ public sealed class CreateExtensionsStage : ICopyStage
     /// <inheritdoc />
     public int Order => 55;
 
+    public bool IsCritical => false;
+
     /// <summary>Initializes a new instance.</summary>
     public CreateExtensionsStage(ILoggerFactory loggerFactory) => _loggerFactory = loggerFactory;
 
@@ -49,7 +51,7 @@ public sealed class CreateExtensionsStage : ICopyStage
                     [StageDetail.Skipped(reason: "No extensions")]);
 
         var logger = _loggerFactory.CreateLogger<CreateExtensionsStage>();
-        var conn = (NpgsqlConnection)context.DestinationConnection!;
+        var conn = PgCopyConnection.Require(context.DestinationConnection, "destination");
         var executor = new PgSqlExecutor(conn, _loggerFactory.CreateLogger<PgSqlExecutor>());
 
         var created = 0;

@@ -11,7 +11,8 @@ public sealed record InterchangeIssue(
     string Code,
     EIssueSeverity Severity,
     string Message,
-    ObjectRef TargetRef = default)
+    ObjectRef TargetRef = default,
+    string Details = "")
 {
     /// <inheritdoc />
     public override string ToString() => $"[{Severity}] {Code}: {Message}";

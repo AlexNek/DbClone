@@ -22,6 +22,8 @@ public sealed class ReCopyMismatchedStage : ICopyStage
     /// <inheritdoc />
     public int Order => 155;
 
+    public bool IsCritical => false;
+
     /// <summary>Initializes a new instance.</summary>
     public ReCopyMismatchedStage(ILoggerFactory loggerFactory) => _loggerFactory = loggerFactory;
 
@@ -148,8 +150,8 @@ public sealed class ReCopyMismatchedStage : ICopyStage
             sourceConn,
             destConn,
             _loggerFactory.CreateLogger<Copy.PgDataCopier>(),
-            context.SourceConnectionString,
-            context.DestinationConnectionString);
+            (context.SourceConnection as PgCopyConnection)?.ConnectionString,
+            (context.DestinationConnection as PgCopyConnection)?.ConnectionString);
 
         // Map row progress into this stage's band of the overall pipeline percent
         // so the bar never jumps backwards.

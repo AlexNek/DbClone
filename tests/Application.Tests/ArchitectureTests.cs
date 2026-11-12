@@ -35,6 +35,8 @@ public class ArchitectureTests
     /// <summary>Gets the regular expression matching a type name from the provider library.</summary>
     private static readonly Regex NpgsqlTypeName = new(@"\bNpgsql\b", RegexOptions.Compiled);
 
+    private static readonly Regex DefinitionsUsing = new(@"^using\s+DbAdapter\.Definitions\s*;$", RegexOptions.Compiled | RegexOptions.Multiline);
+
     [Fact]
     public void NoFileOutsideTheBlockNamesAnNpgsqlType()
     {
@@ -226,9 +228,29 @@ public class ArchitectureTests
     }
 
     [Fact]
+    public void UiDefinitionsImportsStayWithinTheCompositionAndReportAllowList()
+    {
+        var uiRoot = Path.Combine(RepoRoot, "src", "DbClone.UI");
+        var allowed = new HashSet<string>(StringComparer.OrdinalIgnoreCase)
+        {
+            "App.xaml.cs",
+            Path.Combine("Services", "HtmlReportService.cs"),
+            Path.Combine("ViewModels", "CompareViewModel.cs"),
+        };
+
+        var offenders = Directory.EnumerateFiles(uiRoot, "*.cs", SearchOption.AllDirectories)
+            .Where(file => DefinitionsUsing.IsMatch(File.ReadAllText(file)))
+            .Select(file => Path.GetRelativePath(uiRoot, file))
+            .Where(relative => !allowed.Contains(relative))
+            .ToList();
+
+        offenders.Should().BeEmpty(
+            "the UI may import Definitions only in the composition root and the two documented report/compare files");
+    }
+
+    [Fact]
     public void BlockProjectDoesNotReferenceApplication()
     {
-        // Arrange — refactors/09 Phase 4 box 78; the strict one-way layer rule.
         const string blockProject = BlockDirName + "/" + BlockDirName + ".csproj";
 
         // Act

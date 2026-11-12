@@ -252,8 +252,8 @@ public class SyncSequencesStageTests
                            model,
                            new CopyOptions(CopyMode: mode)),
                        SourceModel = model,
-                       SourceConnection = SourceConnection,
-                       DestinationConnection = DestinationConnection
+                       SourceConnection = new PgCopyConnection(SourceConnection, string.Empty),
+                       DestinationConnection = new PgCopyConnection(DestinationConnection, string.Empty)
                    };
     }
 

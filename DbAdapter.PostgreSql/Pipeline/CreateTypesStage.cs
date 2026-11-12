@@ -26,6 +26,8 @@ public sealed class CreateTypesStage : ICopyStage
     /// <inheritdoc />
     public int Order => 65;
 
+    public bool IsCritical => false;
+
     /// <summary>Initializes a new instance.</summary>
     public CreateTypesStage(PgDdlGenerator ddl, ILoggerFactory loggerFactory)
     {
@@ -69,7 +71,7 @@ public sealed class CreateTypesStage : ICopyStage
             return new StageResult(Name, true, TimeSpan.Zero, 0, [StageDetail.Skipped(reason: "No types")]);
 
         var logger = _loggerFactory.CreateLogger<CreateTypesStage>();
-        var conn = (NpgsqlConnection)context.DestinationConnection!;
+        var conn = PgCopyConnection.Require(context.DestinationConnection, "destination");
         var executor = new PgSqlExecutor(conn, _loggerFactory.CreateLogger<PgSqlExecutor>());
 
         // Create each type individually so one failure does not abort the rest.

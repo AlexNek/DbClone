@@ -30,6 +30,8 @@ public sealed class ReconcileColumnsStage : ICopyStage
     /// <inheritdoc />
     public int Order => 75;
 
+    public bool IsCritical => false;
+
     /// <summary>Initializes a new instance.</summary>
     public ReconcileColumnsStage(IPgExecutorFactory executorFactory, ILoggerFactory loggerFactory)
     {
@@ -60,7 +62,7 @@ public sealed class ReconcileColumnsStage : ICopyStage
 
         var model = context.SourceModel!;
         var logger = _loggerFactory.CreateLogger<ReconcileColumnsStage>();
-        var conn = (NpgsqlConnection)context.DestinationConnection!;
+        var conn = PgCopyConnection.Require(context.DestinationConnection, "destination");
         var executor = _executorFactory.Create(conn);
 
         // Only reconcile regular tables and partitioned parents — partition children

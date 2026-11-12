@@ -23,6 +23,8 @@ public sealed class DetectCapabilitiesStage : ICopyStage
     /// <inheritdoc />
     public int Order => 20;
 
+    public bool IsCritical => true;
+
     /// <summary>Initializes a new instance.</summary>
     public DetectCapabilitiesStage(ILoggerFactory loggerFactory) => _loggerFactory = loggerFactory;
 
@@ -31,8 +33,8 @@ public sealed class DetectCapabilitiesStage : ICopyStage
         CopyContext context,
         CancellationToken cancellationToken = default)
     {
-        var sourceConn = (NpgsqlConnection)context.SourceConnection!;
-        var destConn = (NpgsqlConnection)context.DestinationConnection!;
+        var sourceConn = PgCopyConnection.Require(context.SourceConnection, "source");
+        var destConn = PgCopyConnection.Require(context.DestinationConnection, "destination");
 
         var sourceExec = new PgSqlExecutor(
             sourceConn,
