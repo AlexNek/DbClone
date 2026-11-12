@@ -1,4 +1,4 @@
-using DbClone.Application.Interchange;
+using DbClone.Application.Relationship;
 
 namespace DbClone.UI.Models.CatalogGraph;
 
@@ -40,14 +40,14 @@ internal sealed record CatalogGraphDetail(
     string? Table,
     bool IsCaptured,
     long? RowCount,
-    IReadOnlyList<CatalogColumnView> Columns,
+    IReadOnlyList<RelationshipColumnView> Columns,
     IReadOnlyList<int> OutgoingEdgeIndexes,
     IReadOnlyList<int> IncomingEdgeIndexes,
     IReadOnlyList<int> NeighbourNodeIndexes,
     IReadOnlyList<int> TwoHopNodeIndexes,
     int? CyclicGroupNumber,
     IReadOnlyList<string> CyclicGroupMembers,
-    CatalogKeyView? PrimaryKey,
-    IReadOnlyList<CatalogKeyView> UniqueKeys,
-    IReadOnlyList<CatalogIndexView> Indexes,
-    IReadOnlyList<CatalogCheckConstraintView> CheckConstraints);
+    RelationshipKeyView? PrimaryKey,
+    IReadOnlyList<RelationshipKeyView> UniqueKeys,
+    IReadOnlyList<RelationshipIndexView> Indexes,
+    IReadOnlyList<RelationshipCheckConstraintView> CheckConstraints);

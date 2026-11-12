@@ -1,4 +1,4 @@
-using DbClone.Application.Interchange;
+using DbClone.Application.Relationship;
 using DbClone.UI.Models.CatalogGraph;
 using DbClone.UI.Services.GraphAnalysis;
 using DbClone.UI.Services.GraphLayout;
@@ -42,9 +42,6 @@ internal sealed class CatalogGraphAnalyzer
     /// <summary>The member count above which a cyclic group opens behind a supernode.</summary>
     internal const int CollapsedComponentSizeLimit = 8;
 
-    /// <summary>The words for a reference that states no table name at all.</summary>
-    internal const string UnnamedTableLabel = "a table the catalog does not name";
-
     /// <summary>The words for a constraint that captured no name.</summary>
     internal const string UnnamedConstraintLabel = "(unnamed constraint)";
 
@@ -58,7 +55,7 @@ internal sealed class CatalogGraphAnalyzer
     /// the default rule, and only matters when the whole database does not open.
     /// </param>
     /// <returns>The model every later stage reads.</returns>
-    public CatalogGraphModel Analyze(CatalogGraphView view, string? preferredFocusId = null)
+    public CatalogGraphModel Analyze(RelationshipGraphView view, string? preferredFocusId = null)
     {
         ArgumentNullException.ThrowIfNull(view);
 
@@ -94,6 +91,7 @@ internal sealed class CatalogGraphAnalyzer
             GraphSearchIndexBuilder.Build(seeds, edges),
             seeds.Count(seed => seed.IsCaptured),
             edges.Count,
-            view.HasData);
+            view.HasData,
+            view.Origin);
     }
 }

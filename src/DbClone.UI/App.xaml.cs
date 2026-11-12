@@ -10,10 +10,12 @@ using DbClone.Application.Copy;
 using DbClone.Application.Enums;
 using DbClone.Application.Interchange;
 using DbClone.Application.Interfaces;
+using DbClone.Application.Relationship;
 using DbClone.Application.TableFilter;
 using DbClone.Application.Targets;
 using DbClone.UI.Logging;
 using DbClone.UI.Services;
+using DbClone.UI.Services.Relationship;
 using DbClone.UI.ViewModels;
 
 using Microsoft.Extensions.Configuration;
@@ -49,6 +51,8 @@ public partial class App : System.Windows.Application, IDisposable
         Log.Information("**** DbClone shutting down ****");
         Log.Debug("OnExit: stopping host and disposing services");
 
+        RelationshipViewFile.TryDelete();
+
         if (_host is not null)
         {
             _host.StopAsync().GetAwaiter().GetResult();
@@ -82,6 +86,9 @@ public partial class App : System.Windows.Application, IDisposable
 
             // Set up Serilog BEFORE building the host
             Log.Logger = LoggingConfiguration.CreateLogger();
+
+            // D10: the fallback's single file never outlives the session that wrote it.
+            RelationshipViewFile.TryDelete();
 
             _host = BuildHost();
 
@@ -179,13 +186,29 @@ public partial class App : System.Windows.Application, IDisposable
                     services.AddSingleton<StoreRestore.Validators.IWorkflowValidator, StoreRestore.Validators.WorkflowValidator>();
                     services.AddSingleton<StoreRestore.Services.ICatalogPathResolver, StoreRestore.Services.CatalogPathResolver>();
 
-                    // Feature 07: the relationship view. The three stages, the workflow that orders them
-                    // and the shell opener are all resolved by MainViewModel, so none of them may be
-                    // missing here — a gap is a startup failure, not a feature that fails when clicked.
+                    // Feature 11: the relationship view. One graph service reads a catalog folder or a live
+                    // database; one builder renders it; one presenter shows it. No view writes a file — the
+                    // document is a string in memory, and only the store-time picture touches disk.
+                    // A missing registration here is a startup failure, not a feature that fails when clicked.
+                    services.AddSingleton<IRelationshipGraphService, RelationshipGraphService>();
                     services.AddSingleton<Services.CatalogGraphAnalyzer>();
                     services.AddSingleton<Services.GraphLayout.GraphLayoutEngine>();
                     services.AddSingleton<Services.CatalogGraphHtmlRenderer>();
+                    services.AddSingleton<RelationshipDocumentBuilder>();
+                    services.AddSingleton<StoreRestore.Services.RelationshipPictureWriter>();
                     services.AddSingleton<Services.IHtmlFileOpener, Services.WpfHtmlFileOpener>();
+
+                    // How a document is shown is decided once per request: the in-app window when the
+                    // runtime answers and none is open yet, the browser otherwise (D4).
+                    services.AddSingleton<BrowserRelationshipPresenter>();
+                    services.AddSingleton<WebViewRelationshipPresenter>();
+                    services.AddSingleton<IInAppRelationshipPresenter>(
+                        sp => sp.GetRequiredService<WebViewRelationshipPresenter>());
+                    services.AddSingleton<IWebViewRuntimeProbe, WebViewRuntimeProbe>();
+                    services.AddSingleton<IRelationshipViewPresenter>(sp => new RelationshipViewPresenterResolver(
+                        sp.GetRequiredService<IWebViewRuntimeProbe>(),
+                        sp.GetRequiredService<IInAppRelationshipPresenter>(),
+                        sp.GetRequiredService<BrowserRelationshipPresenter>()));
                     services.AddSingleton<StoreRestore.Handlers.IRelationshipViewHandler, StoreRestore.Handlers.RelationshipViewHandler>();
 
                     services.AddTransient<ITableCatalogService, TableCatalogService>();

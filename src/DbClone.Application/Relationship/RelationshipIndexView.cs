@@ -1,4 +1,4 @@
-namespace DbClone.Application.Interchange;
+namespace DbClone.Application.Relationship;
 
 /// <summary>
 /// One captured index: its name, its uniqueness, the key columns the producer stated and — when it
@@ -13,11 +13,11 @@ namespace DbClone.Application.Interchange;
 /// partial index's predicate, the access method.
 /// </param>
 /// <param name="Columns">
-/// The key columns in the order the index stores them, or <see langword="null"/> when the folder does
+/// The key columns in the order the index stores them, or <see langword="null"/> when the origin does
 /// not state them — which is what a catalog captured before the field existed reads as. Read straight
-/// from the interchange record: never derived from <paramref name="Definition"/> here.
+/// from the origin record: never derived from <paramref name="Definition"/> here.
 /// </param>
-public sealed record CatalogIndexView(
+public sealed record RelationshipIndexView(
     string Name,
     bool IsUnique,
     string? Definition,

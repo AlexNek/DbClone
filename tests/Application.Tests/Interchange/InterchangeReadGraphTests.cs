@@ -4,6 +4,7 @@ using DbAdapter.Definitions;
 
 using DbClone.Application.Adapters;
 using DbClone.Application.Interchange;
+using DbClone.Application.Relationship;
 using DbClone.Application.Targets;
 
 using FluentAssertions;
@@ -88,8 +89,11 @@ public class InterchangeReadGraphTests
         declared.IsMandatory.Should().BeTrue();
         graph.Edges.Single(edge => edge.ConstraintName == "orders_shipping_fkey").IsMandatory.Should().BeFalse();
 
-        graph.FormatVersion.Should().Be(3);
-        graph.SourceDialect.Should().Be("testdialect");
+        graph.Origin.Kind.Should().Be(EGraphOriginKind.Catalog);
+        graph.Origin.FormatVersion.Should().Be(3);
+        graph.Origin.Dialect.Should().Be("testdialect");
+        graph.Origin.Label.Should().Be(Path.GetFileName(fixture.Root));
+        graph.Origin.Location.Should().Be(fixture.Root);
         graph.HasData.Should().BeTrue();
         graph.Tables.Should().HaveCount(4);
         graph.UnrelatedTableCount.Should().Be(1, "audit_log declares and receives no constraint");
@@ -298,10 +302,10 @@ public class InterchangeReadGraphTests
     }
 
     [Fact]
-    public void CatalogOutsideTableView_HasNoFieldACountOrColumnListCouldBeWrittenInto()
+    public void RelationshipOutsideTableView_HasNoFieldACountOrColumnListCouldBeWrittenInto()
     {
         // Act
-        var properties = typeof(CatalogOutsideTableView)
+        var properties = typeof(RelationshipOutsideTableView)
             .GetProperties()
             .Select(property => property.Name)
             .OrderBy(name => name, StringComparer.Ordinal);
@@ -435,7 +439,7 @@ public class InterchangeReadGraphTests
         graph.OutsideTables.Should().ContainSingle()
             .Which.Schema.Should().Be("public");
         graph.Schemas.Should().ContainSingle()
-            .Which.Should().Be(new CatalogSchemaView(Schema: "public", TableCount: 1, RelatedTableCount: 1));
+            .Which.Should().Be(new RelationshipSchemaView(Schema: "public", TableCount: 1, RelatedTableCount: 1));
         graph.UnrelatedTableCount.Should().Be(0);
     }
 
@@ -469,12 +473,12 @@ public class InterchangeReadGraphTests
 
     private static string TableRef(string schema, string name) => ObjectRef.Table(schema, name).Value;
 
-    private static long? RowsOf(CatalogGraphView graph, string schema, string table) =>
+    private static long? RowsOf(RelationshipGraphView graph, string schema, string table) =>
         graph.Tables
             .Single(t => t.Schema == schema && t.Table == table)
             .RowCount;
 
-    private static CatalogColumnView ColumnOf(CatalogGraphView graph, string schema, string table, string column) =>
+    private static RelationshipColumnView ColumnOf(RelationshipGraphView graph, string schema, string table, string column) =>
         graph.Tables
             .Single(t => t.Schema == schema && t.Table == table)
             .Columns

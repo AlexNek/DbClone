@@ -14,11 +14,9 @@
   </ItemGroup>
 
   <!-- The naming table and the reference grammar are internal on purpose, and design §3.2 asks that their
-       invariants be asserted rather than reviewed, so the format tests read them. The script harness does the
-       same for feature 10's size split: it drives the writer over a catalog folder the suites may not read. -->
+       invariants be asserted rather than reviewed, so the format tests read them. -->
   <ItemGroup>
     <InternalsVisibleTo Include="DatabaseInterchange.Tests" />
-    <InternalsVisibleTo Include="ScriptHarness" />
   </ItemGroup>
 
   <ItemGroup>

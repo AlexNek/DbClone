@@ -1,18 +1,19 @@
 using CanonicalModel.Interchange;
-using DbClone.Application.Interchange;
+using DbClone.Application.Relationship;
 
 namespace UI.Tests.CatalogGraph;
 
 /// <summary>
-/// Builds a <see cref="CatalogGraphView"/> the way the reader would hand one over: identities are
+/// Builds a <see cref="RelationshipGraphView"/> the way the reader would hand one over: identities are
 /// the catalog's own references, so nothing here is keyed by the text later drawn under a node.
 /// Declare a table before an edge names it.
 /// </summary>
 internal sealed class CatalogGraphFixture
 {
-    private readonly List<CatalogTableView> _tables = [];
-    private readonly List<CatalogOutsideTableView> _outside = [];
+    private readonly List<RelationshipTableView> _tables = [];
+    private readonly List<RelationshipOutsideTableView> _outside = [];
     private readonly List<TestRelation> _edges = [];
+    private GraphViewOrigin _origin = new(EGraphOriginKind.Catalog, "fixture", @"C:\catalogs\fixture", "postgresql", 3);
     private bool _hasData = true;
 
     public static CatalogGraphFixture Create() => new();
@@ -23,9 +24,9 @@ internal sealed class CatalogGraphFixture
         string schema,
         string name,
         long? rowCount = null,
-        params CatalogColumnView[] columns)
+        params RelationshipColumnView[] columns)
     {
-        _tables.Add(new CatalogTableView(
+        _tables.Add(new RelationshipTableView(
             TableId(schema, name),
             schema,
             name,
@@ -45,14 +46,14 @@ internal sealed class CatalogGraphFixture
     /// <summary>States the primary key of the table declared last.</summary>
     public CatalogGraphFixture PrimaryKey(string name, params string[] columns)
     {
-        AmendLast(table => table with { PrimaryKey = new CatalogKeyView(name, columns) });
+        AmendLast(table => table with { PrimaryKey = new RelationshipKeyView(name, columns) });
         return this;
     }
 
     /// <summary>States a unique constraint of the table declared last.</summary>
     public CatalogGraphFixture UniqueKey(string name, params string[] columns)
     {
-        AmendLast(table => table with { UniqueKeys = [.. table.UniqueKeys, new CatalogKeyView(name, columns)] });
+        AmendLast(table => table with { UniqueKeys = [.. table.UniqueKeys, new RelationshipKeyView(name, columns)] });
         return this;
     }
 
@@ -68,7 +69,7 @@ internal sealed class CatalogGraphFixture
     {
         AmendLast(table => table with
         {
-            Indexes = [.. table.Indexes, new CatalogIndexView(name, unique, definition, columns)],
+            Indexes = [.. table.Indexes, new RelationshipIndexView(name, unique, definition, columns)],
             IndexCount = table.IndexCount + 1,
         });
 
@@ -80,18 +81,18 @@ internal sealed class CatalogGraphFixture
     {
         AmendLast(table => table with
         {
-            CheckConstraints = [.. table.CheckConstraints, new CatalogCheckConstraintView(name, expression)],
+            CheckConstraints = [.. table.CheckConstraints, new RelationshipCheckConstraintView(name, expression)],
         });
 
         return this;
     }
 
-    private void AmendLast(Func<CatalogTableView, CatalogTableView> amend) =>
+    private void AmendLast(Func<RelationshipTableView, RelationshipTableView> amend) =>
         _tables[^1] = amend(_tables[^1]);
 
     public CatalogGraphFixture Outside(string id, string? schema, string? table)
     {
-        _outside.Add(new CatalogOutsideTableView(id, schema, table));
+        _outside.Add(new RelationshipOutsideTableView(id, schema, table));
         return this;
     }
 
@@ -125,11 +126,23 @@ internal sealed class CatalogGraphFixture
         return this;
     }
 
-    public CatalogGraphView Build()
+    /// <summary>
+    /// Makes the view one read from a live database: the origin states no format version and no row count
+    /// is measured, so every card says so in the live words (D8, D9).
+    /// </summary>
+    public CatalogGraphFixture Live(string database, string location, string dialect = "postgresql")
+    {
+        _origin = new GraphViewOrigin(EGraphOriginKind.LiveDatabase, database, location, dialect, null);
+        _hasData = false;
+
+        return this;
+    }
+
+    public RelationshipGraphView Build()
     {
         var related = RelatedIds();
         var edges = _edges
-            .Select(edge => new CatalogRelationEdgeView(
+            .Select(edge => new RelationshipEdgeView(
                 edge.ChildId,
                 edge.ParentId,
                 edge.Name,
@@ -142,10 +155,8 @@ internal sealed class CatalogGraphFixture
                 _tables.Any(table => string.Equals(table.Id, edge.ParentId, StringComparison.Ordinal))))
             .ToList();
 
-        return new CatalogGraphView(
-            @"C:\catalogs\fixture",
-            3,
-            "postgresql",
+        return new RelationshipGraphView(
+            _origin,
             _hasData,
             [.. _tables],
             [.. _outside],
@@ -166,11 +177,11 @@ internal sealed class CatalogGraphFixture
         return related;
     }
 
-    private List<CatalogSchemaView> Schemas(HashSet<string> related) =>
+    private List<RelationshipSchemaView> Schemas(HashSet<string> related) =>
     [
         .. _tables
             .GroupBy(table => table.Schema, StringComparer.Ordinal)
-            .Select(group => new CatalogSchemaView(
+            .Select(group => new RelationshipSchemaView(
                 group.Key,
                 group.Count(),
                 group.Count(table => related.Contains(table.Id))))

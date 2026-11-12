@@ -1,9 +1,6 @@
-using System.IO;
-using System.Text;
-
-using DbClone.Application.Interchange;
-using DbClone.UI.Services;
-using DbClone.UI.Services.GraphLayout;
+using DbClone.Application.DTOs;
+using DbClone.Application.Relationship;
+using DbClone.UI.Services.Relationship;
 using DbClone.UI.StoreRestore.Services;
 using DbClone.UI.ViewModels;
 
@@ -12,19 +9,31 @@ using Microsoft.Extensions.Logging;
 namespace DbClone.UI.StoreRestore.Handlers;
 
 /// <summary>
-/// Renders the relationship view of one stored catalog and opens it (D6). The path rule, the three
-/// stages and the opener are all collaborators, so this type only orders them.
+/// The workflow behind the two "View relationships" affordances and behind the picture every finished
+/// store leaves in its catalog (D12): read the origin, build the document, present it — and, for a
+/// store, write it into the catalog.
 /// </summary>
 internal interface IRelationshipViewHandler
 {
-    /// <summary>Reads a catalog, writes its picture into it and hands the file to the shell.</summary>
+    /// <summary>Reads a stored catalog and presents its relationship document.</summary>
     /// <param name="catalogPath">The absolute path of a stored catalog folder.</param>
     /// <param name="state">The Store/Restore state the run reports into.</param>
     /// <param name="cancellationToken">Cancellation token.</param>
-    Task ShowAsync(string catalogPath, WorkflowState state, CancellationToken cancellationToken = default);
+    Task ShowCatalogAsync(string catalogPath, WorkflowState state, CancellationToken cancellationToken = default);
+
+    /// <summary>Reads a live database and presents its relationship document; nothing is written.</summary>
+    /// <param name="connection">The side the button was pressed on — source or target.</param>
+    /// <param name="role">Which side it is, as the log states it.</param>
+    /// <param name="state">The Store/Restore state the run reports into.</param>
+    /// <param name="cancellationToken">Cancellation token.</param>
+    Task ShowDatabaseAsync(
+        ConnectionInfo connection,
+        ERelationshipRole role,
+        WorkflowState state,
+        CancellationToken cancellationToken = default);
 
     /// <summary>
-    /// Writes the picture into the catalog and opens nothing, which is what a finished store needs:
+    /// Writes the picture into the catalog and presents nothing, which is what a finished store needs:
     /// the file is there before the reader asks for it (FR17).
     /// </summary>
     /// <param name="catalogPath">The absolute path of a stored catalog folder.</param>
@@ -35,51 +44,41 @@ internal interface IRelationshipViewHandler
 }
 
 /// <summary>
-/// The workflow behind the "View relationships" affordances and behind the picture every finished
-/// store leaves in its catalog: read → analyze → lay out → emit → write into the catalog, and, when it
-/// was asked for, open. The picture is the only file the app adds to a catalog (D5), and a write that
-/// cannot land leaves neither a partial document nor a temporary file (T8).
+/// Read → build → present, ordered once. The view is a string in memory: viewing a catalog or a database
+/// leaves no file behind (D1), and the one file the product still writes is the picture a store puts in
+/// its catalog (D5, <see cref="RelationshipPictureWriter"/>).
 /// </summary>
 internal sealed class RelationshipViewHandler : IRelationshipViewHandler
 {
     private const string OperationName = "Relationship view";
 
-    /// <summary>The suffix the document is assembled under before it is moved into place.</summary>
-    private const string TemporarySuffix = ".tmp";
-
-    /// <summary>UTF-8 without a byte-order mark, the encoding the product's own writers use.</summary>
-    private static readonly UTF8Encoding NoBomUtf8 = new(encoderShouldEmitUTF8Identifier: false);
-
-    private readonly IInterchangeService _interchange;
-    private readonly CatalogGraphAnalyzer _analyzer;
-    private readonly GraphLayoutEngine _layout;
-    private readonly CatalogGraphHtmlRenderer _renderer;
-    private readonly IHtmlFileOpener _opener;
+    private readonly IRelationshipGraphService _graph;
+    private readonly RelationshipDocumentBuilder _builder;
+    private readonly IRelationshipViewPresenter _presenter;
+    private readonly RelationshipPictureWriter _pictureWriter;
     private readonly ILogger<RelationshipViewHandler> _logger;
 
     /// <summary>
     /// Composes the workflow from its collaborators. Public although the type is internal: the
-    /// container only constructs a public constructor, and the three stage services it receives are
-    /// internal to this assembly.
+    /// container only constructs a public constructor, and the services it receives are internal to
+    /// this assembly.
     /// </summary>
     public RelationshipViewHandler(
-        IInterchangeService interchange,
-        CatalogGraphAnalyzer analyzer,
-        GraphLayoutEngine layout,
-        CatalogGraphHtmlRenderer renderer,
-        IHtmlFileOpener opener,
+        IRelationshipGraphService graph,
+        RelationshipDocumentBuilder builder,
+        IRelationshipViewPresenter presenter,
+        RelationshipPictureWriter pictureWriter,
         ILogger<RelationshipViewHandler> logger)
     {
-        _interchange = interchange ?? throw new ArgumentNullException(nameof(interchange));
-        _analyzer = analyzer ?? throw new ArgumentNullException(nameof(analyzer));
-        _layout = layout ?? throw new ArgumentNullException(nameof(layout));
-        _renderer = renderer ?? throw new ArgumentNullException(nameof(renderer));
-        _opener = opener ?? throw new ArgumentNullException(nameof(opener));
+        _graph = graph ?? throw new ArgumentNullException(nameof(graph));
+        _builder = builder ?? throw new ArgumentNullException(nameof(builder));
+        _presenter = presenter ?? throw new ArgumentNullException(nameof(presenter));
+        _pictureWriter = pictureWriter ?? throw new ArgumentNullException(nameof(pictureWriter));
         _logger = logger ?? throw new ArgumentNullException(nameof(logger));
     }
 
     /// <inheritdoc />
-    public async Task ShowAsync(
+    public Task ShowCatalogAsync(
         string catalogPath,
         WorkflowState state,
         CancellationToken cancellationToken = default)
@@ -87,20 +86,20 @@ internal sealed class RelationshipViewHandler : IRelationshipViewHandler
         ArgumentException.ThrowIfNullOrWhiteSpace(catalogPath);
         ArgumentNullException.ThrowIfNull(state);
 
-        try
-        {
-            var picturePath = await WriteAsync(catalogPath, state, cancellationToken).ConfigureAwait(false);
-            TryOpen(picturePath, state);
-        }
-        catch (OperationCanceledException)
-        {
-            state.Log($"{OperationName} cancelled.");
-        }
-        catch (Exception ex)
-        {
-            _logger.LogError(ex, "Relationship view failed for {CatalogPath}", catalogPath);
-            state.LastError = $"{OperationName} failed: {ex.Message}";
-        }
+        return ShowAsync(state, token => _graph.ReadCatalogAsync(catalogPath, token), cancellationToken);
+    }
+
+    /// <inheritdoc />
+    public Task ShowDatabaseAsync(
+        ConnectionInfo connection,
+        ERelationshipRole role,
+        WorkflowState state,
+        CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(connection);
+        ArgumentNullException.ThrowIfNull(state);
+
+        return ShowAsync(state, token => _graph.ReadDatabaseAsync(connection, role, token), cancellationToken);
     }
 
     /// <inheritdoc />
@@ -114,7 +113,16 @@ internal sealed class RelationshipViewHandler : IRelationshipViewHandler
 
         try
         {
-            return await WriteAsync(catalogPath, state, cancellationToken).ConfigureAwait(false);
+            var view = await _graph.ReadCatalogAsync(catalogPath, cancellationToken).ConfigureAwait(false);
+            var document = _builder.Build(view);
+            var picturePath = await _pictureWriter
+                .WriteAsync(catalogPath, document.Html, cancellationToken)
+                .ConfigureAwait(false);
+
+            Report(view, state);
+            state.LogDetail($"Picture: {picturePath}");
+
+            return picturePath;
         }
         catch (OperationCanceledException)
         {
@@ -131,84 +139,86 @@ internal sealed class RelationshipViewHandler : IRelationshipViewHandler
     }
 
     /// <summary>
-    /// Renders the document and moves it into place inside the catalog. Throws when nothing can be
-    /// written, so each caller decides what a failure means for the run it reports into.
+    /// Reads one origin, reports what it holds and hands the document to whichever presenter the app
+    /// resolved. A read that fails is an error; a presentation that fails costs the reader the window and
+    /// nothing else.
     /// </summary>
-    private async Task<string> WriteAsync(
-        string catalogPath,
+    private async Task ShowAsync(
         WorkflowState state,
+        Func<CancellationToken, Task<RelationshipGraphView>> read,
         CancellationToken cancellationToken)
     {
-        // D5: inside the catalog folder, named after it — derived, never configured.
-        var picturePath = RelationshipPicturePath.For(catalogPath);
+        var view = await ReadAsync(read, state, cancellationToken).ConfigureAwait(false);
+        if (view is null) return;
 
-        var view = await _interchange.ReadGraphAsync(catalogPath, cancellationToken).ConfigureAwait(false);
-        var model = _analyzer.Analyze(view);
-        var layout = _layout.Compute(model);
-        var document = _renderer.Render(view, model, layout, DateTimeOffset.Now);
+        var document = _builder.Build(view);
 
-        await WriteAtomicallyAsync(picturePath, document, cancellationToken).ConfigureAwait(false);
-
-        state.Log($"Relationship view: {view.Tables.Count} tables, {view.Edges.Count} relations");
-        state.LogDetail($"Picture: {picturePath}");
-
-        return picturePath;
-    }
-
-    /// <summary>
-    /// Opens the file that is already complete on disk. A failure here costs the reader the shortcut
-    /// and nothing else, so it is a warning that names the file instead of an error that blames the run.
-    /// </summary>
-    private void TryOpen(string picturePath, WorkflowState state)
-    {
         try
         {
-            _opener.Open(picturePath);
+            await _presenter.PresentAsync(document, Refresh(read, state), cancellationToken).ConfigureAwait(false);
+        }
+        catch (OperationCanceledException)
+        {
+            state.Log($"{OperationName} cancelled.");
         }
         catch (Exception ex)
         {
-            _logger.LogWarning(ex, "The relationship view could not be opened: {PicturePath}", picturePath);
-            state.LogWarning($"{OperationName} was written to {picturePath} but could not be opened: {ex.Message}");
+            _logger.LogWarning(ex, "The relationship view of {Origin} could not be shown", view.Origin.Label);
+            state.LogWarning($"{OperationName} of {view.Origin.Label} could not be shown: {ex.Message}");
+        }
+    }
+
+    /// <summary>Reads the origin and reports it, or states the failure and yields nothing to present.</summary>
+    private async Task<RelationshipGraphView?> ReadAsync(
+        Func<CancellationToken, Task<RelationshipGraphView>> read,
+        WorkflowState state,
+        CancellationToken cancellationToken)
+    {
+        try
+        {
+            var view = await read(cancellationToken).ConfigureAwait(false);
+            Report(view, state);
+
+            return view;
+        }
+        catch (OperationCanceledException)
+        {
+            state.Log($"{OperationName} cancelled.");
+            return null;
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "{Operation} failed", OperationName);
+            state.LastError = $"{OperationName} failed: {ex.Message}";
+            return null;
         }
     }
 
     /// <summary>
-    /// Writes the document beside the target and moves it into place, so a reader never finds half a
-    /// document and a failed write leaves the previous file as it was.
+    /// The refresh a presenter offers: the same read and the same report, so a refreshed document says
+    /// what the first one said. A failure travels to the presenter, which is the only party that can say
+    /// so beside the document it could not replace.
     /// </summary>
-    private static async Task WriteAtomicallyAsync(
-        string path,
-        string document,
-        CancellationToken cancellationToken)
-    {
-        var temporary = path + TemporarySuffix;
+    private Func<CancellationToken, Task<RelationshipDocument>> Refresh(
+        Func<CancellationToken, Task<RelationshipGraphView>> read,
+        WorkflowState state) =>
+        async token =>
+            {
+                var view = await read(token).ConfigureAwait(false);
+                Report(view, state);
 
-        try
-        {
-            await File.WriteAllTextAsync(temporary, document, NoBomUtf8, cancellationToken).ConfigureAwait(false);
-            File.Move(temporary, path, overwrite: true);
-        }
-        catch
-        {
-            TryDelete(temporary);
-            throw;
-        }
-    }
+                return _builder.Build(view);
+            };
 
-    /// <summary>Best-effort removal of the temporary file; never masks the failure that is on its way out.</summary>
-    private static void TryDelete(string path)
+    /// <summary>States what was read, and warns when the origin holds no table to draw.</summary>
+    private static void Report(RelationshipGraphView view, WorkflowState state)
     {
-        try
+        state.Log($"{OperationName}: {view.Tables.Count} tables, {view.Edges.Count} relations");
+        state.LogDetail($"Origin: {view.Origin.Label} ({view.Origin.Location})");
+
+        if (view.Tables.Count == 0)
         {
-            File.Delete(path);
-        }
-        catch (IOException)
-        {
-            // A temporary file that cannot be removed is not worth a second failure.
-        }
-        catch (UnauthorizedAccessException)
-        {
-            // Same here: the original write failure is the one the log has to carry.
+            state.LogWarning($"{OperationName}: {view.Origin.Label} has no tables to draw.");
         }
     }
 }

@@ -10,8 +10,9 @@ internal static class CatalogGraphStyles
 """
 :root{--bg:#fbfbfd;--ink:#1b1f24;--muted:#6a737d;--line:#c9d1d9;--hot:#0b64c4;--warm:#8a5a00}
 *{box-sizing:border-box}
-body{margin:0;font:13px/1.45 "Segoe UI",system-ui,-apple-system,sans-serif;color:var(--ink);background:var(--bg)}
-header{padding:14px 18px 8px;border-bottom:1px solid var(--line)}
+html,body{height:100%}
+body{margin:0;font:13px/1.45 "Segoe UI",system-ui,-apple-system,sans-serif;color:var(--ink);background:var(--bg);display:flex;flex-direction:column}
+header{flex:0 0 auto;padding:14px 18px 8px;border-bottom:1px solid var(--line)}
 h1{margin:0;font-size:17px;font-weight:600}
 .sub{margin:4px 0 0;color:var(--muted);font-size:12px}
 .sub b{color:var(--ink);font-weight:600}
@@ -28,7 +29,7 @@ h1{margin:0;font-size:17px;font-weight:600}
 .legend .key{flex:0 0 auto;width:48px;height:16px;margin-top:1px;overflow:visible}
 .legend .key rect{fill:#fff;stroke:#8b949e;stroke-width:1.2}
 .legend .key rect.super{fill:#eef4fc;stroke:#5b8dd6}
-.chips{display:flex;flex-wrap:wrap;gap:8px 20px;align-items:center;padding:8px 18px;border-bottom:1px solid var(--line)}
+.chips{flex:0 0 auto;display:flex;flex-wrap:wrap;gap:8px 20px;align-items:center;padding:8px 18px;border-bottom:1px solid var(--line)}
 .chips .group{display:flex;flex-wrap:wrap;gap:5px;align-items:center}
 .chips .group>span{color:var(--muted);font-size:11px;text-transform:uppercase;letter-spacing:.05em;margin-right:2px}
 .chips .group>b{font-size:12px;font-weight:600}
@@ -36,8 +37,8 @@ h1{margin:0;font-size:17px;font-weight:600}
 .chip{font:inherit;font-size:12px;padding:2px 9px;border:1px solid var(--line);border-radius:999px;background:#fff;color:var(--ink);cursor:pointer}
 .chip:not(.on){opacity:.5;text-decoration:line-through}
 .chip.on{background:#e8f0fb;border-color:#9dc0ee}
-.layout{display:flex;align-items:stretch}
-main{flex:1 1 auto;min-width:0;display:flex;flex-direction:column}
+.layout{flex:1 1 auto;min-height:0;display:flex;align-items:stretch}
+main{flex:1 1 auto;min-width:0;min-height:0;display:flex;flex-direction:column}
 .toolbar{display:flex;flex-wrap:wrap;gap:6px 12px;align-items:center;padding:8px 18px;border-bottom:1px solid var(--line);font-size:12px}
 .toolbar label{display:flex;gap:6px;align-items:center}
 .toolbar input[type=search]{font:inherit;padding:3px 8px;border:1px solid var(--line);border-radius:6px;min-width:190px}
@@ -52,7 +53,7 @@ main{flex:1 1 auto;min-width:0;display:flex;flex-direction:column}
 .hit span{color:var(--muted)}
 #pic{position:absolute;top:0;left:0;cursor:grab;touch-action:none}
 #pic.dragging{cursor:grabbing}
-.stage{position:relative;flex:1 1 auto;overflow:hidden;height:calc(100vh - 250px);min-height:380px;background:#fff}
+.stage{position:relative;flex:1 1 auto;overflow:hidden;min-height:240px;background:#fff}
 #viewport text{font:12px/1 "Segoe UI",system-ui,sans-serif;fill:var(--ink)}
 .node rect{fill:#fff;stroke:#8b949e;stroke-width:1.2}
 .node.out rect{fill:#fffdf5;stroke-dasharray:4 3}
@@ -67,12 +68,12 @@ main{flex:1 1 auto;min-width:0;display:flex;flex-direction:column}
 .node.dim{opacity:.4}
 .elabel{font-size:10px;fill:var(--muted);paint-order:stroke;stroke:#fff;stroke-width:3px;text-anchor:middle;dominant-baseline:central;pointer-events:none}
 .elabel.quiet{display:none}
-path.edge.hot+text.elabel,path.edge.pick:hover+text.elabel{display:inline;fill:var(--hot);font-weight:600}
+path.edge:not(.off).hot+text.elabel,path.edge.pick:not(.off):hover+text.elabel{display:inline;fill:var(--hot);font-weight:600}
 .super rect{fill:#eef4fc;stroke:#5b8dd6;stroke-width:1.6;rx:8}
 .super text{font-size:13px;font-weight:600;fill:#1a4f96;text-anchor:middle}
 .super{cursor:pointer}
-.node.off,.edge.off,.away,.hidden{display:none}
-aside{flex:0 0 330px;border-left:1px solid var(--line);padding:12px 16px;max-height:78vh;overflow:auto;font-size:12px}
+.node.off,.edge.off,.super.off,.away,.hidden{display:none}
+aside{flex:0 0 330px;border-left:1px solid var(--line);padding:12px 16px;overflow:auto;font-size:12px}
 aside h2{margin:0 0 2px;font-size:14px;word-break:break-word}
 aside h3{margin:14px 0 4px;font-size:12px;text-transform:uppercase;letter-spacing:.05em;color:var(--muted)}
 aside .meta{margin:2px 0;color:var(--muted)}
@@ -94,9 +95,9 @@ aside ul.defs li:last-child{border-bottom:0}
 aside ul.defs b{font-weight:600;margin-right:6px}
 aside ul.defs .note{margin-right:6px}
 aside ul.defs div{margin-top:2px;white-space:pre-wrap;word-break:break-word;color:var(--ink)}
-.register{border-top:1px solid var(--line);padding:10px 18px 18px}
+.register{flex:0 1 auto;min-height:0;max-height:24vh;overflow:auto;border-top:1px solid var(--line);padding:10px 18px 18px}
 .register h2{margin:0 0 6px;font-size:14px}
-.register .scroll{max-height:30vh;overflow:auto;border:1px solid var(--line);border-radius:8px;background:#fff}
+.register .scroll{overflow:auto;border:1px solid var(--line);border-radius:8px;background:#fff}
 .register table{border-collapse:collapse;width:100%;font-size:11.5px}
 .register th,.register td{text-align:left;padding:3px 8px;border-bottom:1px solid #eaeef2;white-space:nowrap}
 .register th{position:sticky;top:0;background:#f6f8fa;font-size:10px;text-transform:uppercase;letter-spacing:.04em;color:var(--muted)}

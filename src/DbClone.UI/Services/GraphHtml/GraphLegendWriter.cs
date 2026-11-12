@@ -1,4 +1,5 @@
 using System.Text;
+using DbClone.UI.Services.GraphAnalysis;
 
 namespace DbClone.UI.Services.GraphHtml;
 
@@ -55,9 +56,11 @@ internal static class GraphLegendWriter
 
     /// <summary>Writes the key's rows.</summary>
     /// <param name="html">The document being built.</param>
-    internal static void WriteTo(StringBuilder html)
+    /// <param name="words">The origin's words for a table it does not hold.</param>
+    internal static void WriteTo(StringBuilder html, GraphOriginWords words)
     {
         ArgumentNullException.ThrowIfNull(html);
+        ArgumentNullException.ThrowIfNull(words);
 
         html.Append("<details class=\"keyed\">\n")
             .Append("<summary>Key \u2014 how to read the picture</summary>\n")
@@ -66,7 +69,7 @@ internal static class GraphLegendWriter
             "multiple records in the source table can reference the same record in the target table");
         Row(html, Bar, "one-to-one (1:1)",
             "each record in the target table can be referenced by at most one record in the source table");
-        Row(html, Dashed, "dashed", "the table it points at is not in this catalog");
+        Row(html, Dashed, "dashed", words.LegendOutside);
         Row(html, Curve, "curve", "a cycle: the two tables point at each other");
         Row(html, Loop, "loop", "the table points at itself");
         Row(html, Card, "card", "one table: its name and row count");

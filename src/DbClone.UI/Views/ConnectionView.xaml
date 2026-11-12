@@ -10,7 +10,8 @@
              d:DataContext="{d:DesignInstance vm:ConnectionViewModel, IsDesignTimeCreatable=False}"
              Padding="0">
     <ui:Card Margin="0" Padding="14">
-        <Grid>
+        <!--  Both panels reserve the same height: the source's Tables row holds a picker and the destination's holds a label and a button, whose heights differ by a few pixels.  -->
+        <Grid MinHeight="148">
             <Grid.RowDefinitions>
                 <RowDefinition Height="Auto"/>
                 <RowDefinition Height="Auto"/>

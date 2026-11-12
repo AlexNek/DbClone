@@ -1,3 +1,5 @@
+using DbClone.Application.Relationship;
+
 namespace DbClone.UI.Models.CatalogGraph;
 
 /// <summary>
@@ -19,7 +21,8 @@ namespace DbClone.UI.Models.CatalogGraph;
 /// <param name="SearchIndex">The searchable facts, in canonical order.</param>
 /// <param name="TableCount">How many tables the catalog holds.</param>
 /// <param name="RelationCount">How many constraints the catalog holds — the register's own total.</param>
-/// <param name="HasData">Whether the catalog states any row count at all.</param>
+/// <param name="HasData">Whether the origin states any row count at all.</param>
+/// <param name="Origin">Where the graph was read from: the words the document prints follow its kind.</param>
 internal sealed record CatalogGraphModel(
     IReadOnlyList<CatalogGraphNode> Nodes,
     IReadOnlyDictionary<string, int> NodeIndexesById,
@@ -32,4 +35,5 @@ internal sealed record CatalogGraphModel(
     IReadOnlyList<CatalogSearchEntry> SearchIndex,
     int TableCount,
     int RelationCount,
-    bool HasData);
+    bool HasData,
+    GraphViewOrigin Origin);

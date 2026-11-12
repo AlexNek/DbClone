@@ -1,4 +1,4 @@
-using DbClone.Application.Interchange;
+using DbClone.Application.Relationship;
 using DbClone.UI.Models.CatalogGraph;
 
 namespace DbClone.UI.Services.GraphAnalysis;
@@ -22,7 +22,7 @@ internal static class GraphClusterChips
     /// <param name="chipsByNode">Every chip claiming each node.</param>
     /// <returns>The chips, numbered in bar order.</returns>
     internal static List<CatalogClusterChip> Build(
-        CatalogGraphView view,
+        RelationshipGraphView view,
         IReadOnlyList<GraphNodeSeed> seeds,
         IReadOnlyList<CatalogCyclicGroup> groups,
         GraphDegrees degrees,
@@ -102,7 +102,7 @@ internal static class GraphClusterChips
     /// The schema names a chip can be made for: the schemas the catalog states, plus any schema a
     /// captured table states, ordinal.
     /// </summary>
-    private static IEnumerable<string> SchemaNames(CatalogGraphView view, IReadOnlyList<GraphNodeSeed> seeds)
+    private static IEnumerable<string> SchemaNames(RelationshipGraphView view, IReadOnlyList<GraphNodeSeed> seeds)
     {
         var names = new SortedSet<string>(StringComparer.Ordinal);
         foreach (var row in view.Schemas)

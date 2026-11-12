@@ -45,17 +45,18 @@ internal static class GraphFactText
     /// have (FR4, D7).
     /// </summary>
     /// <param name="node">The table.</param>
+    /// <param name="words">The origin's words.</param>
     /// <returns>The one line printed under the table's name.</returns>
-    internal static string NodeFacts(CatalogGraphNode node)
+    internal static string NodeFacts(CatalogGraphNode node, GraphOriginWords words)
     {
         if (!node.IsCaptured)
         {
-            return "not in this catalog";
+            return words.OutsideNote;
         }
 
         if (node.RowCount is not { } rows)
         {
-            return "no data captured";
+            return words.RowsNote;
         }
 
         return $"{Rows(rows)} {Count(rows, "row", "rows")}";
@@ -66,10 +67,11 @@ internal static class GraphFactText
     /// figure (FR12, D7), and the words that name a link table, marked as the inference it is (D14.3).
     /// </summary>
     /// <param name="node">The table.</param>
+    /// <param name="words">The origin's words.</param>
     /// <returns>The tooltip text.</returns>
-    internal static string NodeTitle(CatalogGraphNode node)
+    internal static string NodeTitle(CatalogGraphNode node, GraphOriginWords words)
     {
-        var state = node.IsCaptured ? NodeFacts(node) : "not in this catalog";
+        var state = node.IsCaptured ? NodeFacts(node, words) : words.OutsideNote;
         var join = node.JoinTableBetween is null ? string.Empty : $" \u2014 {node.JoinTableBetween} (inferred)";
         return $"{node.DisplayName} \u2014 {state} \u2014 references {node.DegreeOut}, referenced by {node.DegreeIn}{join}";
     }
@@ -79,8 +81,9 @@ internal static class GraphFactText
     /// declared delete behaviour spelled out rather than only styled.
     /// </summary>
     /// <param name="edge">The constraint.</param>
+    /// <param name="words">The origin's words.</param>
     /// <returns>The rule in words.</returns>
-    internal static string Rule(CatalogGraphEdge edge)
+    internal static string Rule(CatalogGraphEdge edge, GraphOriginWords words)
     {
         if (edge.IsSelfReference)
         {
@@ -89,7 +92,7 @@ internal static class GraphFactText
 
         if (!edge.ParentIsCaptured)
         {
-            return "outside the catalog";
+            return words.OutsideRule;
         }
 
         return edge.IsMandatory ? "mandatory" : "optional";

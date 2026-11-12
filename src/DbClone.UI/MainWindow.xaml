@@ -223,10 +223,17 @@
                     </Grid>
 
                     <!--  Connection panels  -->
-                    <StackPanel Grid.Row="1" Orientation="Horizontal"
-                                IsEnabled="{Binding Context.IsBusy, Converter={StaticResource InvertBoolConverter}}">
+                    <!--  Two equal columns: a horizontal stack sizes each child to its own content, so the
+                          source and the destination never came out the same width or height  -->
+                    <Grid Grid.Row="1"
+                          IsEnabled="{Binding Context.IsBusy, Converter={StaticResource InvertBoolConverter}}">
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="*" />
+                            <ColumnDefinition Width="Auto" />
+                            <ColumnDefinition Width="*" />
+                        </Grid.ColumnDefinitions>
                         <!--  Source panel + Store action button  -->
-                        <StackPanel Orientation="Vertical">
+                        <StackPanel Grid.Column="0" Orientation="Vertical">
                             <views:ConnectionView DataContext="{Binding Context.Source}" MinWidth="300" />
                             <ui:Button
                                 Margin="0,8,0,0"
@@ -242,15 +249,15 @@
                                 </ui:Button.Content>
                             </ui:Button>
 
-                            <!--  Relationship view: the last store's catalog, and any catalog on disk (feature 07)  -->
+                            <!--  Relationship view: the source database read live, and any catalog on disk (feature 11)  -->
                             <StackPanel
                                 Margin="0,8,0,0"
                                 HorizontalAlignment="Center"
                                 Orientation="Horizontal">
                                 <ui:Button
                                     Appearance="Secondary"
-                                    Command="{Binding DataContext.ViewRelationshipsCommand, RelativeSource={RelativeSource AncestorType=Window}}"
-                                    ToolTip="Open the relationship view of the catalog the last store wrote">
+                                    Command="{Binding DataContext.ViewSourceRelationshipsCommand, RelativeSource={RelativeSource AncestorType=Window}}"
+                                    ToolTip="Open the relationship view of the source database (read live, nothing is written)">
                                     <ui:Button.Content>
                                         <StackPanel Orientation="Horizontal">
                                             <ui:SymbolIcon Symbol="Document16" Margin="0,0,6,0" />
@@ -263,14 +270,14 @@
                                     Padding="6"
                                     Appearance="Transparent"
                                     Command="{Binding DataContext.BrowseRelationshipsCommand, RelativeSource={RelativeSource AncestorType=Window}}"
-                                    ToolTip="Open the relationship view of another stored catalog">
+                                    ToolTip="Open the relationship view of a stored catalog">
                                     <ui:SymbolIcon Symbol="FolderOpen16" FontSize="16" />
                                 </ui:Button>
                             </StackPanel>
                         </StackPanel>
 
                         <!--  Group action buttons  -->
-                        <StackPanel Orientation="Vertical" VerticalAlignment="Center" Margin="8,0" DataContext="{Binding Connections}">
+                        <StackPanel Grid.Column="1" Orientation="Vertical" VerticalAlignment="Center" Margin="8,0" DataContext="{Binding Connections}">
                             <ui:Button
                                 Appearance="Transparent"
                                 Command="{Binding CreateGroupFromCurrentCommand}"
@@ -289,7 +296,7 @@
                         </StackPanel>
 
                         <!--  Destination panel + Restore action button  -->
-                        <StackPanel Orientation="Vertical">
+                        <StackPanel Grid.Column="2" Orientation="Vertical">
                             <views:ConnectionView DataContext="{Binding Context.Destination}" MinWidth="300" />
                             <ui:Button
                                 Margin="0,8,0,0"
@@ -304,8 +311,23 @@
                                     </StackPanel>
                                 </ui:Button.Content>
                             </ui:Button>
+
+                            <!--  Relationship view: the destination database read live (feature 11)  -->
+                            <ui:Button
+                                Margin="0,8,0,0"
+                                HorizontalAlignment="Center"
+                                Appearance="Secondary"
+                                Command="{Binding DataContext.ViewTargetRelationshipsCommand, RelativeSource={RelativeSource AncestorType=Window}}"
+                                ToolTip="Open the relationship view of the destination database (read live, nothing is written)">
+                                <ui:Button.Content>
+                                    <StackPanel Orientation="Horizontal">
+                                        <ui:SymbolIcon Symbol="Document16" Margin="0,0,6,0" />
+                                        <TextBlock Text="View relationships" />
+                                    </StackPanel>
+                                </ui:Button.Content>
+                            </ui:Button>
                         </StackPanel>
-                    </StackPanel>
+                    </Grid>
 
                     <!--  Progress (DataContext switches by mode; StoreRestore takes priority when running)  -->
                     <views:ProgressView Grid.Row="2">

@@ -1,3 +1,5 @@
+using DbClone.Application.Relationship;
+
 namespace DbClone.Application.Interchange;
 
 /// <summary>
@@ -61,7 +63,7 @@ public interface IInterchangeService
     /// <param name="catalogPath">The catalog folder to read.</param>
     /// <param name="cancellationToken">Cancellation token.</param>
     /// <returns>The relationship graph as app DTOs.</returns>
-    Task<CatalogGraphView> ReadGraphAsync(
+    Task<RelationshipGraphView> ReadGraphAsync(
         string catalogPath,
         CancellationToken cancellationToken);
 

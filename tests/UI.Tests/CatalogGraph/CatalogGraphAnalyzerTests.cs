@@ -1,4 +1,5 @@
 using DbClone.Application.Interchange;
+using DbClone.Application.Relationship;
 using DbClone.UI.Models.CatalogGraph;
 using DbClone.UI.Services;
 
@@ -275,7 +276,7 @@ public sealed class CatalogGraphAnalyzerTests
     /// A 150-table, 160-edge catalog whose most referenced table is the hub D8 refuses, because its
     /// closed one-step neighbourhood is wider than the limit.
     /// </summary>
-    private static CatalogGraphView HubAndChainCatalog()
+    private static RelationshipGraphView HubAndChainCatalog()
     {
         var fixture = CatalogGraphFixture.Create();
         for (var table = 0; table < 150; table++)

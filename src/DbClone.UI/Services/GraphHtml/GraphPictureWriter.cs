@@ -38,6 +38,7 @@ internal sealed class GraphPictureWriter
     private readonly CatalogGraphLayout _layout;
     private readonly ClusterSwitchSet _switches;
     private readonly HashSet<int> _drawn;
+    private readonly GraphOriginWords _words;
 
     /// <summary>Creates the writer for one document.</summary>
     /// <param name="model">The analyzed graph.</param>
@@ -51,6 +52,7 @@ internal sealed class GraphPictureWriter
         _layout = layout;
         _switches = new ClusterSwitchSet(model);
         _drawn = Drawn();
+        _words = GraphOriginWords.For(model.Origin.Kind);
     }
 
     /// <summary>Writes the viewport's contents: one path per constraint, one card per table.</summary>
@@ -167,7 +169,7 @@ internal sealed class GraphPictureWriter
                 html.Append(" data-m=\"").Append(node.CyclicGroupNumber).Append('"');
             }
 
-            html.Append(">\n<title>").Append(GraphHtmlText.Escape(GraphFactText.NodeTitle(node)))
+            html.Append(">\n<title>").Append(GraphHtmlText.Escape(GraphFactText.NodeTitle(node, _words)))
                 .Append("</title>\n");
 
             html.Append("<rect x=\"").Append(GraphHtmlText.Num(place.TopLeft.X))
@@ -181,7 +183,7 @@ internal sealed class GraphPictureWriter
                 .Append(GraphHtmlText.Escape(node.DisplayName)).Append("</text>\n");
             html.Append("<text class=\"count\" x=\"").Append(GraphHtmlText.Num(textX))
                 .Append("\" y=\"").Append(GraphHtmlText.Num(place.TopLeft.Y + GraphCard.FactBaseline)).Append("\">")
-                .Append(GraphHtmlText.Escape(GraphFactText.NodeFacts(node))).Append("</text>\n");
+                .Append(GraphHtmlText.Escape(GraphFactText.NodeFacts(node, _words))).Append("</text>\n");
 
             html.Append("</g>\n");
         }

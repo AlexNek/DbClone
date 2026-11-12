@@ -12,6 +12,9 @@
 #   .\build-installer-wix.ps1                          # win-x64, GitVersion version
 #   .\build-installer-wix.ps1 -Version 2.1.0           # explicit version
 #   .\build-installer-wix.ps1 -Runtime win-arm64       # different platform
+#
+# Requires network access once: the WebView2 Evergreen bootstrapper is downloaded
+# into artifacts\prerequisites and reused on later runs (see step 1).
 
 param(
     [string]$Version = "",
@@ -65,8 +68,30 @@ New-Item -ItemType Directory -Path "$Root\artifacts" -Force | Out-Null
 # Report the resolved version back to build-installer.bat for its summary
 Set-Content -Path "$Root\artifacts\.last-version" -Value $Version
 
-# --- Step 1: Publish the app ---
-Write-Host "`n[1/4] Publishing self-contained ($Runtime)..." -ForegroundColor Cyan
+# --- Step 1: Fetch the WebView2 prerequisite ---
+# Microsoft's Evergreen bootstrapper is vendored into artifacts\prerequisites and
+# bound by the bundle project, so the WiX build itself never reaches the network
+# (the same pattern the repo uses for the WiX extensions). The file is reused when
+# present: a local rebuild does not download it again.
+Write-Host "`n[1/5] Fetching the WebView2 prerequisite..." -ForegroundColor Cyan
+
+$Prerequisites = "$Root\artifacts\prerequisites"
+$WebView2Setup = "$Prerequisites\MicrosoftEdgeWebView2Setup.exe"
+
+New-Item -ItemType Directory -Path $Prerequisites -Force | Out-Null
+
+if (Test-Path $WebView2Setup) {
+    Write-Host "WebView2 bootstrapper already present, reusing it." -ForegroundColor DarkGray
+}
+else {
+    Write-Host "Downloading the WebView2 Evergreen bootstrapper..." -ForegroundColor Gray
+    Invoke-WebRequest -Uri "https://go.microsoft.com/fwlink/p/?LinkId=2124703" -OutFile $WebView2Setup -UseBasicParsing
+
+    if (-not (Test-Path $WebView2Setup)) { throw "WebView2 bootstrapper download failed" }
+}
+
+# --- Step 2: Publish the app ---
+Write-Host "`n[2/5] Publishing self-contained ($Runtime)..." -ForegroundColor Cyan
 dotnet publish "$Root\src\DbClone.UI\DbClone.UI.csproj" `
     -c Release `
     -r $Runtime `
@@ -77,8 +102,8 @@ dotnet publish "$Root\src\DbClone.UI\DbClone.UI.csproj" `
 
 if ($LASTEXITCODE -ne 0) { throw "dotnet publish failed" }
 
-# --- Step 2: Build MSI ---
-Write-Host "`n[2/4] Building MSI package..." -ForegroundColor Cyan
+# --- Step 3: Build MSI ---
+Write-Host "`n[3/5] Building MSI package..." -ForegroundColor Cyan
 dotnet build "$Root\installer\DbClone.Installer.Msi\DbClone.Installer.Msi.wixproj" `
     -c Release `
     -p:Version=$Version `
@@ -86,8 +111,8 @@ dotnet build "$Root\installer\DbClone.Installer.Msi\DbClone.Installer.Msi.wixpro
 
 if ($LASTEXITCODE -ne 0) { throw "MSI build failed" }
 
-# --- Step 3: Publish Installer UI (self-contained single-file) ---
-Write-Host "`n[3/4] Publishing Installer UI..." -ForegroundColor Cyan
+# --- Step 4: Publish Installer UI (self-contained single-file) ---
+Write-Host "`n[4/5] Publishing Installer UI..." -ForegroundColor Cyan
 dotnet publish "$Root\installer\DbClone.Installer.UI\DbClone.Installer.UI.csproj" `
     -c Release `
     -r $Runtime `
@@ -98,8 +123,8 @@ dotnet publish "$Root\installer\DbClone.Installer.UI\DbClone.Installer.UI.csproj
 
 if ($LASTEXITCODE -ne 0) { throw "Installer UI publish failed" }
 
-# --- Step 4: Build Bundle (bootstrapper) ---
-Write-Host "`n[4/4] Building Burn bundle..." -ForegroundColor Cyan
+# --- Step 5: Build Bundle (bootstrapper) ---
+Write-Host "`n[5/5] Building Burn bundle..." -ForegroundColor Cyan
 dotnet build "$Root\installer\DbClone.Installer.Bundle\DbClone.Installer.Bundle.wixproj" `
     -c Release `
     -p:Version=$Version `

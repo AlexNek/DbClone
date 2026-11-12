@@ -1,8 +1,9 @@
 using System.Text;
 using System.Text.Json;
 using System.Text.Json.Serialization;
-using DbClone.Application.Interchange;
+using DbClone.Application.Relationship;
 using DbClone.UI.Models.CatalogGraph;
+using DbClone.UI.Services.GraphAnalysis;
 
 namespace DbClone.UI.Services.GraphHtml;
 
@@ -29,19 +30,21 @@ internal sealed class GraphIslandWriter
         WriteIndented = false,
     };
 
-    private readonly CatalogGraphView _view;
+    private readonly RelationshipGraphView _view;
     private readonly CatalogGraphModel _model;
+    private readonly GraphOriginWords _words;
 
     /// <summary>Creates the writer for one document.</summary>
-    /// <param name="view">The catalog as read back, for the facts the graph itself does not carry.</param>
+    /// <param name="view">The origin as read back, for the facts the graph itself does not carry.</param>
     /// <param name="model">The analyzed graph.</param>
-    public GraphIslandWriter(CatalogGraphView view, CatalogGraphModel model)
+    public GraphIslandWriter(RelationshipGraphView view, CatalogGraphModel model)
     {
         ArgumentNullException.ThrowIfNull(view);
         ArgumentNullException.ThrowIfNull(model);
 
         _view = view;
         _model = model;
+        _words = GraphOriginWords.For(model.Origin.Kind);
     }
 
     /// <summary>Writes the island.</summary>
@@ -55,7 +58,11 @@ internal sealed class GraphIslandWriter
             tables = _model.TableCount,
             relations = _model.RelationCount,
             hasData = _model.HasData,
-            source = _view.SourceDialect,
+            source = _view.Origin.Dialect,
+            // The two sentences the panel and the card print for a figure the origin cannot supply.
+            // They travel with the island so the script never states a word of its own (D12).
+            rowsNote = _words.RowsNote,
+            outsideNote = _words.OutsideNote,
             nodes = NodeRows(),
             edges = EdgeRows(),
             details = DetailRows(),

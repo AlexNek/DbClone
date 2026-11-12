@@ -39,7 +39,7 @@ internal static class CatalogGraphScript
   }
 
   function rowsPhrase(rows) {
-    if (rows === null || rows === undefined) return "no data captured";
+    if (rows === null || rows === undefined) return data.rowsNote;
     return rows + (rows === 1 ? " row" : " rows");
   }
 
@@ -56,6 +56,22 @@ internal static class CatalogGraphScript
   // them is their card — and an arrow is shown only while both of the tables it joins are.
   function shown(element2) {
     return !element2.classList.contains("off") && !element2.classList.contains("away");
+  }
+
+  // The chip axes, read from the island so the script names no kind of its own. A table is claimed by
+  // one chip per axis — its schema, the cyclic group it sits in, and the unconnected set — and each
+  // axis filters on its own, so switching a schema off hides every one of its tables even when a
+  // cyclic-group chip also claims them (T27).
+  var chipKind = new Map();
+  data.chips.forEach(function (chip) { chipKind.set(chip.i, chip.kind); });
+
+  function claimsOf(element2) {
+    return (element2.getAttribute("data-c") || "").split(" ").filter(Boolean).map(Number);
+  }
+
+  function axisOn(claims, kind) {
+    var ofKind = claims.filter(function (claim) { return chipKind.get(claim) === kind; });
+    return ofKind.length === 0 || ofKind.some(function (claim) { return !offChips.has(claim); });
   }
 
   function updateCounts() {
@@ -77,14 +93,26 @@ internal static class CatalogGraphScript
   function applyChips() {
     var visible = new Set();
     nodes.forEach(function (element2) {
-      var claims = (element2.getAttribute("data-c") || "").split(" ").filter(Boolean);
-      var shown = claims.length === 0 || claims.some(function (chip) { return !offChips.has(Number(chip)); });
-      element2.classList.toggle("off", !shown);
-      if (shown) visible.add(Number(element2.getAttribute("data-n")));
+      var claims = claimsOf(element2);
+      var onScreen = axisOn(claims, "Schema")
+        && axisOn(claims, "CyclicGroup")
+        && axisOn(claims, "Unconnected");
+      element2.classList.toggle("off", !onScreen);
+      if (onScreen) visible.add(Number(element2.getAttribute("data-n")));
     });
     edges.forEach(function (element2) {
       var edge = data.edges[Number(element2.getAttribute("data-e"))];
       element2.classList.toggle("off", !visible.has(edge.c) || !visible.has(edge.p));
+    });
+    // A collapsed group is drawn as one box over its members, so the box follows them: a schema the
+    // reader switched off leaves no labelled box standing over an empty part of the picture (T27).
+    Array.prototype.forEach.call(document.querySelectorAll("#viewport .super"), function (element2) {
+      var group = element2.getAttribute("data-g");
+      var anyMember = false;
+      nodes.forEach(function (card) {
+        if (card.getAttribute("data-m") === group && !card.classList.contains("off")) anyMember = true;
+      });
+      element2.classList.toggle("off", !anyMember);
     });
     updateCounts();
   }
@@ -227,7 +255,7 @@ internal static class CatalogGraphScript
     if (!detail) return;
     panel.textContent = "";
     panel.appendChild(element("h2", null, titleOf(detail, cardOf.get(index))));
-    panel.appendChild(element("p", "meta", detail.cap ? rowsPhrase(detail.rows) : "not in this catalog"));
+    panel.appendChild(element("p", "meta", detail.cap ? rowsPhrase(detail.rows) : data.outsideNote));
     if (detail.g !== null && detail.g !== undefined) {
       panel.appendChild(element("p", "meta",
         "cyclic group " + detail.g + ": " + detail.members.length + " tables, this one points back into it"));
@@ -293,7 +321,11 @@ internal static class CatalogGraphScript
     });
   }
 
-  function cardOf(index) {
+  // The card a table is drawn with, by the index the island states. The map above is the island's own
+  // lookup and this one answers with an element, so the two cannot share a name: a function and a
+  // variable of one name leave the map where the reveal calls the function, and the call throws — a
+  // search that reports a match and then shows nothing at all.
+  function cardElement(index) {
     var found = null;
     nodes.forEach(function (element2) {
       if (Number(element2.getAttribute("data-n")) === index) found = element2;
@@ -306,8 +338,21 @@ internal static class CatalogGraphScript
   // that table — a search whose result selects a card nobody can see reads as a search that does
   // nothing at all — so the three ways of hiding a card are undone before the card is selected.
   function showCard(index) {
-    var card = cardOf(index);
+    var card = cardElement(index);
     if (!card) return;
+
+    // The chips own their filter, so a chip that hides this table is switched back on rather than the
+    // card's own class being removed behind the chip's back: the next chip click must not undo this.
+    // Every axis the table is claimed by has to be on again, or the reveal would leave it hidden.
+    var switched = false;
+    claimsOf(card).forEach(function (claim) {
+      var chip = document.querySelector("#chips .chip[data-c=\"" + claim + "\"]");
+      if (chip && !chip.classList.contains("on")) {
+        setChip(chip, true);
+        switched = true;
+      }
+    });
+    if (switched) applyChips();
 
     card.classList.remove("away");
 
@@ -322,18 +367,6 @@ internal static class CatalogGraphScript
       }
     }
 
-    // The chips own their filter, so a chip that hides this table is switched back on rather than the
-    // card's own class being removed behind the chip's back: the next chip click must not undo this.
-    var switched = false;
-    (card.getAttribute("data-c") || "").split(" ").filter(Boolean).forEach(function (claim) {
-      var chip = document.querySelector("#chips .chip[data-c=\"" + claim + "\"]");
-      if (chip && !chip.classList.contains("on")) {
-        setChip(chip, true);
-        switched = true;
-      }
-    });
-    if (switched) applyChips();
-
     // An arrow is shown only while both of its tables are, so the arrows this card joins to tables the
     // picture already shows come back with it; the ones to tables still out of sight stay hidden rather
     // than pointing at blank space.
@@ -341,7 +374,7 @@ internal static class CatalogGraphScript
       var edge = data.edges[Number(element2.getAttribute("data-e"))];
       var other = edge.c === index ? edge.p : edge.p === index ? edge.c : null;
       if (other === null) return;
-      var neighbour = cardOf(other);
+      var neighbour = cardElement(other);
       if (neighbour && shown(neighbour)) element2.classList.remove("away");
     });
 
@@ -358,7 +391,7 @@ internal static class CatalogGraphScript
   // stage shows whatever part of the picture it was laid out over, so only the two boxes say where the
   // card is now.
   function bringIntoView(index) {
-    var card = cardOf(index);
+    var card = cardElement(index);
     if (!card) return;
     var stage = svg.parentNode.getBoundingClientRect();
     var canvas = svg.getBoundingClientRect();
@@ -431,12 +464,63 @@ internal static class CatalogGraphScript
 
   function fit() {
     var stage = svg.parentNode.getBoundingClientRect();
-    var width = Number(svg.getAttribute("width"));
-    var height = Number(svg.getAttribute("height"));
-    if (!width || !height) return;
-    scale = Math.min(stage.width / width, stage.height / height) * 0.97;
-    shiftX = (stage.width - width * scale) / 2;
-    shiftY = (stage.height - height * scale) / 2;
+    var box = pictureBox();
+    if (!box) return;
+    var width = Math.max(1, box.right - box.left);
+    var height = Math.max(1, box.bottom - box.top);
+    placeContent(Math.min(stage.width / width, stage.height / height) * 0.97);
+  }
+
+  // The part of the canvas the reader can actually look at: the cards and the collapsed group boxes on
+  // screen, read from the coordinates the layout wrote rather than from the current screen box, so the
+  // answer does not depend on the zoom. A blank corner of the canvas is not part of it.
+  function pictureBox() {
+    var box = null;
+    Array.prototype.forEach.call(document.querySelectorAll("#viewport .node, #viewport .super"), function (element2) {
+      if (!shown(element2) || element2.classList.contains("hidden")) return;
+      var rect = element2.querySelector("rect");
+      if (!rect) return;
+      var left = Number(rect.getAttribute("x"));
+      var top = Number(rect.getAttribute("y"));
+      var right = left + Number(rect.getAttribute("width"));
+      var bottom = top + Number(rect.getAttribute("height"));
+      box = box === null
+        ? { left: left, top: top, right: right, bottom: bottom }
+        : {
+          left: Math.min(box.left, left), top: Math.min(box.top, top),
+          right: Math.max(box.right, right), bottom: Math.max(box.bottom, bottom),
+        };
+    });
+    return box;
+  }
+
+  // Where the picture goes: the scale asked for, and then either centred in the stage or aligned to its
+  // own top-left corner. The canvas of a large database is many screens across, so the corner the
+  // document used to open on was empty canvas with no table in it — and "100%" put the reader back on
+  // that empty corner (T27). Centring is the answer only while the picture fits: the middle of a
+  // picture taller than the stage is a corridor as often as it is a table, and a reader who asks for
+  // 100% wants the first table, not the middle of nothing.
+  function placeContent(wanted) {
+    var stage = svg.parentNode.getBoundingClientRect();
+    // The wheel's floor is where a card stops being readable; a fit is allowed below it, because a
+    // picture that does not fit its stage is not a fit and a reader who asked for one gets all of it.
+    scale = Math.min(4, Math.max(0.02, wanted));
+    var box = pictureBox();
+    if (box === null) {
+      shiftX = 0;
+      shiftY = 0;
+      applyTransform();
+      return;
+    }
+    var margin = 16;
+    var width = (box.right - box.left) * scale;
+    var height = (box.bottom - box.top) * scale;
+    shiftX = width <= stage.width
+      ? (stage.width - width) / 2 - box.left * scale
+      : margin - box.left * scale;
+    shiftY = height <= stage.height
+      ? (stage.height - height) / 2 - box.top * scale
+      : margin - box.top * scale;
     applyTransform();
   }
 
@@ -491,6 +575,17 @@ internal static class CatalogGraphScript
     if (edge) highlightEdge(Number(edge.getAttribute("data-e")));
   });
 
+  // The collapsed group's box is reachable with Tab — it states role="button" and tabindex="0" — so
+  // Enter and Space have to expand it: a control that takes the focus and ignores the keyboard is a
+  // button that does not work.
+  svg.addEventListener("keydown", function (event) {
+    if (event.key !== "Enter" && event.key !== " ") return;
+    var supernode = event.target.closest ? event.target.closest("[data-g]") : null;
+    if (!supernode) return;
+    event.preventDefault();
+    toggleGroup(Number(supernode.getAttribute("data-g")));
+  });
+
   function setChip(chip, on) {
     chip.classList.toggle("on", on);
     chip.setAttribute("aria-pressed", on ? "true" : "false");
@@ -535,7 +630,7 @@ internal static class CatalogGraphScript
     if (action === "in") zoomAround(1.25, stage.left + stage.width / 2, stage.top + stage.height / 2);
     if (action === "out") zoomAround(1 / 1.25, stage.left + stage.width / 2, stage.top + stage.height / 2);
     if (action === "fit") fit();
-    if (action === "reset") { scale = 1; shiftX = 0; shiftY = 0; applyTransform(); }
+    if (action === "reset") placeContent(1);
   });
 
   var showAll = document.getElementById("showall");
@@ -564,7 +659,11 @@ internal static class CatalogGraphScript
   });
 
   applyChips();
-  applyTransform();
+  // The document opens at its own size with the picture centred in the stage, not on the canvas origin:
+  // the picture is laid out across a canvas many screens wide, so the corner it used to open on was
+  // empty canvas and no table at all. Fitting on open would answer with a thumbnail of a large
+  // database, which is why the opening scale is the document's own and "Fit" stays a button (T27).
+  placeContent(1);
 }());
 """;
 }

@@ -1,4 +1,5 @@
 using DbClone.UI.Models.CatalogGraph;
+using DbClone.UI.Services.GraphAnalysis;
 
 namespace DbClone.UI.Services.GraphLayout;
 
@@ -40,10 +41,11 @@ internal sealed class GraphLayoutEngine
                 GraphRankedPlacement.Margin * 2);
         }
 
+        var words = GraphOriginWords.For(model.Origin.Kind);
         var widths = new double[model.Nodes.Count];
         for (var node = 0; node < widths.Length; node++)
         {
-            widths[node] = GraphCard.WidthOf(model.Nodes[node]);
+            widths[node] = GraphCard.WidthOf(model.Nodes[node], words);
         }
 
         var (placement, grid) = GraphRankedPlacement.Place(model, widths);

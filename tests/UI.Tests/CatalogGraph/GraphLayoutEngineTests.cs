@@ -2,8 +2,10 @@ using System.Globalization;
 using System.Text;
 
 using DbClone.Application.Interchange;
+using DbClone.Application.Relationship;
 using DbClone.UI.Models.CatalogGraph;
 using DbClone.UI.Services;
+using DbClone.UI.Services.GraphAnalysis;
 using DbClone.UI.Services.GraphLayout;
 
 using FluentAssertions;
@@ -21,6 +23,18 @@ public sealed class GraphLayoutEngineTests
     private readonly CatalogGraphAnalyzer _analyzer = new();
 
     private readonly GraphLayoutEngine _engine = new();
+
+    /// <summary>The words a fixture states its origin in: every fixture here is a catalog.</summary>
+    private static readonly GraphOriginWords Words = GraphOriginWords.For(EGraphOriginKind.Catalog);
+
+    /// <summary>How finely a curve is sampled to read back the ink the document paints for it.</summary>
+    private const int InkSamples = 12;
+
+    /// <summary>How finely a route is walked when its ink is compared with another's.</summary>
+    private const double InkStep = 2;
+
+    /// <summary>The shortest stretch two routes can share and still be read as two arrows.</summary>
+    private const double InkRun = 14;
 
     // ── T4: one encoding, one meaning ─────────────────────────────────────────────
 
@@ -313,7 +327,7 @@ public sealed class GraphLayoutEngineTests
 
         small.Width.Should().Be(giant.Width, "no card is normalised against this catalog's largest table");
         small.Height.Should().Be(giant.Height);
-        small.Width.Should().Be(GraphCard.WidthOf(smallModel.Nodes[small.NodeIndex]));
+        small.Width.Should().Be(GraphCard.WidthOf(smallModel.Nodes[small.NodeIndex], Words));
     }
 
     // ── T12: the card ─────────────────────────────────────────────────────────────
@@ -329,8 +343,8 @@ public sealed class GraphLayoutEngineTests
         var shortName = layout.Nodes[model.NodeIndexesById[CatalogGraphFixture.TableId("sized", "id")]];
         var longName = layout.Nodes[model.NodeIndexesById[CatalogGraphFixture.TableId("sized", "a_considerably_longer_table_name")]];
 
-        shortName.Width.Should().Be(GraphCard.WidthOf(model.Nodes[shortName.NodeIndex]));
-        longName.Width.Should().Be(GraphCard.WidthOf(model.Nodes[longName.NodeIndex]));
+        shortName.Width.Should().Be(GraphCard.WidthOf(model.Nodes[shortName.NodeIndex], Words));
+        longName.Width.Should().Be(GraphCard.WidthOf(model.Nodes[longName.NodeIndex], Words));
         longName.Width.Should().BeGreaterThan(shortName.Width, "a name must be read, so it widens its own card");
         layout.Nodes.Should().OnlyContain(
             node => node.Height == GraphCard.Height,
@@ -610,7 +624,7 @@ public sealed class GraphLayoutEngineTests
         static string Table(string name) => CatalogGraphFixture.TableId("slide", name);
     }
 
-    // ── T26: one route per corridor line, and no label over a card ────────────────
+    // ── T26: one route per corridor line ──────────────────────────────────────────
 
     [Fact]
     public void Two_routes_never_run_along_the_same_corridor_line()
@@ -779,7 +793,7 @@ public sealed class GraphLayoutEngineTests
             Math.Sqrt(Math.Pow(first.X - second.X, 2) + Math.Pow(first.Y - second.Y, 2));
 
         NodePlacement At(int node, double top) =>
-            new(node, new GraphPoint(0, top), GraphCard.WidthOf(model.Nodes[node]), GraphCard.Height);
+            new(node, new GraphPoint(0, top), GraphCard.WidthOf(model.Nodes[node], Words), GraphCard.Height);
     }
 
     [Fact]
@@ -844,6 +858,45 @@ public sealed class GraphLayoutEngineTests
             "a full side hands the ends it has no room for to the next one");
     }
 
+    // ── T26: the ink, not the shape ───────────────────────────────────────────────
+
+    [Fact]
+    public void No_two_arrows_are_drawn_on_one_stroke()
+    {
+        // A curve used to stand outside the rule: the router neither claimed a cycle's curve nor tested
+        // a candidate against one, so a hub inside a cycle drew several constraints on one stroke and
+        // the reader could tell neither where one ended nor which table the third joined. The rule is
+        // about ink and not about shape — a curve lying along a corridor line is two arrows on one line
+        // exactly as a dog-leg lying along it is — so every shape is compared with every other here.
+        var requirements = CatalogGraphFixture.TableId("hub", "requirements");
+        var versions = CatalogGraphFixture.TableId("hub", "requirement_versions");
+        var comments = CatalogGraphFixture.TableId("hub", "comments");
+        var projects = CatalogGraphFixture.TableId("hub", "projects");
+        var schemas = CatalogGraphFixture.TableId("hub", "data_schemas");
+        var signatures = CatalogGraphFixture.TableId("hub", "signatures");
+
+        var fixture = CatalogGraphFixture.Create()
+            .Table("hub", "requirements", 839, Column("project_id"), Column("version_id"), Column("parent_id"))
+            .Table("hub", "requirement_versions", 12, Column("requirement_id"))
+            .Table("hub", "comments", 1, Column("requirement_id"), Column("author_id"))
+            .Table("hub", "projects", 50, Column("status_id"))
+            .Table("hub", "data_schemas", 50, Column("version_id"))
+            .Table("hub", "signatures", 3, Column("requirement_id"))
+            .Edge(requirements, projects, "fk_requirements_project", ["project_id"])
+            .Edge(versions, requirements, "fk_versions_requirement", ["requirement_id"])
+            .Edge(requirements, versions, "fk_requirements_version", ["version_id"])
+            .Edge(comments, requirements, "fk_comments_requirement", ["requirement_id"])
+            .Edge(comments, comments, "fk_comments_author", ["author_id"])
+            .Edge(schemas, versions, "fk_schemas_version", ["version_id"])
+            .Edge(signatures, requirements, "fk_signatures_requirement", ["requirement_id"])
+            .Edge(signatures, signatures, "fk_signatures_copy", ["requirement_id"]);
+
+        var model = Analyze(fixture);
+        var layout = _engine.Compute(model);
+
+        AssertNoTwoArrowsRunOnOneStroke(layout);
+    }
+
     // ── Helpers ───────────────────────────────────────────────────────────────────
 
     /// <summary>The vertical segments of a route: the line each runs along and the stretch of it it covers.</summary>
@@ -893,7 +946,7 @@ public sealed class GraphLayoutEngineTests
         return fixture;
     }
 
-    private static CatalogColumnView Column(string name) =>
+    private static RelationshipColumnView Column(string name) =>
         new(name, "integer", false, false, true, false, null);
 
     private static string Id(string schema, int table, int digits = 1) =>
@@ -903,7 +956,7 @@ public sealed class GraphLayoutEngineTests
 
     /// <summary>The lattice the engine placed the cards on, computed the same way so the cells can be asserted.</summary>
     private static GraphGrid GridOf(CatalogGraphModel model) =>
-        GraphRankedPlacement.Place(model, [.. model.Nodes.Select(GraphCard.WidthOf)]).Grid;
+        GraphRankedPlacement.Place(model, [.. model.Nodes.Select(node => GraphCard.WidthOf(node, Words))]).Grid;
 
     /// <summary>How many grid steps separate two cards, counted the way placement counts them.</summary>
     private static int Step(GraphGrid grid, int first, int second) =>
@@ -1058,6 +1111,162 @@ public sealed class GraphLayoutEngineTests
         }
 
         return fixture;
+    }
+
+    /// <summary>
+    /// Every route read as the ink it draws, then every pair compared: two stretches are one stroke when
+    /// they head the same way and lie within a mark's gap of one another over a stretch worth drawing —
+    /// the case a reader cannot read apart, however the router arrived at it. A crossing is one point of
+    /// contact and stays two arrows, so the run has to continue in both directions before it counts.
+    /// </summary>
+    private static void AssertNoTwoArrowsRunOnOneStroke(CatalogGraphLayout layout)
+    {
+        var traces = layout.Edges.Select(route => (route.EdgeIndex, Trace: Trace(route))).ToList();
+        var violations = new List<string>();
+
+        for (var first = 0; first < traces.Count; first++)
+        {
+            for (var second = first + 1; second < traces.Count; second++)
+            {
+                var together = DrawnAlong(traces[first].Trace, traces[second].Trace);
+                if (together > 0)
+                {
+                    violations.Add(
+                        $"edges {traces[first].EdgeIndex} and {traces[second].EdgeIndex} are drawn on one stroke for " +
+                        $"{Round(together)} px: {Show(layout.Edges[traces[first].EdgeIndex])} / " +
+                        $"{Show(layout.Edges[traces[second].EdgeIndex])}");
+                }
+            }
+        }
+
+        violations.Distinct().Should().BeEmpty("two arrows drawn on one line read as one arrow joining four tables");
+    }
+
+    /// <summary>A route written out for a failure message: its shape and every point the document paints.</summary>
+    private static string Show(EdgeRoute route) =>
+        route.Shape + " " + string.Join(' ', route.Points.Select(point => $"({Round(point.X)},{Round(point.Y)})"));
+
+    /// <summary>A route as the paper shows it: points along the stroke, and how far along the stroke each sits.</summary>
+    private sealed record InkTrace(IReadOnlyList<GraphPoint> Points, IReadOnlyList<double> Along);
+
+    /// <summary>A route walked at a step small enough to compare two strokes as the eye follows them.</summary>
+    private static InkTrace Trace(EdgeRoute route)
+    {
+        var shape = new List<GraphPoint>();
+        if (route.Shape == EEdgeShape.Line)
+        {
+            shape.AddRange(route.Points);
+        }
+        else
+        {
+            for (var sample = 0; sample <= InkSamples; sample++)
+            {
+                shape.Add(CubicAt(route.Points, (double)sample / InkSamples));
+            }
+        }
+
+        var points = new List<GraphPoint> { shape[0] };
+        var along = new List<double> { 0 };
+        var walked = 0.0;
+
+        for (var index = 0; index + 1 < shape.Count; index++)
+        {
+            var (from, to) = (shape[index], shape[index + 1]);
+            var (dx, dy) = (to.X - from.X, to.Y - from.Y);
+            var length = Math.Sqrt((dx * dx) + (dy * dy));
+            var steps = Math.Max(1, (int)Math.Ceiling(length / InkStep));
+
+            for (var step = 1; step <= steps; step++)
+            {
+                var share = (double)step / steps;
+                points.Add(new GraphPoint(from.X + (dx * share), from.Y + (dy * share)));
+                along.Add(walked + (length * share));
+            }
+
+            walked += length;
+        }
+
+        return new InkTrace(points, along);
+    }
+
+    /// <summary>
+    /// How long the two routes are drawn on one another: the longest stretch of the first whose points
+    /// all lie within a mark's gap of the second and head the same way there, and over which the second
+    /// is walked at the same pace — a crossing matches for a point or two and then parts.
+    /// </summary>
+    private static double DrawnAlong(InkTrace one, InkTrace other)
+    {
+        var longest = 0.0;
+        var run = -1;
+        var (entered, left) = (0.0, 0.0);
+
+        for (var index = 0; index < one.Points.Count; index++)
+        {
+            var near = Nearest(other, one.Points[index]);
+
+            if (near.Distance > GraphEdgeRouter.InkGap || !Aligned(one, index, other, near.Index))
+            {
+                run = -1;
+                continue;
+            }
+
+            if (run < 0)
+            {
+                run = index;
+                (entered, left) = (near.Along, near.Along);
+            }
+
+            entered = Math.Min(entered, near.Along);
+            left = Math.Max(left, near.Along);
+
+            var mine = one.Along[index] - one.Along[run];
+            var theirs = left - entered;
+
+            if (mine >= InkRun && theirs >= InkRun)
+            {
+                longest = Math.Max(longest, Math.Min(mine, theirs));
+            }
+        }
+
+        return longest;
+    }
+
+    /// <summary>The nearest point of a route to a point beside it: how far, how far along, and which point.</summary>
+    private static (double Distance, double Along, int Index) Nearest(InkTrace trace, GraphPoint point)
+    {
+        var best = (Distance: double.MaxValue, Along: 0.0, Index: 0);
+
+        for (var index = 0; index < trace.Points.Count; index++)
+        {
+            var (dx, dy) = (trace.Points[index].X - point.X, trace.Points[index].Y - point.Y);
+            var distance = Math.Sqrt((dx * dx) + (dy * dy));
+
+            if (distance < best.Distance)
+            {
+                best = (distance, trace.Along[index], index);
+            }
+        }
+
+        return best;
+    }
+
+    /// <summary>Whether the two routes head the same way where they pass closest: a crossing does not.</summary>
+    private static bool Aligned(InkTrace one, int at, InkTrace other, int nearest)
+    {
+        var (ux, uy) = Step(one, at);
+        var (vx, vy) = Step(other, nearest);
+        var lengths = Math.Sqrt((ux * ux) + (uy * uy)) * Math.Sqrt((vx * vx) + (vy * vy));
+
+        return lengths > 0 && Math.Abs((ux * vy) - (uy * vx)) / lengths < 0.25;
+    }
+
+    /// <summary>The direction a route travels at one of its points.</summary>
+    private static (double X, double Y) Step(InkTrace trace, int index)
+    {
+        var from = trace.Points[Math.Max(0, index - 1)];
+        var to = trace.Points[Math.Min(trace.Points.Count - 1, index + 1)];
+
+        return (to.X - from.X, to.Y - from.Y);
     }
 
     private static string Signature(CatalogGraphLayout layout)

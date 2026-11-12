@@ -1,10 +1,10 @@
-namespace DbClone.Application.Interchange;
+namespace DbClone.Application.Relationship;
 
 /// <summary>
-/// One captured column in a catalog relationship view.
+/// One captured column in a relationship view.
 /// </summary>
-/// <param name="Name">The column name as the catalog captured it.</param>
-/// <param name="LogicalType">The logical type the catalog recorded, as text.</param>
+/// <param name="Name">The column name as the origin states it.</param>
+/// <param name="LogicalType">The logical type the origin records, as text.</param>
 /// <param name="IsNullable">Whether the column admits null values.</param>
 /// <param name="IsPartOfPrimaryKey">Whether the column participates in the table's primary key.</param>
 /// <param name="IsReferencingForeignKey">
@@ -17,7 +17,7 @@ namespace DbClone.Application.Interchange;
 /// <c>ReferencedColumns</c>).
 /// </param>
 /// <param name="Comment">The captured column comment, or <see langword="null"/> when none was captured.</param>
-public sealed record CatalogColumnView(
+public sealed record RelationshipColumnView(
     string Name,
     string LogicalType,
     bool IsNullable,

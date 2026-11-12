@@ -1,4 +1,4 @@
-using DbClone.Application.Interchange;
+using DbClone.Application.Relationship;
 using DbClone.UI.Models.CatalogGraph;
 
 namespace DbClone.UI.Services.GraphAnalysis;
@@ -24,11 +24,12 @@ internal static class GraphNodeSeeds
     /// <summary>Orders the catalog's tables into the canonical node list.</summary>
     /// <param name="view">The facts read from the catalog folder.</param>
     /// <returns>Every node, captured tables first.</returns>
-    internal static List<GraphNodeSeed> Order(CatalogGraphView view)
+    internal static List<GraphNodeSeed> Order(RelationshipGraphView view)
     {
         ArgumentNullException.ThrowIfNull(view);
 
         var qualify = SchemaIsNeeded(view);
+        var words = GraphOriginWords.For(view.Origin.Kind);
         var seeds = new List<GraphNodeSeed>(view.Tables.Count + view.OutsideTables.Count);
         foreach (var table in view.Tables.OrderBy(table => table.Id, StringComparer.Ordinal))
         {
@@ -36,7 +37,7 @@ internal static class GraphNodeSeeds
                 table.Id,
                 table.Schema,
                 table.Table,
-                DisplayName(table.Schema, table.Table, qualify),
+                DisplayName(table.Schema, table.Table, qualify, words),
                 true,
                 table.RowCount,
                 table.Columns,
@@ -58,7 +59,7 @@ internal static class GraphNodeSeeds
                 outside.Id,
                 outside.Schema,
                 outside.Table,
-                DisplayName(outside.Schema, outside.Table, qualify),
+                DisplayName(outside.Schema, outside.Table, qualify, words),
                 false,
                 null,
                 [],
@@ -75,12 +76,13 @@ internal static class GraphNodeSeeds
     /// <param name="schema">The stated schema, if any.</param>
     /// <param name="table">The stated table name, if any.</param>
     /// <param name="qualify">Whether the picture holds a schema the prefix is needed for.</param>
-    /// <returns>The display name, with the platform's own words for a nameless reference.</returns>
-    internal static string DisplayName(string? schema, string? table, bool qualify)
+    /// <param name="words">The origin's words for a reference that states no name.</param>
+    /// <returns>The display name, with the origin's own words for a nameless reference.</returns>
+    internal static string DisplayName(string? schema, string? table, bool qualify, GraphOriginWords words)
     {
         if (string.IsNullOrEmpty(table))
         {
-            return string.IsNullOrEmpty(schema) ? CatalogGraphAnalyzer.UnnamedTableLabel : schema;
+            return string.IsNullOrEmpty(schema) ? words.UnnamedReference : schema;
         }
 
         return string.IsNullOrEmpty(schema) || !qualify ? table : $"{schema}.{table}";
@@ -91,7 +93,7 @@ internal static class GraphNodeSeeds
     /// more than one schema, or two of its tables would read the same without the prefix — a reference
     /// that states no schema can still collide with a captured <c>public.customers</c>.
     /// </summary>
-    private static bool SchemaIsNeeded(CatalogGraphView view)
+    private static bool SchemaIsNeeded(RelationshipGraphView view)
     {
         var schemas = new HashSet<string>(StringComparer.Ordinal);
         var names = new HashSet<string>(StringComparer.Ordinal);
@@ -113,7 +115,7 @@ internal static class GraphNodeSeeds
         return schemas.Count > 1 || collides;
     }
 
-    private static IEnumerable<(string? Schema, string? Table)> Parts(CatalogGraphView view)
+    private static IEnumerable<(string? Schema, string? Table)> Parts(RelationshipGraphView view)
     {
         foreach (var table in view.Tables)
         {

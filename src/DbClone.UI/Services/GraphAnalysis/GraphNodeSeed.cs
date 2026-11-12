@@ -1,4 +1,4 @@
-using DbClone.Application.Interchange;
+using DbClone.Application.Relationship;
 
 namespace DbClone.UI.Services.GraphAnalysis;
 
@@ -24,8 +24,8 @@ internal sealed record GraphNodeSeed(
     string DisplayName,
     bool IsCaptured,
     long? RowCount,
-    IReadOnlyList<CatalogColumnView> Columns,
-    CatalogKeyView? PrimaryKey,
-    IReadOnlyList<CatalogKeyView> UniqueKeys,
-    IReadOnlyList<CatalogIndexView> Indexes,
-    IReadOnlyList<CatalogCheckConstraintView> CheckConstraints);
+    IReadOnlyList<RelationshipColumnView> Columns,
+    RelationshipKeyView? PrimaryKey,
+    IReadOnlyList<RelationshipKeyView> UniqueKeys,
+    IReadOnlyList<RelationshipIndexView> Indexes,
+    IReadOnlyList<RelationshipCheckConstraintView> CheckConstraints);

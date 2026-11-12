@@ -8,6 +8,7 @@ using DbClone.Application.Comparison;
 using DbClone.Application.Copy;
 using DbClone.Application.Enums;
 using DbClone.Application.Interfaces;
+using DbClone.Application.Relationship;
 using DbClone.UI.Models;
 using DbClone.UI.Services;
 using DbClone.UI.Settings;
@@ -64,9 +65,6 @@ public sealed partial class MainViewModel : ObservableObject
     private readonly IDialogService _storeDialogService;
     private readonly IRelationshipViewHandler _relationshipView;
     private CancellationTokenSource? _storeCts;
-
-    /// <summary>The catalog the last successful Store wrote — the target of the view command.</summary>
-    private string? _lastStoredCatalogPath;
 
     /// <summary>The three workflow components behind their common contract.</summary>
     private readonly IWorkflowViewModel[] _workflows;
@@ -246,6 +244,15 @@ public sealed partial class MainViewModel : ObservableObject
         _storeDialogService = serviceProvider.GetRequiredService<IDialogService>();
         _relationshipView = serviceProvider.GetRequiredService<IRelationshipViewHandler>();
 
+        // The busy lock gates the two relationship buttons as it gates every other command (D7).
+        Context.PropertyChanged += (_, e) =>
+        {
+            if (e.PropertyName != nameof(OperationContext.IsBusy)) return;
+
+            ViewSourceRelationshipsCommand.NotifyCanExecuteChanged();
+            ViewTargetRelationshipsCommand.NotifyCanExecuteChanged();
+        };
+
         _workflows = [Copy, Compare];
 
         // Route elapsed time to the currently running workflow (symmetric via IWorkflowViewModel)
@@ -417,14 +424,21 @@ public sealed partial class MainViewModel : ObservableObject
         await ExecuteStoreWorkflowAsync("Restore", ct => RunRestoreAsync(catalogPath, ct));
     }
 
-    // ── Relationship view (feature 07, D6) ──────────────────────────────────────
+    // ── Relationship view (feature 11, D7) ──────────────────────────────────────
 
-    /// <summary>Opens the relationship view of the catalog the last successful Store wrote.</summary>
-    [RelayCommand(CanExecute = nameof(CanViewRelationships))]
-    private Task ViewRelationshipsAsync() =>
-        _relationshipView.ShowAsync(_lastStoredCatalogPath!, StoreRestoreState);
+    /// <summary>Opens the relationship view of the source database, read live.</summary>
+    [RelayCommand(CanExecute = nameof(CanViewSourceRelationships))]
+    private Task ViewSourceRelationshipsAsync() =>
+        ShowDatabaseRelationshipsAsync(Context.Source, ERelationshipRole.Source);
 
-    private bool CanViewRelationships() => _lastStoredCatalogPath is not null;
+    private bool CanViewSourceRelationships() => CanViewRelationships(Context.Source);
+
+    /// <summary>Opens the relationship view of the destination database, read live.</summary>
+    [RelayCommand(CanExecute = nameof(CanViewTargetRelationships))]
+    private Task ViewTargetRelationshipsAsync() =>
+        ShowDatabaseRelationshipsAsync(Context.Destination, ERelationshipRole.Target);
+
+    private bool CanViewTargetRelationships() => CanViewRelationships(Context.Destination);
 
     /// <summary>Opens the relationship view of any stored catalog the user picks.</summary>
     [RelayCommand]
@@ -435,7 +449,34 @@ public sealed partial class MainViewModel : ObservableObject
 
         if (!_storeValidator.ValidateDirectoryExists(catalogPath, StoreRestoreState)) return;
 
-        await _relationshipView.ShowAsync(catalogPath, StoreRestoreState);
+        await _relationshipView.ShowCatalogAsync(catalogPath, StoreRestoreState);
+    }
+
+    /// <summary>A side is viewable when it names a database and nothing else is running.</summary>
+    /// <param name="connection">The side whose button is being asked about.</param>
+    /// <returns>Whether its relationship view can be opened now.</returns>
+    private bool CanViewRelationships(ConnectionViewModel connection) =>
+        !Context.IsBusy && !string.IsNullOrWhiteSpace(connection.DatabaseName);
+
+    /// <summary>
+    /// Reads one side and presents it. The busy lock covers the app — a metadata read is a real query —
+    /// and no file is written: the document is held in memory (D1).
+    /// </summary>
+    /// <param name="connection">The side to read.</param>
+    /// <param name="role">Which side it is, as the log states it.</param>
+    private async Task ShowDatabaseRelationshipsAsync(ConnectionViewModel connection, ERelationshipRole role)
+    {
+        Context.IsBusy = true;
+
+        try
+        {
+            var info = ConnectionInfoFactory.FromViewModel(connection);
+            await _relationshipView.ShowDatabaseAsync(info, role, StoreRestoreState);
+        }
+        finally
+        {
+            Context.IsBusy = false;
+        }
     }
 
     private async Task ExecuteStoreWorkflowAsync(string operationName, Func<CancellationToken, Task> executor)
@@ -488,7 +529,6 @@ public sealed partial class MainViewModel : ObservableObject
 
         var result = await _storeWorkflow.ExecuteAsync(request, ct);
         _resultHandler.HandleStoreResult(StoreRestoreState, result);
-        RememberStoredCatalog(result);
 
         // FR17: a catalog that finished arrives with its picture beside it, so the file is there before
         // anybody asks for it. A picture that cannot be written leaves the store a success and says why.
@@ -496,13 +536,6 @@ public sealed partial class MainViewModel : ObservableObject
         {
             await _relationshipView.TryWriteAsync(result.CatalogPath, StoreRestoreState, ct).ConfigureAwait(false);
         }
-    }
-
-    /// <summary>Remembers the catalog a successful store wrote, and forgets a run that wrote none.</summary>
-    private void RememberStoredCatalog(StoreResult result)
-    {
-        _lastStoredCatalogPath = result.Success ? result.CatalogPath : null;
-        ViewRelationshipsCommand.NotifyCanExecuteChanged();
     }
 
     private async Task RunRestoreAsync(string catalogPath, CancellationToken ct)
@@ -549,6 +582,10 @@ public sealed partial class MainViewModel : ObservableObject
         {
             Connections.ClearGroupIfConnectionMismatch();
             SyncConnectionsToSettings();
+
+            // A side that newly names a database becomes viewable without leaving the panel (D7).
+            ViewSourceRelationshipsCommand.NotifyCanExecuteChanged();
+            ViewTargetRelationshipsCommand.NotifyCanExecuteChanged();
 
             // The previous run's error/result referred to the old connection —
             // drop the visible error display (never while an operation is running)

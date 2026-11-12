@@ -1,4 +1,4 @@
-namespace DbClone.Application.Interchange;
+namespace DbClone.Application.Relationship;
 
 /// <summary>
 /// One captured foreign key, drawn as one edge. Two constraints between the same pair of tables
@@ -17,7 +17,7 @@ namespace DbClone.Application.Interchange;
 /// <param name="IsMandatory">Whether every referencing column is non-nullable.</param>
 /// <param name="IsSelfReference">Whether the parent is the child's own table.</param>
 /// <param name="ParentIsCaptured">Whether the parent is a table this catalog holds.</param>
-public sealed record CatalogRelationEdgeView(
+public sealed record RelationshipEdgeView(
     string ChildId,
     string ParentId,
     string ConstraintName,

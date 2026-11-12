@@ -12,6 +12,8 @@ using DbClone.Application.Targets;
 
 using Microsoft.Extensions.Logging;
 
+using DbClone.Application.Relationship;
+
 namespace DbClone.Application.Interchange;
 
 /// <summary>
@@ -376,7 +378,7 @@ public sealed class InterchangeService : IInterchangeService
     }
 
     /// <inheritdoc />
-    public async Task<CatalogGraphView> ReadGraphAsync(
+    public async Task<RelationshipGraphView> ReadGraphAsync(
         string catalogPath,
         CancellationToken cancellationToken)
     {
@@ -428,8 +430,8 @@ public sealed class InterchangeService : IInterchangeService
                 cancellationToken);
         }
 
-        var edges = new List<CatalogRelationEdgeView>();
-        var outsideById = new Dictionary<string, CatalogOutsideTableView>(StringComparer.Ordinal);
+        var edges = new List<RelationshipEdgeView>();
+        var outsideById = new Dictionary<string, RelationshipOutsideTableView>(StringComparer.Ordinal);
         var referencingColumnsByTable = new Dictionary<string, HashSet<string>>(StringComparer.Ordinal);
         var referencedColumnsByTable = new Dictionary<string, HashSet<string>>(StringComparer.Ordinal);
 
@@ -454,7 +456,7 @@ public sealed class InterchangeService : IInterchangeService
                     parentId = parentRef.Value;
                     if (!parentIsCaptured)
                     {
-                        outsideById.TryAdd(parentId, new CatalogOutsideTableView(parentId, stated.Schema, stated.Name));
+                        outsideById.TryAdd(parentId, new RelationshipOutsideTableView(parentId, stated.Schema, stated.Name));
                     }
                 }
                 else
@@ -462,10 +464,10 @@ public sealed class InterchangeService : IInterchangeService
                     // The reference states nothing. The key only keeps two nameless targets apart;
                     // the label is the renderer's business, never a name invented here.
                     parentId = $"unresolved:{childId}|{foreignKey.Name}";
-                    outsideById.TryAdd(parentId, new CatalogOutsideTableView(parentId, null, null));
+                    outsideById.TryAdd(parentId, new RelationshipOutsideTableView(parentId, null, null));
                 }
 
-                edges.Add(new CatalogRelationEdgeView(
+                edges.Add(new RelationshipEdgeView(
                     ChildId: childId,
                     ParentId: parentId,
                     ConstraintName: foreignKey.Name,
@@ -504,7 +506,7 @@ public sealed class InterchangeService : IInterchangeService
 
                 var columns = table.Columns
                     .OrderBy(c => c.Ordinal)
-                    .Select(c => new CatalogColumnView(
+                    .Select(c => new RelationshipColumnView(
                         Name: c.Name,
                         LogicalType: c.LogicalType.ToString(),
                         IsNullable: c.Nullable,
@@ -516,14 +518,14 @@ public sealed class InterchangeService : IInterchangeService
 
                 var indexes = (table.Indexes ?? [])
                     .OrderBy(index => index.Name, StringComparer.Ordinal)
-                    .Select(index => new CatalogIndexView(
+                    .Select(index => new RelationshipIndexView(
                         Name: index.Name,
                         IsUnique: index.IsUnique,
                         Definition: index.NativeDefinition?.Text,
                         Columns: index.Columns))
                     .ToList();
 
-                return new CatalogTableView(
+                return new RelationshipTableView(
                     Id: id,
                     Schema: SchemaNameOf(table),
                     Table: table.Name,
@@ -534,19 +536,19 @@ public sealed class InterchangeService : IInterchangeService
                     Columns: columns,
                     PrimaryKey: table.PrimaryKey is null
                         ? null
-                        : new CatalogKeyView(table.PrimaryKey.Name, [.. table.PrimaryKey.Columns]),
+                        : new RelationshipKeyView(table.PrimaryKey.Name, [.. table.PrimaryKey.Columns]),
                     UniqueKeys:
                     [
                         .. (table.UniqueConstraints ?? [])
                             .OrderBy(key => key.Name, StringComparer.Ordinal)
-                            .Select(key => new CatalogKeyView(key.Name, [.. key.Columns])),
+                            .Select(key => new RelationshipKeyView(key.Name, [.. key.Columns])),
                     ],
                     Indexes: indexes,
                     CheckConstraints:
                     [
                         .. (table.CheckConstraints ?? [])
                             .OrderBy(check => check.Name, StringComparer.Ordinal)
-                            .Select(check => new CatalogCheckConstraintView(
+                            .Select(check => new RelationshipCheckConstraintView(
                                 check.Name,
                                 check.Expression?.Text ?? string.Empty)),
                     ]);
@@ -569,7 +571,7 @@ public sealed class InterchangeService : IInterchangeService
             .Select(g =>
             {
                 var inSchema = g.ToList();
-                return new CatalogSchemaView(
+                return new RelationshipSchemaView(
                     Schema: g.Key,
                     TableCount: inSchema.Count,
                     RelatedTableCount: inSchema.Count(t => relatedIds.Contains(t.Ref.Value)));
@@ -579,10 +581,13 @@ public sealed class InterchangeService : IInterchangeService
         // A schema-only run states no row count for any table; that is the one flag the header needs.
         var hasData = tables.Any(t => rowCountById.TryGetValue(t.Ref.Value, out var rows) && rows is not null);
 
-        return new CatalogGraphView(
-            CatalogPath: catalogPath,
-            FormatVersion: manifest.FormatVersion,
-            SourceDialect: manifest.SourceDialect,
+        return new RelationshipGraphView(
+            Origin: new GraphViewOrigin(
+                Kind: EGraphOriginKind.Catalog,
+                Label: FolderName(catalogPath),
+                Location: catalogPath,
+                Dialect: manifest.SourceDialect,
+                FormatVersion: manifest.FormatVersion),
             HasData: hasData,
             Tables: tableViews,
             OutsideTables: outsideById.Values.OrderBy(o => o.Id, StringComparer.Ordinal).ToList(),
@@ -596,6 +601,13 @@ public sealed class InterchangeService : IInterchangeService
     }
 
     private static readonly (string? Schema, string? Name, bool StatesSomething) NoReference = (null, null, false);
+
+    /// <summary>The folder's own name, never the path: the origin's display word for a catalog.</summary>
+    private static string FolderName(string path)
+    {
+        var trimmed = path.TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar);
+        return Path.GetFileName(trimmed) is { Length: > 0 } name ? name : trimmed;
+    }
 
     /// <summary>
     /// Reads what a reference states, without inventing anything for one that states nothing.

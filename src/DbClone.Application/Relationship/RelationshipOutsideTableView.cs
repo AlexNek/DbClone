@@ -1,8 +1,8 @@
-namespace DbClone.Application.Interchange;
+namespace DbClone.Application.Relationship;
 
 /// <summary>
-/// A table a constraint names that the catalog does not hold. It carries only the name the
-/// constraint states — no rows, no columns, no indexes, no definition, because the folder holds
+/// A table a constraint names that the origin does not hold. It carries only the name the
+/// constraint states — no rows, no columns, no indexes, no definition, because the origin holds
 /// none of them, and no count field exists here so the renderer cannot print a number it lacks.
 /// </summary>
 /// <param name="Id">
@@ -11,7 +11,7 @@ namespace DbClone.Application.Interchange;
 /// </param>
 /// <param name="Schema">The schema the reference states, or <see langword="null"/> when it states none.</param>
 /// <param name="Table">The table name the reference states, or <see langword="null"/> when it states none.</param>
-public sealed record CatalogOutsideTableView(
+public sealed record RelationshipOutsideTableView(
     string Id,
     string? Schema,
     string? Table);

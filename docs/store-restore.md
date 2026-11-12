@@ -11,7 +11,7 @@ Store writes a connected database into a **catalog** — a folder of files on di
 |---------|----------|
 | **Store** button | Below the **source** connection panel — the database that is captured |
 | **Restore** button | Below the **destination** connection panel — the database a catalog is applied to |
-| **View relationships** | Below the **source** connection panel, under **Store** — opens the [relationship explorer](#viewing-the-relationships) of the catalog the last store wrote. The folder button beside it opens any stored catalog |
+| **View relationships** | Below **both** connection panels — the source panel's button opens the source database's relationships, the destination panel's the target's. Either one reads that database live, so nothing has to be stored first. The folder button beside **Store** opens any catalog already on disk — see [Viewing the relationships](#viewing-the-relationships) |
 | **Store Options** | Toolbar popup: catalog location, subfolder pattern, data inclusion, packing |
 | **Pause / Resume**, **Stop** | Toolbar, enabled while a Store or Restore operation runs |
 | ++ctrl+shift+s++ / ++ctrl+shift+r++ | Start Store / Start Restore — see [Keyboard Shortcuts](keyboard-shortcuts.md) |
@@ -172,25 +172,40 @@ What the files deliberately do **not** do:
 
 ## Viewing the relationships
 
-The summary above states the relationships as text. The same catalog can also be drawn and opened in your browser, and a finished store draws it for you: the picture is in the catalog folder as soon as the store completes, so there is nothing to press first. To open one, **View relationships** under the source connection panel draws the catalog the last store of this session wrote and opens it, and the folder button beside it opens any catalog already on disk — including one stored in an earlier session.
+The summary above states the relationships as text. DbClone also draws them as a picture, and it can draw it from either of two places:
 
-Neither needs a connection. The picture is built from the catalog folder alone — it never opens a database — so a catalog can be explored on a machine that cannot reach the database it came from. The document is one self-contained HTML file: no server, no CDN, no asset folder, so it opens with the network disconnected and can be mailed or committed with the catalog.
+- **A database you have open.** **View relationships** under the source panel draws the source, and the same button under the destination panel draws the target. Nothing has to be stored first: the picture comes from a live read of the database's own metadata — schemas, tables, columns, keys, constraints and indexes — and that read never touches a row and writes nothing back.
+- **A stored catalog.** The folder button beside **Store** opens any catalog on disk, including one written in an earlier session. This path needs no connection at all, so a catalog can be explored on a machine that cannot reach the database it came from.
 
-!!! info "Why the file sits in the catalog folder"
-    The picture is named after the catalog folder and written **inside** it — `my_app_db_2026-11-10_16-10/my_app_db_2026-11-10_16-10.html` — so a catalog and the picture of it travel together and the store folder stays clean. Like `summary.md`, the picture is not part of the catalog's content: it is not listed in `manifest.json`, not hashed, not verified and never restored, so deleting it or editing it cannot break a catalog. Every store rewrites the file when it finishes, and opening the view rewrites it again; a picture that cannot be written never makes a store a failure, because the catalog is already complete — the log states the reason instead.
+A finished store also draws the picture for you, so a catalog folder explains itself as soon as it exists (see below).
+
+The document is one self-contained HTML file: no server, no CDN, no asset folder, so it opens with the network disconnected and can be mailed or committed with the catalog. When the WebView2 runtime is present the picture opens in DbClone's own window, whose toolbar holds three actions:
+
+| Action | What it does |
+|--------|---------------|
+| **Refresh** | Reads the origin again and draws it again, so a table created after the window opened appears. A live view re-runs the same metadata read; a catalog view re-reads the folder |
+| **Open in browser** | Hands the very document on screen to your default browser |
+| **Save as HTML…** | Keeps a copy wherever you choose, as one file |
+
+On a machine without the runtime the picture opens in your browser instead, and the log says why. That fallback uses one fixed file, `%LOCALAPPDATA%\DbClone\view\relationship.html`, overwritten by every view — so opening the view a hundred times leaves one file, never one per view. Neither route writes anything into a catalog folder: opening the view of a catalog leaves its files and their timestamps exactly as they were.
+
+!!! info "Why the store's picture sits in the catalog folder"
+    The picture a store draws is named after the catalog folder and written **inside** it — `my_app_db_2026-11-10_16-10/my_app_db_2026-11-10_16-10.html` — so a catalog and the picture of it travel together and the store folder stays clean. Like `summary.md`, the picture is not part of the catalog's content: it is not listed in `manifest.json`, not hashed, not verified and never restored, so deleting it or editing it cannot break a catalog. Every store rewrites the file when it finishes; viewing a catalog reads the folder and leaves that file alone. A picture that cannot be written never makes a store a failure, because the catalog is already complete — the log states the reason instead.
 
 ### The card: the name and the count, inside
 
-Every table is one card, and both facts about it are printed **inside** it, on two lines: the table's name, and its row count. The card is exactly as wide as the longer of those two lines, so `ai_chat_provider_configuration` gets a wider card than `orders` — and no name is ever cut, wrapped or pushed outside the shape.
+Every table is one card, and both facts about it are printed **inside** it, on two lines: the table's name, and what the origin states about its rows — the count a store captured, or the fact that a live read did not count them. The card is exactly as wide as the longer of those two lines, so `ai_chat_provider_configuration` gets a wider card than `orders` — and no name is ever cut, wrapped or pushed outside the shape.
 
-No dimension states a figure. Every card has the same height and a width that follows its own text, so a larger shape never means "a larger table": the row count is read in words inside the card, not off its size, and no colour carries a number either.
+No dimension states a figure. Every card has the same height and a width that follows its own text, so a larger shape never means "a larger table": what the origin states about rows is read in words inside the card, not off its size, and no colour carries a number either.
 
 | Printed on the card | Meaning |
 |---------------------|---------|
 | `1 240 rows` | The row count the store captured |
 | `0 rows` | A real table that was captured empty |
 | `no data captured` | The structure was captured but not the rows — table data was switched off |
+| `rows are not counted here` | A live view: counting every table is a scan nobody asked for, so no figure is stated |
 | `not in this catalog` | A constraint points at this table and the store did not capture it |
+| `not in this view` | A live view: a constraint points at a table the read did not return |
 
 ### What the arrows say
 
@@ -222,9 +237,9 @@ An arrow never passes over a card it has nothing to do with. When the direct way
 |---------|---------------|
 | **Search** | Matches a table, a column, a constraint or a comment. The result list names the field each row matched — every table in the catalog, not only the ones on screen — and selecting a row shows that table: a table the picture was not showing is revealed, switched back on and brought into view, then selected with its panel open |
 | **Direction** | While a table is selected: **both ways**, **references** (the arrows leaving it) or **referenced by** (the arrows arriving). The arrows outside the chosen direction fade rather than disappear |
-| The bar of chips | One chip per schema, per cyclic group and for the tables in no relationship. A click hides a cluster, alt-click (or shift-click) shows only it. A catalog with a single schema states the schema instead of offering a switch whose other state is "hide everything" |
+| The bar of chips | One chip per schema, per cyclic group and for the tables in no relationship. A click hides a cluster, alt-click (or shift-click) shows only it. Each group of chips filters on its own, so switching a schema off hides every table of that schema even when a cyclic group also claims it, and the box standing over a collapsed group leaves with the tables it stands over. A catalog with a single schema states the schema instead of offering a switch whose other state is "hide everything" |
 | **Show the whole database** | Appears when the picture opened on one table's neighbourhood. A small catalog opens showing everything; a dense one opens where a reader can start, never on the biggest hub |
-| **−** / **+** / **Fit** / **100%** | Zoom. Drag to pan, wheel to zoom |
+| **−** / **+** / **Fit** / **100%** | Zoom. Drag to pan, wheel to zoom. **100%** draws the picture at its own size and **Fit** fits the tables that are on screen into the window; a picture that fits the window is centred in it, and one larger than the window starts at its own top-left corner rather than in the empty middle of the canvas |
 | The panel on the right | The selected table itself: its row count, its columns with their types and key marks, its primary key, its unique constraints, its indexes — each named by the key columns the store captured, so a reader never has to read a SQL statement to find out what an index covers, with the engine's own statement printed only for an index whose columns the folder does not state — and its check constraints with their expressions. Then both lists of constraints, each row naming the constraint, the columns it joins, its `on delete`/`on update` action, and how many child rows may name a parent — `exactly one`, `at most one`, or whether a child row may have no parent at all — so two constraints joining the same columns are told apart by name and rule, never printed as duplicates |
 | The register at the bottom | Every constraint in the catalog, one row each, with its columns, its `on delete` and `on update` actions and its rule. Selecting a row selects that arrow |
 
@@ -232,7 +247,7 @@ Nothing is removed by narrowing: focus, direction, the chips and the search chan
 
 ### What the picture does not state
 
-The header names the catalog, how many tables and relations the file holds, its format version and dialect, and when the picture was generated. Two things it deliberately does not state:
+The header names the origin — `catalog <folder>` for a stored catalog, `live database <host:port/database>` for a database read — how many tables and relations the picture holds, the catalog's format version when there is one, the dialect, and when the picture was generated (a catalog) or read (a live database). Two things it deliberately does not state:
 
 - **Per-table storage bytes.** The catalog's byte figures are totals for the whole folder; it records a table's rows and chunk files, not a byte figure per table.
 - **When the catalog was stored.** The picture is stamped with the moment it was generated. The catalog's own write time is in `export.json`.

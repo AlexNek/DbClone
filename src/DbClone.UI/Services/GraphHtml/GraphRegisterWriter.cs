@@ -17,6 +17,7 @@ namespace DbClone.UI.Services.GraphHtml;
 internal sealed class GraphRegisterWriter
 {
     private readonly CatalogGraphModel _model;
+    private readonly GraphOriginWords _words;
 
     /// <summary>Creates the writer for one document.</summary>
     /// <param name="model">The analyzed graph.</param>
@@ -24,6 +25,7 @@ internal sealed class GraphRegisterWriter
     {
         ArgumentNullException.ThrowIfNull(model);
         _model = model;
+        _words = GraphOriginWords.For(model.Origin.Kind);
     }
 
     /// <summary>Writes the register.</summary>
@@ -51,7 +53,7 @@ internal sealed class GraphRegisterWriter
             html.Append("<td class=\"mono\">").Append(GraphHtmlText.Escape(Pairs(edge))).Append("</td>");
             html.Append("<td>").Append(GraphHtmlText.Escape(GraphFactText.Lower(edge.OnDelete))).Append("</td>");
             html.Append("<td>").Append(GraphHtmlText.Escape(GraphFactText.Lower(edge.OnUpdate))).Append("</td>");
-            html.Append("<td>").Append(GraphHtmlText.Escape(GraphFactText.Rule(edge))).Append("</td>");
+            html.Append("<td>").Append(GraphHtmlText.Escape(GraphFactText.Rule(edge, _words))).Append("</td>");
             html.Append("</tr>\n");
         }
 

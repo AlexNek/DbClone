@@ -1,5 +1,6 @@
 using System.Text;
 using DbClone.UI.Models.CatalogGraph;
+using DbClone.UI.Services.GraphAnalysis;
 using DbClone.UI.Services.GraphLayout;
 
 namespace DbClone.UI.Services.GraphHtml;
@@ -18,6 +19,7 @@ internal sealed class GraphWorkspaceWriter
     private readonly CatalogGraphModel _model;
     private readonly CatalogGraphLayout _layout;
     private readonly GraphPictureWriter _picture;
+    private readonly GraphOriginWords _words;
 
     /// <summary>Creates the writer for one document.</summary>
     /// <param name="model">The analyzed graph.</param>
@@ -35,6 +37,7 @@ internal sealed class GraphWorkspaceWriter
         _model = model;
         _layout = layout;
         _picture = picture;
+        _words = GraphOriginWords.For(model.Origin.Kind);
     }
 
     /// <summary>Writes the toolbar, the stage and the panel.</summary>
@@ -56,9 +59,10 @@ internal sealed class GraphWorkspaceWriter
         html.Append("</div>\n");
     }
 
-    private static void WriteSearchField(StringBuilder html) =>
+    private void WriteSearchField(StringBuilder html) =>
         html.Append("<label>Search <input id=\"query\" type=\"search\" autocomplete=\"off\" ")
-            .Append("placeholder=\"table, column, constraint or comment\" aria-label=\"Search the catalog\"></label>\n");
+            .Append("placeholder=\"table, column, constraint or comment\" aria-label=\"")
+            .Append(GraphHtmlText.Escape(_words.SearchLabel)).Append("\"></label>\n");
 
     private void WriteDirectionFieldset(StringBuilder html)
     {

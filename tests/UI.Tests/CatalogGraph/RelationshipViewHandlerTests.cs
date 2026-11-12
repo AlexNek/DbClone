@@ -1,9 +1,13 @@
 using System.IO;
 
 using CanonicalModel.Enums;
-using DbClone.Application.Interchange;
+using DbClone.Application.DTOs;
+using DbClone.Application.Relationship;
+using DbClone.UI.Services;
 using DbClone.UI.Services.GraphLayout;
+using DbClone.UI.Services.Relationship;
 using DbClone.UI.StoreRestore.Handlers;
+using DbClone.UI.StoreRestore.Services;
 using DbClone.UI.ViewModels;
 
 using FluentAssertions;
@@ -15,13 +19,15 @@ using NSubstitute;
 namespace UI.Tests.CatalogGraph;
 
 /// <summary>
-/// T8: the workflow writes one document into the catalog — named after it, and nothing beside it — and
-/// a write that cannot land leaves neither a partial document nor a temporary file behind.
+/// Feature 11: the workflow reads an origin, builds one document and hands it to whichever presenter the
+/// app holds — a view writes nothing (D1). The one file the product still writes is the picture a store
+/// puts inside its catalog, and a write that cannot land leaves neither a partial file nor a temporary
+/// one (FR17).
 /// </summary>
 /// <remarks>
-/// The stages are the real ones, so the file that lands is the document the app actually produces. Only
-/// the catalog read and the shell open are replaced: one is the product's boundary, the other is the
-/// operating system's.
+/// The reader is the application's boundary and the presenter is the shell's, so both are replaced; the
+/// builder and the picture writer are the real ones, so the document asserted here is the one the app
+/// produces.
 /// </remarks>
 public sealed class RelationshipViewHandlerTests : IDisposable
 {
@@ -31,7 +37,9 @@ public sealed class RelationshipViewHandlerTests : IDisposable
         Path.GetTempPath(),
         "dbclone-relationship-" + Guid.NewGuid().ToString("N"));
 
-    private readonly RecordingHtmlFileOpener _opener = new();
+    private readonly RecordingPresenter _presenter = new();
+
+    private readonly IRelationshipGraphService _graph = Substitute.For<IRelationshipGraphService>();
 
     public RelationshipViewHandlerTests() => Directory.CreateDirectory(_root);
 
@@ -48,128 +56,177 @@ public sealed class RelationshipViewHandlerTests : IDisposable
     }
 
     [Fact]
-    public async Task ShowAsync_WritesTheDocumentIntoTheCatalog_AndOpensIt()
+    public async Task ShowCatalogAsync_PresentsTheDocument_AndWritesNothing()
     {
-        // Arrange
+        // Arrange — a stored catalog, handed over the way the catalog reader hands it over.
         var catalog = CreateCatalog();
-        var sut = CreateHandler(interchange => Reading(interchange, View()));
+        var before = Snapshot(catalog);
+        Reading(View());
+        var sut = CreateHandler();
 
         // Act
-        await sut.ShowAsync(catalog, new WorkflowState());
+        await sut.ShowCatalogAsync(catalog, new WorkflowState());
 
-        // Assert (D5) — the catalog folder, the catalog's own name, one document, nothing beside it.
+        // Assert — the document reaches the presenter and the folder is untouched: a view writes nothing.
+        _presenter.Presented.Should().ContainSingle().Which.Html.Should().StartWith("<!DOCTYPE html>");
+        Snapshot(catalog).Should().BeEquivalentTo(before);
+        TempFiles().Should().BeEmpty();
+    }
+
+    [Fact]
+    public async Task ShowDatabaseAsync_ReadsTheSideThatWasAsked_AndCreatesNoFileAtAll()
+    {
+        // Arrange — no store, no folder: the side names a database and nothing else (criteria 1–3).
+        var catalog = CreateCatalog();
+        var before = Snapshot(_root);
+        _graph.ReadDatabaseAsync(
+                Arg.Any<ConnectionInfo>(),
+                Arg.Any<ERelationshipRole>(),
+                Arg.Any<CancellationToken>())
+            .Returns(Task.FromResult(View()));
+        var sut = CreateHandler();
+
+        // Act
+        await sut.ShowDatabaseAsync(Connection(), ERelationshipRole.Target, new WorkflowState());
+
+        // Assert — the target side was read, and nothing anywhere on disk changed.
+        await _graph.Received(1).ReadDatabaseAsync(
+            Arg.Is<ConnectionInfo>(info => info != null && info.DatabaseName == "testdb"),
+            ERelationshipRole.Target,
+            Arg.Any<CancellationToken>());
+        _presenter.Presented.Should().ContainSingle();
+        Snapshot(_root).Should().BeEquivalentTo(before);
+        TempFiles().Should().BeEmpty();
+    }
+
+    [Fact]
+    public async Task ShowDatabaseAsync_OfADatabaseWithNoTables_WarnsAndStillPresents()
+    {
+        // Arrange — an empty database is a fact the picture can state, so it is drawn and named.
+        _graph.ReadDatabaseAsync(
+                Arg.Any<ConnectionInfo>(),
+                Arg.Any<ERelationshipRole>(),
+                Arg.Any<CancellationToken>())
+            .Returns(Task.FromResult(EmptyDatabase()));
+        var state = new WorkflowState();
+        var sut = CreateHandler();
+
+        // Act
+        await sut.ShowDatabaseAsync(Connection(), ERelationshipRole.Source, state);
+
+        // Assert
+        state.LogMessages.Should().ContainSingle(entry => entry.Level == ELogLevel.Warning)
+            .Which.Message.Should().Contain("testdb");
+        _presenter.Presented.Should().ContainSingle("a database with no tables is still a document");
+    }
+
+    [Fact]
+    public async Task ShowCatalogAsync_OfAFolderThatIsNotACatalog_ReportsTheError_AndPresentsNothing()
+    {
+        // Arrange — a folder that names no catalog: the product's reader refuses it.
+        var catalog = CreateCatalog();
+        var before = Snapshot(catalog);
+        _graph.ReadCatalogAsync(Arg.Any<string>(), Arg.Any<CancellationToken>())
+            .Returns(Task.FromException<RelationshipGraphView>(new DirectoryNotFoundException("no catalog")));
+        var state = new WorkflowState();
+        var sut = CreateHandler();
+
+        // Act
+        await sut.ShowCatalogAsync(catalog, state);
+
+        // Assert — a failed read is an error that names the reason, and nothing is presented.
+        state.LastError.Should().Contain("no catalog");
+        _presenter.Presented.Should().BeEmpty();
+        Snapshot(catalog).Should().BeEquivalentTo(before);
+        TempFiles().Should().BeEmpty();
+    }
+
+    [Fact]
+    public async Task ShowCatalogAsync_WhenTheDocumentCannotBeShown_IsAWarningThatNamesTheOrigin()
+    {
+        // Arrange — the document is built; only showing it fails, which costs the reader the window.
+        var catalog = CreateCatalog();
+        Reading(View());
+        var state = new WorkflowState();
+        var refusing = new RecordingPresenter { Failure = new InvalidOperationException("no viewer") };
+        var sut = CreateHandler(refusing);
+
+        // Act
+        await sut.ShowCatalogAsync(catalog, state);
+
+        // Assert
+        state.LastError.Should().BeEmpty("the view was read and rendered; presenting it is what failed");
+        state.LogMessages.Should().ContainSingle(entry => entry.Level == ELogLevel.Warning)
+            .Which.Message.Should().Contain("fixture").And.Contain("no viewer");
+    }
+
+    [Fact]
+    public async Task The_refresh_a_presenter_is_given_ReadsTheOriginAgain()
+    {
+        // Arrange — a window offers Refresh; it re-runs the delegate the handler supplied (D6).
+        var catalog = CreateCatalog();
+        Reading(View());
+        var sut = CreateHandler();
+
+        // Act
+        await sut.ShowCatalogAsync(catalog, new WorkflowState());
+        _presenter.Refresh.Should().NotBeNull();
+        var again = await _presenter.Refresh!(CancellationToken.None);
+
+        // Assert
+        again.Origin.Label.Should().Be("fixture");
+        await _graph.Received(2).ReadCatalogAsync(catalog, Arg.Any<CancellationToken>());
+    }
+
+    [Fact]
+    public async Task TryWriteAsync_PutsThePictureInsideTheCatalog_AndPresentsNothing()
+    {
+        // Arrange — what a finished store asks for (FR17): the file, not a window.
+        var catalog = CreateCatalog();
+        var state = new WorkflowState();
+        Reading(View());
+        var sut = CreateHandler();
+
+        // Act
+        var written = await sut.TryWriteAsync(catalog, state);
+
+        // Assert — the catalog folder, the catalog's own name, one document, nothing beside it.
         var picture = PictureIn(catalog);
-        File.Exists(picture).Should().BeTrue();
-        _opener.Opened.Should().ContainSingle().Which.Should().Be(picture);
+        written.Should().Be(picture);
         File.ReadAllText(picture).Should().StartWith("<!DOCTYPE html>").And.EndWith("</html>\n");
+        _presenter.Presented.Should().BeEmpty();
+        state.LastError.Should().BeEmpty();
+        TempFiles().Should().BeEmpty();
         SiblingsBesideTheCatalog().Should().BeEmpty("the store folder holds the picture, not its parent");
     }
 
     [Fact]
-    public async Task ShowAsync_AddsOnlyThePictureToTheCatalogFolder()
+    public async Task TryWriteAsync_AddsOnlyThePictureToTheCatalogFolder()
     {
         // Arrange — the picture is the one file the app contributes; the archive's own files stay as the
         // store wrote them.
         var catalog = CreateCatalog();
         var before = FolderEntries(catalog);
-        var sut = CreateHandler(interchange => Reading(interchange, View()));
+        Reading(View());
+        var sut = CreateHandler();
 
         // Act
-        await sut.ShowAsync(catalog, new WorkflowState());
+        await sut.TryWriteAsync(catalog, new WorkflowState());
 
-        // Assert — the catalog's files plus the picture, and nothing unfinished anywhere.
+        // Assert
         FolderEntries(catalog).Should().BeEquivalentTo([.. before, Path.GetFileName(PictureIn(catalog))]);
         TempFiles().Should().BeEmpty();
     }
 
     [Fact]
-    public async Task ShowAsync_ReportsTheFailureAndLeavesNoPartialFile_WhenTheDocumentCannotLand()
+    public async Task TryWriteAsync_ReportsAWriteThatCannotLandAsAWarning_AndLeavesTheRunAsItWas()
     {
         // Arrange — a folder occupies the document's own name, so the move cannot land.
         var catalog = CreateCatalog();
         Directory.CreateDirectory(PictureIn(catalog));
         var state = new WorkflowState();
-        var sut = CreateHandler(interchange => Reading(interchange, View()));
-
-        // Act
-        await sut.ShowAsync(catalog, state);
-
-        // Assert — a stated failure, no leftover temporary file, and the shell was never asked.
-        state.LastError.Should().StartWith("Relationship view failed:");
-        TempFiles().Should().BeEmpty();
-        _opener.Opened.Should().BeEmpty();
-    }
-
-    [Fact]
-    public async Task ShowAsync_KeepsTheCompleteDocument_WhenTheShellRefusesToOpenIt()
-    {
-        // Arrange — the file is written before anything tries to open it.
-        var openingFails = new RecordingHtmlFileOpener { Failure = new InvalidOperationException("no handler") };
-        var catalog = CreateCatalog();
-        var state = new WorkflowState();
-        var sut = CreateHandler(interchange => Reading(interchange, View()), openingFails);
-
-        // Act
-        await sut.ShowAsync(catalog, state);
-
-        // Assert — a shortcut that failed is a warning that names the file, not a failed run.
-        File.ReadAllText(PictureIn(catalog))
-            .Should().EndWith("</html>\n");
-        state.LastError.Should().BeEmpty();
-        state.LogMessages.Should().ContainSingle(entry => entry.Level == ELogLevel.Warning)
-            .Which.Message.Should().Contain(CatalogFolderName + ".html");
-    }
-
-    [Fact]
-    public async Task ShowAsync_ReportsAReadFailure_AndWritesNothing()
-    {
-        // Arrange — a folder that is not a catalog: the product's reader refuses it.
-        var catalog = CreateCatalog();
-        var before = FolderEntries(catalog);
-        var state = new WorkflowState();
-        var sut = CreateHandler(interchange =>
-            interchange.ReadGraphAsync(Arg.Any<string>(), Arg.Any<CancellationToken>())
-                .Returns(Task.FromException<CatalogGraphView>(new DirectoryNotFoundException("no catalog"))));
-
-        // Act
-        await sut.ShowAsync(catalog, state);
-
-        // Assert
-        state.LastError.Should().Contain("no catalog");
-        FolderEntries(catalog).Should().Equal(before);
-        TempFiles().Should().BeEmpty();
-        _opener.Opened.Should().BeEmpty();
-    }
-
-    [Fact]
-    public async Task TryWriteAsync_WritesTheDocumentIntoTheCatalog_AndOpensNothing()
-    {
-        // Arrange — what a finished store asks for (FR17): the file, not the browser.
-        var catalog = CreateCatalog();
-        var state = new WorkflowState();
-        var sut = CreateHandler(interchange => Reading(interchange, View()));
-
-        // Act
-        var written = await sut.TryWriteAsync(catalog, state);
-
-        // Assert — the same document the view produces, and the shell was never asked.
-        var picture = PictureIn(catalog);
-        written.Should().Be(picture);
-        File.ReadAllText(picture).Should().StartWith("<!DOCTYPE html>").And.EndWith("</html>\n");
-        _opener.Opened.Should().BeEmpty();
-        state.LastError.Should().BeEmpty();
-        TempFiles().Should().BeEmpty();
-        SiblingsBesideTheCatalog().Should().BeEmpty();
-    }
-
-    [Fact]
-    public async Task TryWriteAsync_ReportsAWriteThatCannotLandAsAWarning_AndLeavesTheRunAsItWas()
-    {
-        // Arrange — the same obstruction as above: a folder sits where the document belongs.
-        var catalog = CreateCatalog();
-        Directory.CreateDirectory(PictureIn(catalog));
-        var state = new WorkflowState();
-        var sut = CreateHandler(interchange => Reading(interchange, View()));
+        Reading(View());
+        var sut = CreateHandler();
 
         // Act
         var written = await sut.TryWriteAsync(catalog, state);
@@ -180,7 +237,6 @@ public sealed class RelationshipViewHandlerTests : IDisposable
         state.LogMessages.Should().ContainSingle(entry => entry.Level == ELogLevel.Warning)
             .Which.Message.Should().StartWith("Relationship view could not be written:");
         TempFiles().Should().BeEmpty();
-        _opener.Opened.Should().BeEmpty();
     }
 
     /// <summary>A catalog folder holding the two files a reader would find, and nothing else.</summary>
@@ -194,27 +250,31 @@ public sealed class RelationshipViewHandlerTests : IDisposable
         return catalog;
     }
 
-    private RelationshipViewHandler CreateHandler(
-        Action<IInterchangeService> prepare,
-        RecordingHtmlFileOpener? opener = null)
-    {
-        var interchange = Substitute.For<IInterchangeService>();
-        prepare(interchange);
-
-        return new RelationshipViewHandler(
-            interchange,
-            new CatalogGraphAnalyzer(),
-            new GraphLayoutEngine(),
-            new CatalogGraphHtmlRenderer(),
-            opener ?? _opener,
+    private RelationshipViewHandler CreateHandler(RecordingPresenter? presenter = null) =>
+        new(
+            _graph,
+            new RelationshipDocumentBuilder(
+                new CatalogGraphAnalyzer(),
+                new GraphLayoutEngine(),
+                new CatalogGraphHtmlRenderer()),
+            presenter ?? _presenter,
+            new RelationshipPictureWriter(),
             NullLogger<RelationshipViewHandler>.Instance);
-    }
 
-    private static void Reading(IInterchangeService interchange, CatalogGraphView view) =>
-        interchange.ReadGraphAsync(Arg.Any<string>(), Arg.Any<CancellationToken>())
+    private void Reading(RelationshipGraphView view) =>
+        _graph.ReadCatalogAsync(Arg.Any<string>(), Arg.Any<CancellationToken>())
             .Returns(Task.FromResult(view));
 
-    private static CatalogGraphView View() =>
+    private static ConnectionInfo Connection() =>
+        new(
+            Host: "test.example.com",
+            Port: 5432,
+            DatabaseName: "testdb",
+            Username: "test_user",
+            Password: "fake-password",
+            SslMode: "Prefer");
+
+    private static RelationshipGraphView View() =>
         CatalogGraphFixture.Create()
             .Table("public", "customers", rowCount: 3, Column("id", "uuid", primaryKey: true))
             .Table("public", "orders", rowCount: 5, Column("id", "uuid", primaryKey: true),
@@ -229,7 +289,12 @@ public sealed class RelationshipViewHandlerTests : IDisposable
                 onDelete: "cascade")
             .Build();
 
-    private static CatalogColumnView Column(
+    private static RelationshipGraphView EmptyDatabase() =>
+        CatalogGraphFixture.Create()
+            .Live("testdb", "test.example.com:5432/testdb")
+            .Build();
+
+    private static RelationshipColumnView Column(
         string name,
         string logicalType,
         bool primaryKey = false,
@@ -243,6 +308,13 @@ public sealed class RelationshipViewHandlerTests : IDisposable
     /// <summary>Any document sitting in the store folder rather than in the catalog it describes.</summary>
     private IEnumerable<string> SiblingsBesideTheCatalog() => Directory.GetFiles(_root, "*.html");
 
+    /// <summary>Every file under the root with its size and the moment it was last written.</summary>
+    private static Dictionary<string, (long Length, DateTime Written)> Snapshot(string folder) =>
+        Directory.EnumerateFiles(folder, "*", SearchOption.AllDirectories)
+            .ToDictionary(
+                path => Path.GetRelativePath(folder, path),
+                path => (new FileInfo(path).Length, File.GetLastWriteTimeUtc(path)));
+
     private static string[] FolderEntries(string folder) =>
         [.. Directory.GetFileSystemEntries(folder)
             .Select(entry => Path.GetFileName(entry)!)
@@ -251,18 +323,26 @@ public sealed class RelationshipViewHandlerTests : IDisposable
     private IEnumerable<string> TempFiles() =>
         Directory.EnumerateFiles(_root, "*.tmp", SearchOption.AllDirectories);
 
-    /// <summary>An opener that records what it was asked to open, or fails the way a missing handler does.</summary>
-    private sealed class RecordingHtmlFileOpener : IHtmlFileOpener
+    /// <summary>Records what it was asked to show, so the test can assert on the document and the refresh.</summary>
+    private sealed class RecordingPresenter : IRelationshipViewPresenter
     {
-        internal List<string> Opened { get; } = [];
+        internal List<RelationshipDocument> Presented { get; } = [];
+
+        internal Func<CancellationToken, Task<RelationshipDocument>>? Refresh { get; private set; }
 
         internal Exception? Failure { get; init; }
 
-        public void Open(string path)
+        public Task PresentAsync(
+            RelationshipDocument document,
+            Func<CancellationToken, Task<RelationshipDocument>>? refresh,
+            CancellationToken ct)
         {
             if (Failure is not null) throw Failure;
 
-            Opened.Add(path);
+            Presented.Add(document);
+            Refresh = refresh;
+
+            return Task.CompletedTask;
         }
     }
 }

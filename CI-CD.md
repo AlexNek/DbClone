@@ -43,10 +43,14 @@ Builds the WiX installer and optionally uploads the artifacts. Inputs:
 
 Steps:
 
-1. Run `build-installer-wix.ps1 -Version <version>`, which publishes the app,
-   builds the MSI, and builds the Burn bundle (`DbClone-Setup-*.exe`).
+1. Run `build-installer-wix.ps1 -Version <version>`, which fetches the WebView2
+   prerequisite, publishes the app, builds the MSI, and builds the Burn bundle
+   (`DbClone-Setup-*.exe`).
 2. If `upload` is `'true'`, upload `artifacts/DbClone-Setup-*.exe` and
    `artifacts/DbClone-*.msi` as a workflow artifact (7-day retention).
+
+The prerequisite download is the only network step: it must reach
+`go.microsoft.com` (see [WebView2 prerequisite](#webview2-prerequisite)).
 
 ## CI workflow (`ci.yml`)
 
@@ -107,6 +111,33 @@ manual dispatch. Runs on `ubuntu-latest`, builds the MkDocs site with
 
 The script publishes the app, builds the MSI, builds the Burn bundle, and
 copies the outputs into `artifacts/`.
+
+## WebView2 prerequisite
+
+The relationship view (`View relationships` under either connection panel) is
+hosted in an in-app window backed by the WebView2 Evergreen runtime. The bundle
+installs it as a **non-vital** prerequisite:
+
+1. `build-installer-wix.ps1` downloads Microsoft's bootstrapper
+   (`MicrosoftEdgeWebView2Setup.exe`, via
+   `https://go.microsoft.com/fwlink/p/?LinkId=2124703`) into
+   `artifacts/prerequisites/` and reuses it when the file is already there.
+2. `installer/DbClone.Installer.Bundle/Bundle.wxs` binds that folder
+   (`!(bindpath.Prerequisites)`) and chains an `ExePackage` **before** the MSI,
+   running `/silent /install`.
+3. Detection reads the client's `pv` value under
+   `HKLM\SOFTWARE\WOW6432Node\Microsoft\EdgeUpdate\Clients\{F3017226-FE2A-4295-8BDF-00C3A9A7E4C5}`
+   or its `HKCU` counterpart, so an already-installed runtime — per-machine or
+   per-user — is not touched.
+4. `Permanent="yes"` keeps the runtime when DbClone is uninstalled (other
+   software shares it). `Vital="no"` means a prerequisite that cannot install
+   does **not** fail the product's install: the app falls back to the system
+   browser and states why.
+
+Because the bundle project binds a downloaded file, the WiX build itself never
+reaches the network, and `artifacts/` is git-ignored — a fresh clone must run
+the script (or the `build-installer` action) rather than build the bundle
+project directly.
 
 ## Versioning
 

@@ -12,10 +12,13 @@ namespace DbClone.UI.Services.GraphLayout;
 /// Two rules outrank the others. No path may cross a card it does not start or end on (plan D4 step
 /// 8, T25), and no two paths may run along one line: a pair of arrows drawn on one coordinate is drawn
 /// as one line, so the reader sees a single stroke joining four tables and can attribute neither end.
-/// Every route therefore claims the stretches it covers, and a candidate that would cover a stretch
-/// another route already covers is passed over while a free line exists — in another corridor first,
-/// then on a lane beside the first. Running over another route is the last resort of a picture that
-/// leaves no other way round, never the shape it prefers (T26).
+/// The test is the ink on the page rather than equal numbers, because two routes on separate grids
+/// can land a pixel apart and be drawn as one stroke (see <see cref="InkGap"/>). Every route — a
+/// dog-leg, a straight angled arrow, a cycle's curve and a self-loop alike — therefore claims the ink
+/// it covers, and a candidate that would cover ink another route already covers is passed over while
+/// a free line exists — in another corridor first, then on a lane beside the first. Running over
+/// another route is the last resort of a picture that leaves no other way round, never the shape it
+/// prefers (T26).
 /// </para>
 /// <para>
 /// The short way is preferred among the routes that satisfy both rules — a straight segment when it
@@ -53,6 +56,15 @@ internal static class GraphEdgeRouter
     /// </summary>
     internal const double LaneRowStep = 9;
 
+    /// <summary>
+    /// The least air two strokes need between them. A stroke is 1.3 px of ink, so two lines further
+    /// apart than this read as two arrows and two lines nearer read as one thick one: the parallel
+    /// shift (22) and the lane step (12) are two independent grids, so a shifted route taking a lane
+    /// can land a pixel from another route's line, which is drawn as one stroke though the coordinates
+    /// differ. Sharing is therefore decided by the ink on the page, not by equal numbers.
+    /// </summary>
+    internal const double InkGap = 6;
+
     /// <summary>How far a closing cycle's curve bows away from the straight line between its ends.</summary>
     internal const double Bulge = 26;
 
@@ -61,6 +73,9 @@ internal static class GraphEdgeRouter
 
     /// <summary>How finely a curve is sampled when checking that it clears the cards.</summary>
     private const int CurveSamples = 8;
+
+    /// <summary>How finely a curve is read back when its ink is claimed or tested against another route.</summary>
+    private const int TraceSamples = 16;
 
     /// <summary>How far two coordinates may differ and still be the same line.</summary>
     private const double Tolerance = 0.01;
@@ -93,9 +108,9 @@ internal static class GraphEdgeRouter
                 && groupOfNode[edge.ChildIndex] == groupOfNode[edge.ParentIndex];
 
             var route = edge.IsSelfReference
-                ? Loop(edge, placement, grid, ends[edge.Index], shift)
+                ? Loop(edge, placement, grid, ends[edge.Index], shift, tracks)
                 : closesCycle
-                    ? Cycle(edge, placement, ends[edge.Index], shift)
+                    ? Cycle(edge, placement, ends[edge.Index], shift, tracks)
                     : Line(edge, placement, grid, cards, near, ends[edge.Index], shift, tracks);
 
             tracks.Claim(route);
@@ -135,7 +150,7 @@ internal static class GraphEdgeRouter
         {
             var length = Length(candidate);
             var clears = Clears(candidate, placement, cards, near, edge.ChildIndex, edge.ParentIndex);
-            var shared = tracks.IsShared(candidate);
+            var shared = tracks.IsShared(candidate, EEdgeShape.Line);
 
             if (best is null || Beats(clears, shared, length, bestClears, bestShared, bestLength))
             {
@@ -518,13 +533,15 @@ internal static class GraphEdgeRouter
     /// <summary>
     /// A constraint whose two ends sit in one cyclic group, drawn as a curve so the picture states
     /// the cycle. The two directions of a mutual pair bow to opposite sides; a bulge that would cross
-    /// a card is flipped, then reduced, before it is accepted.
+    /// a card is flipped, then reduced, and a bulge drawn along a route already in the picture is
+    /// passed over for the next one, so a hub inside a cycle does not put its arrows on one stroke.
     /// </summary>
     private static EdgeRoute Cycle(
         CatalogGraphEdge edge,
         IReadOnlyList<NodePlacement> placement,
         GraphEdgeEnds ends,
-        double shift)
+        double shift,
+        TrackUse tracks)
     {
         var start = ends.Child.Point;
         var end = ends.Parent.Point;
@@ -535,6 +552,8 @@ internal static class GraphEdgeRouter
         var side = edge.ChildIndex < edge.ParentIndex ? -1 : 1;
 
         IReadOnlyList<GraphPoint>? first = null;
+        IReadOnlyList<GraphPoint>? firstClear = null;
+
         foreach (var bulge in CycleBulges(shift))
         {
             foreach (var signed in new[] { side, -side })
@@ -542,14 +561,24 @@ internal static class GraphEdgeRouter
                 var points = Curve(start, end, normalX * signed * bulge, normalY * signed * bulge);
                 first ??= points;
 
-                if (CurveClears(points, placement))
+                if (!CurveClears(points, placement))
+                {
+                    continue;
+                }
+
+                firstClear ??= points;
+
+                if (!tracks.IsShared(points, EEdgeShape.Detour))
                 {
                     return new EdgeRoute(edge.Index, EEdgeShape.Detour, points, Midpoint(points));
                 }
             }
         }
 
-        return new EdgeRoute(edge.Index, EEdgeShape.Detour, first!, Midpoint(first!));
+        // Every arc crosses a card or lies on an arrow already drawn: the picture keeps the cycle and
+        // takes the overlap, which is what the rule asks for when no other way exists (T26).
+        var accepted = firstClear ?? first!;
+        return new EdgeRoute(edge.Index, EEdgeShape.Detour, accepted, Midpoint(accepted));
     }
 
     /// <summary>
@@ -570,14 +599,16 @@ internal static class GraphEdgeRouter
     /// A table pointing at itself: a loop drawn into the corridor at its right, so the arrow says
     /// "itself" without running across the card or over its neighbour. Both of its ends belong to the
     /// one card, so each is given its own point on it: two self-references drawn into one point are
-    /// drawn as one arrow naming neither constraint.
+    /// drawn as one arrow naming neither constraint. A reach whose outer leg would fall on an arrow
+    /// already drawn gives way to a shorter one, which stays inside the same corridor.
     /// </summary>
     private static EdgeRoute Loop(
         CatalogGraphEdge edge,
         IReadOnlyList<NodePlacement> placement,
         GraphGrid grid,
         GraphEdgeEnds ends,
-        double shift)
+        double shift,
+        TrackUse tracks)
     {
         var node = placement[edge.ChildIndex];
         var column = grid.ColumnOfNode[node.NodeIndex];
@@ -593,10 +624,27 @@ internal static class GraphEdgeRouter
 
         // The loop bows out of each end along the side that end stands on, which for the ends a
         // self-reference is given is the card's own right — the corridor the reach is measured into.
+        var shortest = Math.Max(12, reach * 0.7);
+        IReadOnlyList<GraphPoint>? accepted = null;
+
+        foreach (var length in new[] { reach, shortest })
+        {
+            IReadOnlyList<GraphPoint> points =
+                [start.Point, Out(start, length), Out(end, length), end.Point];
+            accepted ??= points;
+
+            if (!tracks.IsShared(points, EEdgeShape.Loop))
+            {
+                accepted = points;
+                reach = length;
+                break;
+            }
+        }
+
         return new EdgeRoute(
             edge.Index,
             EEdgeShape.Loop,
-            [start.Point, Out(start, reach), Out(end, reach), end.Point],
+            accepted!,
             new GraphPoint(node.Right + reach + 8, node.Centre.Y));
     }
 
@@ -876,49 +924,58 @@ internal static class GraphEdgeRouter
     }
 
     /// <summary>
-    /// The stretches the routes already drawn along occupy: the x of every vertical run and the y-range
-    /// covered on it, the y of every horizontal run and its x-range. A dog-leg that picks a corridor is
-    /// picking ground other routes may already be drawn on, and two routes drawn along one line over one
-    /// another are indistinguishable in the picture — one stroke, four tables, and no way to say which
-    /// end belongs to which constraint.
+    /// The ground the routes already cover: the x of every vertical run and the y-range drawn on it,
+    /// the y of every horizontal run and its x-range, and the ink of every curve and loop. A dog-leg
+    /// that picks a corridor is picking ground other routes may already be drawn on, and two routes
+    /// drawn along one line over one another are indistinguishable in the picture — one stroke, four
+    /// tables, and no way to say which end belongs to which constraint.
     /// </summary>
     /// <remarks>
+    /// <para>
     /// A stretch is compared by the range it covers, never by the whole line it lies on: a corridor is
     /// free where nobody has drawn in it yet, so a route may use the same x as a route far above it.
-    /// Coordinates are compared as rounded values because they all come from the same lattice
-    /// arithmetic: two routes that took the same corridor produce the identical double, so exact
-    /// equality is the rule and the rounding only keeps a stray fraction from splitting one line into
-    /// two claims. Only a right-angled route claims a stretch; a curve is drawn across the picture, not
-    /// along a corridor.
+    /// </para>
+    /// <para>
+    /// Every shape is a route here, because the rule names the ink and not the way the ink was chosen:
+    /// a curve that bows between two members of a cycle is drawn to the same border as a dog-leg, so it
+    /// is tested before it is drawn and claimed once it is. Leaving curves out was what let a hub
+    /// inside a cycle put several arrows on one stroke.
+    /// </para>
+    /// <para>
+    /// Two routes are one line when their strokes are drawn within <see cref="InkGap"/> of one another,
+    /// never when their coordinates are merely equal: the parallel shift and the lane step are two
+    /// grids whose sums land a pixel apart, and a pixel apart is one thick stroke on the page.
+    /// Straight runs are held per coordinate and found by a range query; a curve's ink is bucketed by
+    /// cell, because a curve need not follow a corridor and the cells keep the search proportional to
+    /// the edge count instead of to the picture's size.
+    /// </para>
     /// </remarks>
     private sealed class TrackUse
     {
         /// <summary>How far two coordinates may differ and still be the same line.</summary>
         private const double Tolerance = 0.01;
 
+        /// <summary>How coarse the cells that hold a curve's ink are.</summary>
+        private const double Cell = 96;
+
         private readonly Dictionary<double, List<(double From, double To)>> _vertical = [];
         private readonly Dictionary<double, List<(double From, double To)>> _horizontal = [];
+        private readonly SortedSet<double> _verticalLines = [];
+        private readonly SortedSet<double> _horizontalLines = [];
+        private readonly Dictionary<(int Column, int Row), List<(GraphPoint From, GraphPoint To)>> _ink = [];
 
         /// <summary>Whether any part of the route covers a stretch another route already covers.</summary>
-        /// <param name="points">The candidate route.</param>
+        /// <param name="points">The candidate: its own points, or a curve's four control points.</param>
+        /// <param name="shape">Which of the two it is, because a curve is read between its control points.</param>
         /// <returns>Whether the route would be drawn along a stretch already in use.</returns>
-        public bool IsShared(IReadOnlyList<GraphPoint> points)
+        public bool IsShared(IReadOnlyList<GraphPoint> points, EEdgeShape shape)
         {
-            for (var index = 0; index + 1 < points.Count; index++)
+            var trace = shape == EEdgeShape.Line ? points : Sampled(points);
+
+            for (var index = 0; index + 1 < trace.Count; index++)
             {
-                var start = points[index];
-                var end = points[index + 1];
-
-                if (Math.Abs(end.X - start.X) < Tolerance
-                    && _vertical.TryGetValue(Track(start.X), out var vertical)
-                    && Covers(vertical, Math.Min(start.Y, end.Y), Math.Max(start.Y, end.Y)))
-                {
-                    return true;
-                }
-
-                if (Math.Abs(end.Y - start.Y) < Tolerance
-                    && _horizontal.TryGetValue(Track(start.Y), out var horizontal)
-                    && Covers(horizontal, Math.Min(start.X, end.X), Math.Max(start.X, end.X)))
+                if (RunsAlongALine(trace[index], trace[index + 1])
+                    || RunsAlongInk(trace[index], trace[index + 1]))
                 {
                     return true;
                 }
@@ -927,12 +984,13 @@ internal static class GraphEdgeRouter
             return false;
         }
 
-        /// <summary>Records the stretches a route that has been drawn now occupies.</summary>
+        /// <summary>Records the ink a route that has been drawn now occupies.</summary>
         /// <param name="route">The route the router accepted.</param>
         public void Claim(EdgeRoute route)
         {
             if (route.Shape != EEdgeShape.Line)
             {
+                ClaimInk(Sampled(route.Points));
                 return;
             }
 
@@ -944,14 +1002,193 @@ internal static class GraphEdgeRouter
 
                 if (Math.Abs(end.X - start.X) < Tolerance)
                 {
-                    Add(_vertical, Track(start.X), Math.Min(start.Y, end.Y), Math.Max(start.Y, end.Y));
+                    Add(_vertical, _verticalLines, Track(start.X), Math.Min(start.Y, end.Y), Math.Max(start.Y, end.Y));
                 }
-
-                if (Math.Abs(end.Y - start.Y) < Tolerance)
+                else if (Math.Abs(end.Y - start.Y) < Tolerance)
                 {
-                    Add(_horizontal, Track(start.Y), Math.Min(start.X, end.X), Math.Max(start.X, end.X));
+                    Add(_horizontal, _horizontalLines, Track(start.Y), Math.Min(start.X, end.X), Math.Max(start.X, end.X));
+                }
+                else
+                {
+                    // A straight arrow drawn at an angle follows no corridor, so it is held the same way
+                    // a curve is. Left out, it claimed nothing and any later route could be drawn on it —
+                    // which is how a diagonal and a curve came to be printed as one stroke.
+                    ClaimInk([start, end]);
                 }
             }
+        }
+
+        /// <summary>
+        /// Whether the stretch runs along a corridor line another route already runs on. A stretch is
+        /// read as belonging to the axis it mostly follows, and a curve's stretch counts too: what the
+        /// reader sees is one line, whether a dog-leg or an arc of a cycle was laid along it.
+        /// </summary>
+        private bool RunsAlongALine(GraphPoint from, GraphPoint to)
+        {
+            var (dx, dy) = (Math.Abs(to.X - from.X), Math.Abs(to.Y - from.Y));
+
+            return dy <= dx
+                ? Along(_horizontal, _horizontalLines, (from.Y + to.Y) / 2, Math.Min(from.X, to.X), Math.Max(from.X, to.X), dy <= InkGap)
+                : Along(_vertical, _verticalLines, (from.X + to.X) / 2, Math.Min(from.Y, to.Y), Math.Max(from.Y, to.Y), dx <= InkGap);
+        }
+
+        /// <summary>Whether the stretch lies on ink a route already laid down that follows no corridor.</summary>
+        private bool RunsAlongInk(GraphPoint from, GraphPoint to)
+        {
+            if (_ink.Count == 0)
+            {
+                return false;
+            }
+
+            foreach (var (column, row) in Cells(from, to, InkGap))
+            {
+                if (!_ink.TryGetValue((column, row), out var strokes))
+                {
+                    continue;
+                }
+
+                foreach (var (heldFrom, heldTo) in strokes)
+                {
+                    if (RunsAlong(from, to, heldFrom, heldTo))
+                    {
+                        return true;
+                    }
+                }
+            }
+
+            return false;
+        }
+
+        /// <summary>Records ink that follows no corridor — a curve, a loop, or a straight arrow drawn at an angle — in the cells it passes through.</summary>
+        private void ClaimInk(IReadOnlyList<GraphPoint> trace)
+        {
+            for (var index = 0; index + 1 < trace.Count; index++)
+            {
+                var stroke = (From: trace[index], To: trace[index + 1]);
+
+                foreach (var (column, row) in Cells(stroke.From, stroke.To, 0))
+                {
+                    if (!_ink.TryGetValue((column, row), out var strokes))
+                    {
+                        strokes = [];
+                        _ink[(column, row)] = strokes;
+                    }
+
+                    strokes.Add(stroke);
+                }
+            }
+        }
+
+        /// <summary>
+        /// Whether two stretches are drawn along one another rather than merely meeting: they have to
+        /// head the same way, and the shorter of the two has to lie on the longer one for a stretch worth
+        /// drawing. A crossing meets that at one point and is left alone, which is why the direction is
+        /// read first; measuring the shorter against the longer is what lets a 15 px arc be tested
+        /// against a straight arrow 200 px long, whose far ends are nowhere near it by design.
+        /// </summary>
+        private static bool RunsAlong(GraphPoint from, GraphPoint to, GraphPoint heldFrom, GraphPoint heldTo)
+        {
+            var (ux, uy) = (to.X - from.X, to.Y - from.Y);
+            var (vx, vy) = (heldTo.X - heldFrom.X, heldTo.Y - heldFrom.Y);
+            var reach = Math.Sqrt((ux * ux) + (uy * uy)) * Math.Sqrt((vx * vx) + (vy * vy));
+
+            if (reach < 0.000001 || Math.Abs((ux * vy) - (uy * vx)) / reach > 0.34)
+            {
+                return false;
+            }
+
+            var (shortFrom, shortTo, longFrom, longTo) = Shorter(from, to, heldFrom, heldTo);
+            var (lx, ly) = (longTo.X - longFrom.X, longTo.Y - longFrom.Y);
+            var longLength = Math.Sqrt((lx * lx) + (ly * ly));
+
+            if (DistanceTo(longFrom, lx, ly, longLength, shortFrom) > InkGap
+                || DistanceTo(longFrom, lx, ly, longLength, shortTo) > InkGap)
+            {
+                return false;
+            }
+
+            var (one, two) = (
+                (((shortFrom.X - longFrom.X) * lx) + ((shortFrom.Y - longFrom.Y) * ly)) / longLength,
+                (((shortTo.X - longFrom.X) * lx) + ((shortTo.Y - longFrom.Y) * ly)) / longLength);
+
+            return Math.Min(Math.Max(one, two), longLength) - Math.Max(Math.Min(one, two), 0) > 1;
+        }
+
+        /// <summary>The two stretches ordered so the one that has to fit inside the other comes first.</summary>
+        private static (GraphPoint From, GraphPoint To, GraphPoint HeldFrom, GraphPoint HeldTo) Shorter(
+            GraphPoint from,
+            GraphPoint to,
+            GraphPoint heldFrom,
+            GraphPoint heldTo)
+        {
+            var mine = ((to.X - from.X) * (to.X - from.X)) + ((to.Y - from.Y) * (to.Y - from.Y));
+            var theirs = ((heldTo.X - heldFrom.X) * (heldTo.X - heldFrom.X)) + ((heldTo.Y - heldFrom.Y) * (heldTo.Y - heldFrom.Y));
+
+            return mine <= theirs
+                ? (from, to, heldFrom, heldTo)
+                : (heldFrom, heldTo, from, to);
+        }
+
+        /// <summary>How far a point lies from the line a stretch is drawn along.</summary>
+        private static double DistanceTo(GraphPoint from, double ux, double uy, double length, GraphPoint point) =>
+            Math.Abs((ux * (point.Y - from.Y)) - (uy * (point.X - from.X))) / length;
+
+        /// <summary>
+        /// The cells a stretch touches, grown by the air two strokes need. A curve's ink need not follow
+        /// a corridor, so it is found by cell rather than by coordinate.
+        /// </summary>
+        private static IEnumerable<(int Column, int Row)> Cells(GraphPoint from, GraphPoint to, double reach)
+        {
+            var firstColumn = (int)Math.Floor((Math.Min(from.X, to.X) - reach) / Cell);
+            var lastColumn = (int)Math.Floor((Math.Max(from.X, to.X) + reach) / Cell);
+            var firstRow = (int)Math.Floor((Math.Min(from.Y, to.Y) - reach) / Cell);
+            var lastRow = (int)Math.Floor((Math.Max(from.Y, to.Y) + reach) / Cell);
+
+            for (var column = firstColumn; column <= lastColumn; column++)
+            {
+                for (var row = firstRow; row <= lastRow; row++)
+                {
+                    yield return (column, row);
+                }
+            }
+        }
+
+        /// <summary>A curve read as the short straight stretches the document paints for it.</summary>
+        private static IReadOnlyList<GraphPoint> Sampled(IReadOnlyList<GraphPoint> points)
+        {
+            var trace = new List<GraphPoint>(TraceSamples + 1);
+
+            for (var sample = 0; sample <= TraceSamples; sample++)
+            {
+                trace.Add(CubicAt(points, (double)sample / TraceSamples));
+            }
+
+            return trace;
+        }
+
+        /// <summary>Whether a run at this line, over this range, meets ink already drawn there.</summary>
+        private static bool Along(
+            Dictionary<double, List<(double From, double To)>> tracks,
+            SortedSet<double> lines,
+            double line,
+            double from,
+            double to,
+            bool headsAlongAxis)
+        {
+            if (!headsAlongAxis)
+            {
+                return false;
+            }
+
+            foreach (var held in lines.GetViewBetween(line - InkGap, line + InkGap))
+            {
+                if (tracks.TryGetValue(held, out var ranges) && Covers(ranges, from, to))
+                {
+                    return true;
+                }
+            }
+
+            return false;
         }
 
         /// <summary>Whether one of the ranges on a line meets the range a candidate covers on it.</summary>
@@ -971,6 +1208,7 @@ internal static class GraphEdgeRouter
         /// <summary>Adds one stretch to a line's own list, dropping the ones with no length to speak of.</summary>
         private static void Add(
             Dictionary<double, List<(double From, double To)>> tracks,
+            SortedSet<double> lines,
             double line,
             double from,
             double to)
@@ -984,6 +1222,7 @@ internal static class GraphEdgeRouter
             {
                 ranges = [];
                 tracks[line] = ranges;
+                lines.Add(line);
             }
 
             ranges.Add((from, to));

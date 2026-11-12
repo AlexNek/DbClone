@@ -2,6 +2,7 @@ using System.Globalization;
 using System.Text.Json;
 using System.Text.RegularExpressions;
 using DbClone.Application.Interchange;
+using DbClone.Application.Relationship;
 using DbClone.UI.Models.CatalogGraph;
 using DbClone.UI.Services;
 using DbClone.UI.Services.GraphLayout;
@@ -93,9 +94,70 @@ public sealed class CatalogGraphHtmlRendererTests
 
         // Assert
         rendered.Document.Should().Contain("class=\"elabel quiet\"");
-        rendered.Document.Should().Contain("path.edge.hot+text.elabel");
-        rendered.Document.Should().Contain("path.edge.pick:hover+text.elabel");
+        rendered.Document.Should().Contain("path.edge:not(.off).hot+text.elabel");
+        rendered.Document.Should().Contain("path.edge.pick:not(.off):hover+text.elabel");
         Count(rendered.Document, "class=\"elabel").Should().Be(rendered.Model.Edges.Count);
+    }
+
+    [Fact]
+    public void A_cluster_switched_off_takes_its_supernode_with_it()
+    {
+        // Arrange
+        var rendered = Render(Ring(9));
+
+        // Assert — a table is claimed by one chip per axis and each axis filters on its own, so a schema
+        // the reader switches off hides the grouped tables it also claims, and the box drawn over a
+        // collapsed group goes with its members instead of naming tables that are no longer on screen.
+        rendered.Document.Should().Contain("axisOn(claims, \"Schema\")")
+            .And.Contain("axisOn(claims, \"CyclicGroup\")")
+            .And.Contain("axisOn(claims, \"Unconnected\")");
+        rendered.Document.Should().Contain(".super.off");
+    }
+
+    [Fact]
+    public void The_picture_opens_on_itself_rather_than_on_the_canvas_corner()
+    {
+        // Arrange
+        var rendered = Render(Chain(12));
+
+        // Assert — the stage takes the height the window has left instead of a guessed offset, and both
+        // the opening view and "100%" centre the visible cards in it rather than moving the canvas
+        // origin into the stage's corner.
+        rendered.Document.Should().Contain("function placeContent(wanted)")
+            .And.Contain("if (action === \"reset\") placeContent(1);")
+            .And.MatchRegex("placeContent\\(1\\);\\s*\\}\\(\\)\\);");
+        rendered.Document.Should().NotContain("calc(100vh");
+
+        // A picture larger than the stage is aligned to its own top-left corner instead of centred, so
+        // "100%" lands on the first tables rather than on the middle of the canvas.
+        rendered.Document.Should().Contain("width <= stage.width")
+            .And.Contain("height <= stage.height");
+    }
+
+    [Fact]
+    public void The_folded_group_box_answers_the_keyboard_it_offers()
+    {
+        // Arrange — the box carries role="button" and tabindex="0", so Tab reaches it; a control the
+        // reader can reach and then cannot press is a button that does not work.
+        var rendered = Render(Ring(9));
+
+        // Assert
+        rendered.Document.Should().Contain("svg.addEventListener(\"keydown\"");
+        rendered.Document.Should().Contain("event.key !== \"Enter\"");
+    }
+
+    [Fact]
+    public void Selecting_a_search_hit_can_show_the_card_it_names()
+    {
+        // Arrange
+        var rendered = Render(Chain(12));
+
+        // Assert — revealing a hit asks the picture for a table's card while the island's own lookup is
+        // a map. One name for both would leave the map where the reveal calls the function: the call
+        // throws, and a search that reports a match then shows nothing at all.
+        rendered.Document.Should().Contain("function cardElement(index)");
+        rendered.Document.Should().Contain("var card = cardElement(index);");
+        rendered.Document.Should().NotContain("function cardOf(");
     }
 
     [Fact]
@@ -699,6 +761,71 @@ public sealed class CatalogGraphHtmlRendererTests
         (GraphEdgePorts.MinStep - bar).Should().BeGreaterThanOrEqualTo(6, "a bar would print on the head of the end beside it");
     }
 
+    [Fact]
+    public void A_catalog_document_states_its_origin_in_the_words_it_always_had()
+    {
+        // Feature 11 changes what a document *can* describe, never what a catalog's document says: the
+        // header keeps its folder, its format version and its moment (D8).
+        var rendered = Render(CatalogGraphFixture.Create()
+            .Table("public", "orders", 1200, Column("id", "bigint", isPrimaryKey: true))
+            .Table("public", "customers", 40, Column("id", "bigint", isPrimaryKey: true))
+            .Edge(
+                CatalogGraphFixture.TableId("public", "orders"),
+                CatalogGraphFixture.TableId("public", "customers"),
+                "fk_orders_customers",
+                ["customer_id"],
+                ["id"])
+            .WithoutData());
+
+        // Assert
+        rendered.Document.Should().Contain("<title>Relationships \u2014 fixture</title>");
+        rendered.Document.Should().Contain("catalog <b title=\"C:\\catalogs\\fixture\">fixture</b>");
+        rendered.Document.Should().Contain("format version 3");
+        rendered.Document.Should().Contain("postgresql \u00b7 generated 2026-11-10 16:00");
+        rendered.Document.Should().Contain("no row data was captured");
+        rendered.Document.Should().Contain("aria-label=\"Search the catalog\"");
+        rendered.Document.Should().Contain("no data captured");
+        rendered.Document.Should().NotContain("live database");
+        rendered.Document.Should().NotContain("rows are not counted here");
+    }
+
+    [Fact]
+    public void A_live_document_names_the_database_and_never_speaks_of_a_catalog()
+    {
+        // A live read is not a catalog: there is no format to state and no row count was measured, so
+        // every sentence that described a captured artefact is replaced by one that describes a read
+        // (D8, D9). The outside table is drawn, so the register and the key state the live words too.
+        var orders = CatalogGraphFixture.TableId("public", "orders");
+        var absent = "table:absent.audit";
+        var rendered = Render(CatalogGraphFixture.Create()
+            .Live("testdb", "test.example.com:5432/testdb")
+            .Table("public", "orders", columns: Column("id", "bigint", isPrimaryKey: true))
+            .Table("public", "customers", columns: Column("id", "bigint", isPrimaryKey: true))
+            .Outside(absent, "absent", "audit")
+            .Edge(orders, CatalogGraphFixture.TableId("public", "customers"), "fk_orders_customers", ["customer_id"], ["id"])
+            .Edge(orders, absent, "fk_orders_audit", ["audit_id"], ["id"]));
+
+        // Assert — the origin the document states.
+        rendered.Document.Should().Contain("<title>Relationships \u2014 testdb</title>");
+        rendered.Document.Should().Contain("live database <b title=\"test.example.com:5432/testdb\">testdb</b>");
+        rendered.Document.Should().Contain("postgresql \u00b7 read 2026-11-10 16:00");
+        rendered.Document.Should().NotContain("format version");
+
+        // Assert — the live words, and not one catalog literal anywhere in the document.
+        rendered.Document.Should().Contain("rows are not counted here");
+        rendered.Document.Should().Contain("not in this view");
+        rendered.Document.Should().Contain("outside this view");
+        rendered.Document.Should().Contain("the table it points at is not in this view");
+        rendered.Document.Should().Contain("aria-label=\"Search this view\"");
+        rendered.Document.Should().NotContain("no row data was captured");
+        rendered.Document.Should().NotContain("no data captured");
+        rendered.Document.Should().NotContain("not in this catalog");
+        rendered.Document.Should().NotContain("outside the catalog");
+        rendered.Document.Should().NotContain("the table it points at is not in this catalog");
+        rendered.Document.Should().NotContain("Search the catalog");
+        rendered.Document.Should().NotContain("a table the catalog does not name");
+    }
+
     /// <summary>How wide one mark is drawn in the picture, in pixels, ink and all.</summary>
     private static double MarkInk(string document, string id)
     {
@@ -846,7 +973,7 @@ public sealed class CatalogGraphHtmlRendererTests
         return fixture;
     }
 
-    private static CatalogColumnView Column(string name, string type, bool isPrimaryKey = false) =>
+    private static RelationshipColumnView Column(string name, string type, bool isPrimaryKey = false) =>
         new(name, type, false, isPrimaryKey, false, false, null);
 
     private static Rendered Render(CatalogGraphFixture fixture)
@@ -863,7 +990,7 @@ public sealed class CatalogGraphHtmlRendererTests
     }
 
     private sealed record Rendered(
-        CatalogGraphView View,
+        RelationshipGraphView View,
         CatalogGraphModel Model,
         string Document,
         string Island);

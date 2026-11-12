@@ -1,7 +1,7 @@
-namespace DbClone.Application.Interchange;
+namespace DbClone.Application.Relationship;
 
 /// <summary>
-/// One schema row in a catalog relationship view, read by the schema filter chips.
+/// One schema row in a relationship view, read by the schema filter chips.
 /// </summary>
 /// <param name="Schema">The schema name.</param>
 /// <param name="TableCount">The number of captured tables in this schema.</param>
@@ -11,7 +11,7 @@ namespace DbClone.Application.Interchange;
 /// fact. A self reference counts its table once; an outside end never joins a schema row even when
 /// its reference names one, because the catalog never confirmed that schema.
 /// </param>
-public sealed record CatalogSchemaView(
+public sealed record RelationshipSchemaView(
     string Schema,
     int TableCount,
     int RelatedTableCount);

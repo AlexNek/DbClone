@@ -1,0 +1,35 @@
+namespace DbClone.UI.Services.Relationship;
+
+/// <summary>
+/// Shows a document by handing it to whatever the user's system uses for HTML (D10): the fallback when
+/// no in-app runtime is available, so the feature works on a machine that has installed nothing extra.
+/// </summary>
+/// <remarks>
+/// The document is written to the one fixed path before the shell is asked, so a browser that refuses
+/// the file still leaves the reader something to open by hand.
+/// </remarks>
+internal sealed class BrowserRelationshipPresenter : IRelationshipViewPresenter
+{
+    private readonly IHtmlFileOpener _opener;
+
+    /// <summary>Creates the presenter over the shell opener.</summary>
+    /// <param name="opener">Hands the written file to the system.</param>
+    public BrowserRelationshipPresenter(IHtmlFileOpener opener) =>
+        _opener = opener ?? throw new ArgumentNullException(nameof(opener));
+
+    /// <inheritdoc />
+    /// <remarks>
+    /// <paramref name="refresh"/> is unused: a browser tab has no control this app can offer, and a
+    /// reader who wants a fresh document asks for a new view.
+    /// </remarks>
+    public async Task PresentAsync(
+        RelationshipDocument document,
+        Func<CancellationToken, Task<RelationshipDocument>>? refresh,
+        CancellationToken ct)
+    {
+        ArgumentNullException.ThrowIfNull(document);
+
+        await RelationshipViewFile.WriteAsync(document.Html, ct).ConfigureAwait(false);
+        _opener.Open(RelationshipViewFile.Path);
+    }
+}

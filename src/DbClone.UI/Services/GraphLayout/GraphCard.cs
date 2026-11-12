@@ -40,12 +40,14 @@ internal static class GraphCard
 
     /// <summary>The width the card of a table needs, from the two lines printed inside it.</summary>
     /// <param name="node">The table.</param>
+    /// <param name="words">The origin's words, so the measured line is the printed line.</param>
     /// <returns>The card's width.</returns>
-    internal static double WidthOf(CatalogGraphNode node)
+    internal static double WidthOf(CatalogGraphNode node, GraphOriginWords words)
     {
         ArgumentNullException.ThrowIfNull(node);
+        ArgumentNullException.ThrowIfNull(words);
 
-        return Width(node.DisplayName, GraphFactText.NodeFacts(node));
+        return Width(node.DisplayName, GraphFactText.NodeFacts(node, words));
     }
 
     /// <summary>The width two printed lines need, with the card's padding on either side.</summary>

@@ -1,4 +1,4 @@
-using DbClone.Application.Interchange;
+using DbClone.Application.Relationship;
 using DbClone.UI.Models.CatalogGraph;
 
 namespace DbClone.UI.Services.GraphAnalysis;
@@ -21,7 +21,7 @@ internal static class GraphEdgeBuilder
     /// <param name="seeds">The ordered nodes, for the parent's display name.</param>
     /// <returns>The edges, numbered in canonical order.</returns>
     internal static List<CatalogGraphEdge> Build(
-        CatalogGraphView view,
+        RelationshipGraphView view,
         Dictionary<string, int> indexById,
         IReadOnlyList<GraphNodeSeed> seeds)
     {
@@ -125,7 +125,7 @@ internal static class GraphEdgeBuilder
     /// The constraint's full text: the columns that store the value, then the table the value comes
     /// from, then the delete action only where it leaves the default.
     /// </summary>
-    private static string ConstraintLabel(CatalogRelationEdgeView edge, GraphNodeSeed parent)
+    private static string ConstraintLabel(RelationshipEdgeView edge, GraphNodeSeed parent)
     {
         var right = edge.ReferencedColumns.Count == 0
             ? parent.DisplayName
@@ -139,7 +139,7 @@ internal static class GraphEdgeBuilder
     /// The short text the picture prints beside an edge: the columns, and nothing else. The parent's
     /// name is already on the card the edge ends at, so repeating it only crowds the drawing.
     /// </summary>
-    private static string PictureLabel(CatalogRelationEdgeView edge)
+    private static string PictureLabel(RelationshipEdgeView edge)
     {
         var right = edge.ReferencedColumns.Count == 0 ? "pk" : Join(edge.ReferencedColumns);
         return $"{Join(edge.Columns)} → {right}";
