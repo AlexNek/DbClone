@@ -26,7 +26,7 @@ public sealed class RelationshipViewPresenterResolverTests
         var browser = new Recorder();
 
         // Act
-        await CreateResolver(probe, window, browser).PresentAsync(Document(), refresh: null, CancellationToken.None);
+        await CreateResolver(probe, window, browser).PresentAsync(Document(), refresh: null, redraw: null, CancellationToken.None);
 
         // Assert
         browser.Presented.Should().Be(1);
@@ -43,7 +43,7 @@ public sealed class RelationshipViewPresenterResolverTests
         var browser = new Recorder();
 
         // Act
-        await CreateResolver(probe, window, browser).PresentAsync(Document(), refresh: null, CancellationToken.None);
+        await CreateResolver(probe, window, browser).PresentAsync(Document(), refresh: null, redraw: null, CancellationToken.None);
 
         // Assert
         window.Presented.Should().Be(1);
@@ -59,7 +59,7 @@ public sealed class RelationshipViewPresenterResolverTests
         var browser = new Recorder();
 
         // Act
-        await CreateResolver(probe, window, browser).PresentAsync(Document(), refresh: null, CancellationToken.None);
+        await CreateResolver(probe, window, browser).PresentAsync(Document(), refresh: null, redraw: null, CancellationToken.None);
 
         // Assert
         window.Presented.Should().Be(1);
@@ -105,6 +105,7 @@ public sealed class RelationshipViewPresenterResolverTests
         public Task PresentAsync(
             RelationshipDocument document,
             Func<CancellationToken, Task<RelationshipDocument>>? refresh,
+            Func<IReadOnlySet<int>, RelationshipDocument>? redraw,
             CancellationToken ct)
         {
             Presented++;
@@ -121,6 +122,7 @@ public sealed class RelationshipViewPresenterResolverTests
         public Task PresentAsync(
             RelationshipDocument document,
             Func<CancellationToken, Task<RelationshipDocument>>? refresh,
+            Func<IReadOnlySet<int>, RelationshipDocument>? redraw,
             CancellationToken ct)
         {
             Presented++;

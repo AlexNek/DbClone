@@ -27,7 +27,10 @@ internal static class CatalogGraphScript
   var cardOf = new Map();
   data.nodes.forEach(function (card) { cardOf.set(card.i, card); });
 
-  var offChips = new Set();
+  // The selection the picture was drawn for: the host leaves the tables of a switched-off cluster
+  // out of the picture and out of the layout, so the cards that remain are arranged for the picture
+  // the reader is looking at (T28).
+  var offChips = new Set(data.off || []);
   var focus = -1;
   var direction = "both";
 
@@ -593,6 +596,20 @@ internal static class CatalogGraphScript
     if (on) offChips.delete(index); else offChips.add(index);
   }
 
+  // The picture is drawn again for the clusters that are on: the host re-lays it out, because a
+  // lattice sized for the tables this chip hides is what leaves a hole where they used to stand.
+  // A copy opened outside the viewer has no host, and keeps the class toggle it always had.
+  var host = window.chrome && window.chrome.webview;
+  var redraw = 0;
+
+  function requestRedraw() {
+    if (!host || typeof host.postMessage !== "function") return;
+    clearTimeout(redraw);
+    redraw = setTimeout(function () {
+      host.postMessage(JSON.stringify({ off: Array.from(offChips) }));
+    }, 250);
+  }
+
   document.getElementById("chips").addEventListener("click", function (event) {
     var chip = event.target.closest(".chip");
     if (!chip) return;
@@ -604,6 +621,7 @@ internal static class CatalogGraphScript
       setChip(chip, !chip.classList.contains("on"));
     }
     applyChips();
+    requestRedraw();
   });
 
   document.getElementById("query").addEventListener("input", function (event) {

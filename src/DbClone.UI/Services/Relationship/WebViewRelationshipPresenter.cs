@@ -43,6 +43,7 @@ internal sealed class WebViewRelationshipPresenter : IInAppRelationshipPresenter
     public async Task PresentAsync(
         RelationshipDocument document,
         Func<CancellationToken, Task<RelationshipDocument>>? refresh,
+        Func<IReadOnlySet<int>, RelationshipDocument>? redraw,
         CancellationToken ct)
     {
         ArgumentNullException.ThrowIfNull(document);
@@ -53,7 +54,7 @@ internal sealed class WebViewRelationshipPresenter : IInAppRelationshipPresenter
                 ?? throw new InvalidOperationException("The application is shutting down, so no window can be shown.");
 
             await dispatcher
-                .InvokeAsync(() => PresentOnUiThreadAsync(document, refresh, ct))
+                .InvokeAsync(() => PresentOnUiThreadAsync(document, refresh, redraw, ct))
                 .Task.Unwrap()
                 .ConfigureAwait(false);
         }
@@ -64,13 +65,14 @@ internal sealed class WebViewRelationshipPresenter : IInAppRelationshipPresenter
         catch (Exception ex)
         {
             _logger.LogWarning(ex, "The in-app relationship view could not be shown; the browser takes this one");
-            await _fallback.PresentAsync(document, refresh, ct).ConfigureAwait(false);
+            await _fallback.PresentAsync(document, refresh, redraw, ct).ConfigureAwait(false);
         }
     }
 
     private async Task PresentOnUiThreadAsync(
         RelationshipDocument document,
         Func<CancellationToken, Task<RelationshipDocument>>? refresh,
+        Func<IReadOnlySet<int>, RelationshipDocument>? redraw,
         CancellationToken ct)
     {
         _window ??= new RelationshipViewWindow(_logger, OpenInBrowserAsync, SaveAsync)
@@ -78,12 +80,12 @@ internal sealed class WebViewRelationshipPresenter : IInAppRelationshipPresenter
             Owner = System.Windows.Application.Current.MainWindow,
         };
 
-        await _window.ShowDocumentAsync(document, refresh, ct).ConfigureAwait(true);
+        await _window.ShowDocumentAsync(document, refresh, redraw, ct).ConfigureAwait(true);
     }
 
     /// <summary>The window's "open in browser": the one file rule, shared with the fallback (D10).</summary>
     private Task OpenInBrowserAsync(RelationshipDocument document, CancellationToken ct) =>
-        _fallback.PresentAsync(document, refresh: null, ct);
+        _fallback.PresentAsync(document, refresh: null, redraw: null, ct);
 
     /// <summary>The window's "save as": a copy wherever the reader asks for it, in the product's encoding.</summary>
     private async Task SaveAsync(RelationshipDocument document, CancellationToken ct)

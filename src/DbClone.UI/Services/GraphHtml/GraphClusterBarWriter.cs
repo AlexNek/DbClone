@@ -5,14 +5,19 @@ namespace DbClone.UI.Services.GraphHtml;
 
 /// <summary>
 /// The cluster selector: one button per schema, per cyclic group and for the tables with no relation
-/// at all. Every chip opens switched on, and switching one off hides its tables and their incident
-/// edges without removing anything from the document (FR15, D8a).
+/// at all. Every chip opens switched on; switching one off is answered by a picture that does not hold
+/// its tables, so what the reader keeps is arranged for what they kept (FR15, D8a, T28).
 /// </summary>
 /// <remarks>
 /// <para>
 /// Which tables a chip claims was decided by the analyzer part; this writer only prints the buttons
 /// and the claim sets the script reads. A chip group the catalog produced no chip for is not
 /// written at all, so an empty heading never appears.
+/// </para>
+/// <para>
+/// A chip the reader switched off is printed off, so a document drawn for a selection states it: the
+/// picture holds only the clusters that are on, and the reader still has every chip to switch one
+/// back. The chips are read from the whole catalog, never from the picture's own model.
 /// </para>
 /// <para>
 /// A schema the catalog holds only one of is stated, not offered: a lone chip's other state is
@@ -24,14 +29,19 @@ internal sealed class GraphClusterBarWriter
 {
     private readonly CatalogGraphModel _model;
     private readonly ClusterSwitchSet _switches;
+    private readonly IReadOnlySet<int> _offChips;
 
     /// <summary>Creates the writer for one document.</summary>
-    /// <param name="model">The analyzed graph, with its chips and their claim sets.</param>
-    public GraphClusterBarWriter(CatalogGraphModel model)
+    /// <param name="model">The analyzed whole catalog, with its chips and their claim sets.</param>
+    /// <param name="offChips">The chips the picture was drawn without.</param>
+    public GraphClusterBarWriter(CatalogGraphModel model, IReadOnlySet<int> offChips)
     {
         ArgumentNullException.ThrowIfNull(model);
+        ArgumentNullException.ThrowIfNull(offChips);
+
         _model = model;
         _switches = new ClusterSwitchSet(model);
+        _offChips = offChips;
     }
 
     /// <summary>Writes the cluster bar.</summary>
@@ -95,9 +105,11 @@ internal sealed class GraphClusterBarWriter
 
         foreach (var chip in chips)
         {
-            html.Append("<button type=\"button\" class=\"chip on\" data-c=\"").Append(chip.Index)
-                .Append("\" aria-pressed=\"true\">").Append(GraphHtmlText.Escape(Label(chip)))
-                .Append("</button>\n");
+            var on = !_offChips.Contains(chip.Index);
+            html.Append("<button type=\"button\" class=\"chip").Append(on ? " on" : string.Empty)
+                .Append("\" data-c=\"").Append(chip.Index)
+                .Append("\" aria-pressed=\"").Append(on ? "true" : "false").Append("\">")
+                .Append(GraphHtmlText.Escape(Label(chip))).Append("</button>\n");
         }
 
         html.Append("</div>\n");

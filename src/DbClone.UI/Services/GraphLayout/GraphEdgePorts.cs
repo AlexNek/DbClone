@@ -10,8 +10,9 @@ namespace DbClone.UI.Services.GraphLayout;
 /// An end placed where the line from card centre to card centre meets the border puts every neighbour
 /// standing in the same direction on the same point, and four arrowheads on one point read as one
 /// thick arrow belonging to no table in particular. So the border is dealt out instead: an end keeps
-/// the point its own centre-to-centre line names for it unless the end before it is nearer than a
-/// mark is wide, in which case it moves on round the card. Nothing is stacked and nothing is dropped.
+/// the side its own centre-to-centre line names for it, and the ends of one side are spread along it —
+/// each keeps the place it asks for while its neighbour leaves it a mark's room, and ends asking for
+/// one place are opened out around that place rather than pushed off the side they face.
 /// </para>
 /// <para>
 /// A card's corners take no end, because a mark printed on a corner is half on the card and half on
@@ -98,6 +99,9 @@ internal static class GraphEdgePorts
     }
 
     /// <summary>Hands one card's border out to the ends that meet it.</summary>
+    /// <param name="node">The card.</param>
+    /// <param name="wants">The ends that meet it.</param>
+    /// <returns>One point per end.</returns>
     private static IEnumerable<(Want Want, GraphEdgePort Port)> Deal(NodePlacement node, List<Want> wants)
     {
         if (wants.Count == 0)
@@ -113,45 +117,220 @@ internal static class GraphEdgePorts
             .ToList();
 
         var usable = Usable(node);
-        var first = FirstAfterWidestGap(sorted, usable);
 
-        var ordered = new List<Want>(sorted.Count);
-        for (var step = 0; step < sorted.Count; step++)
+        return sorted.Count * MinStep > usable
+            ? Crowded(node, sorted, FirstAfterWidestGap(sorted, usable), usable)
+            : BySide(node, sorted);
+    }
+
+    /// <summary>
+    /// Deals the ends of a card that has room for all of them: an end keeps the side its own
+    /// neighbour stands on, and only a side with no room for the ends that name it hands the surplus
+    /// to the next side round the card. An arrow therefore leaves and arrives on a side its table
+    /// faces; an end carried a whole turn round would leave in a direction the table never faces, and
+    /// the only corridor open to it is the picture's own edge.
+    /// </summary>
+    /// <param name="node">The card.</param>
+    /// <param name="sorted">The ends that meet it, in border order.</param>
+    /// <returns>One point per end.</returns>
+    private static List<(Want Want, GraphEdgePort Port)> BySide(
+        NodePlacement node,
+        IReadOnlyList<Want> sorted)
+    {
+        var spans = new double[Order.Length];
+        var used = new int[Order.Length];
+        var assigned = new List<(Want Want, double Along)>[Order.Length];
+
+        for (var side = 0; side < Order.Length; side++)
         {
-            ordered.Add(sorted[(first + step) % sorted.Count]);
+            spans[side] = Span(node, Order[side]);
+            assigned[side] = [];
         }
 
-        var positions = LineUp(ordered, usable);
-        var dealt = new List<(Want, GraphEdgePort)>(ordered.Count);
-
-        for (var index = 0; index < ordered.Count; index++)
+        foreach (var want in sorted)
         {
-            dealt.Add((ordered[index], Place(node, positions[index])));
+            var side = want.Side;
+            var along = want.Along;
+
+            if (used[side] == Slots(spans[side]))
+            {
+                side = NextSide(used, spans, side);
+                along = 0;
+            }
+
+            used[side]++;
+            assigned[side].Add((want, along));
+        }
+
+        var dealt = new List<(Want Want, GraphEdgePort Port)>(sorted.Count);
+
+        for (var side = 0; side < Order.Length; side++)
+        {
+            var ends = assigned[side].OrderBy(end => end.Along).ToList();
+            var along = Arrange([.. ends.Select(end => end.Along)], spans[side]);
+
+            for (var index = 0; index < ends.Count; index++)
+            {
+                dealt.Add((ends[index].Want, new GraphEdgePort(Order[side], At(node, Order[side], along[index]))));
+            }
         }
 
         return dealt;
     }
 
-    /// <summary>
-    /// The position every end gets: its own preferred one while the end before it has left room, and
-    /// the first free one after it when it has not. Ends that would be pushed onto the loop's own
-    /// start are spread over the whole border instead, so they stay distinct even on a card the
-    /// catalog has more arrows into than the border has marks of room for.
-    /// </summary>
-    private static double[] LineUp(IReadOnlyList<Want> ordered, double usable)
+    /// <summary>Spreads ends the whole border has no room for evenly round it.</summary>
+    /// <param name="node">The card.</param>
+    /// <param name="sorted">The ends that meet the card, in border order.</param>
+    /// <param name="first">The end the walk starts at.</param>
+    /// <param name="usable">The whole usable border.</param>
+    /// <returns>One point per end.</returns>
+    private static List<(Want Want, GraphEdgePort Port)> Crowded(
+        NodePlacement node,
+        IReadOnlyList<Want> sorted,
+        int first,
+        double usable)
     {
-        var positions = new double[ordered.Count];
-        var previous = ordered[0].Logical - MinStep;
+        var spots = Even(sorted[first].Logical, sorted.Count, usable);
+        var dealt = new List<(Want Want, GraphEdgePort Port)>(sorted.Count);
 
-        for (var index = 0; index < ordered.Count; index++)
+        for (var step = 0; step < sorted.Count; step++)
         {
-            previous = Math.Max(ordered[index].Logical, previous + MinStep);
-            positions[index] = previous;
+            dealt.Add((sorted[(first + step) % sorted.Count], Place(node, spots[step])));
         }
 
-        return previous < positions[0] + usable - MinStep
-            ? positions
-            : Even(ordered[0].Logical, ordered.Count, usable);
+        return dealt;
+    }
+
+    /// <summary>Which side a border point stands on, and how far along that side it sits.</summary>
+    /// <param name="node">The card.</param>
+    /// <param name="point">The border point.</param>
+    /// <returns>The side and the distance along it.</returns>
+    private static (int Side, double Along) Locate(NodePlacement node, GraphPoint point)
+    {
+        for (var side = 0; side < Order.Length; side++)
+        {
+            if (OnSide(node, Order[side], point))
+            {
+                return (side, Math.Clamp(Along(node, Order[side], point), 0, Span(node, Order[side])));
+            }
+        }
+
+        return (0, 0);
+    }
+
+    /// <summary>How many ends one side holds a mark apart, counting the first.</summary>
+    /// <param name="span">The length of the side.</param>
+    /// <returns>The number of ends it has room for.</returns>
+    private static int Slots(double span) => Math.Max(1, (int)(span / MinStep) + 1);
+
+    /// <summary>The first side round the card with room for one more end.</summary>
+    /// <param name="used">How many ends each side has taken.</param>
+    /// <param name="spans">How long each side is.</param>
+    /// <param name="from">The side the end asked for.</param>
+    /// <returns>The side that takes it.</returns>
+    private static int NextSide(IReadOnlyList<int> used, IReadOnlyList<double> spans, int from)
+    {
+        for (var step = 1; step <= spans.Count; step++)
+        {
+            var side = (from + step) % spans.Count;
+            if (used[side] < Slots(spans[side]))
+            {
+                return side;
+            }
+        }
+
+        return from;
+    }
+
+    /// <summary>
+    /// Spreads the ends of one side along it: the non-decreasing sequence that moves them least while
+    /// keeping a mark between neighbours, so a run of ends that ask for one place opens out around
+    /// that place instead of being pushed along the border off the side they face.
+    /// </summary>
+    /// <param name="alongs">Where each end asks to sit along the side, in order.</param>
+    /// <param name="span">The length of the side.</param>
+    /// <returns>One position along the side per end.</returns>
+    private static double[] Arrange(IReadOnlyList<double> alongs, double span)
+    {
+        var count = alongs.Count;
+        var positions = new double[count];
+
+        if (count == 0)
+        {
+            return positions;
+        }
+
+        if (count == 1)
+        {
+            positions[0] = Math.Clamp(alongs[0], 0, span);
+            return positions;
+        }
+
+        var wanted = new double[count];
+        for (var index = 0; index < count; index++)
+        {
+            wanted[index] = alongs[index] - (index * MinStep);
+        }
+
+        var fitted = Isotonic(wanted);
+        var spread = (fitted[^1] - fitted[0]) + ((count - 1) * MinStep);
+
+        if (spread > span)
+        {
+            for (var index = 0; index < count; index++)
+            {
+                positions[index] = span * index / (count - 1);
+            }
+
+            return positions;
+        }
+
+        var shift = Math.Clamp(0, -fitted[0], span - spread - fitted[0]);
+
+        for (var index = 0; index < count; index++)
+        {
+            positions[index] = fitted[index] + (index * MinStep) + shift;
+        }
+
+        return positions;
+    }
+
+    /// <summary>The non-decreasing sequence that is closest to the given values, in least squares.</summary>
+    /// <param name="values">The values to fit.</param>
+    /// <returns>One fitted value per input, in the same order.</returns>
+    private static double[] Isotonic(IReadOnlyList<double> values)
+    {
+        var sums = new double[values.Count];
+        var counts = new int[values.Count];
+        var blocks = 0;
+
+        foreach (var value in values)
+        {
+            sums[blocks] = value;
+            counts[blocks] = 1;
+            blocks++;
+
+            while (blocks > 1 && (sums[blocks - 2] / counts[blocks - 2]) > (sums[blocks - 1] / counts[blocks - 1]))
+            {
+                sums[blocks - 2] += sums[blocks - 1];
+                counts[blocks - 2] += counts[blocks - 1];
+                blocks--;
+            }
+        }
+
+        var fitted = new double[values.Count];
+        var index = 0;
+
+        for (var block = 0; block < blocks; block++)
+        {
+            var mean = sums[block] / counts[block];
+            for (var step = 0; step < counts[block]; step++)
+            {
+                fitted[index++] = mean;
+            }
+        }
+
+        return fitted;
     }
 
     /// <summary>Spreads ends evenly over the border, starting where the first of them faces.</summary>
@@ -210,10 +389,19 @@ internal static class GraphEdgePorts
         return GraphGeometry.Boundary(node, peer.Centre);
     }
 
-    private static Want Of(CatalogGraphEdge edge, NodePlacement node, NodePlacement peer, bool isChild) =>
-        new(Logical(node, Preferred(node, peer, edge, isChild)), peer.NodeIndex, edge.Index, isChild);
+    private static Want Of(CatalogGraphEdge edge, NodePlacement node, NodePlacement peer, bool isChild)
+    {
+        var point = Preferred(node, peer, edge, isChild);
+        var (side, along) = Locate(node, point);
 
-    /// <summary>Where a border point sits along the usable border, measured from the top-left corner.</summary>
+        return new Want(side, along, Logical(node, point), peer.NodeIndex, edge.Index, isChild);
+    }
+
+    /// <summary>
+    /// Where a border point sits along the usable border, measured from the top-left corner. A point on
+    /// the far end of a side is the next side's own start, so the position wraps rather than naming a
+    /// place one whole turn along — a position outside the loop is read back as the loop's own start.
+    /// </summary>
     private static double Logical(NodePlacement node, GraphPoint point)
     {
         var before = 0.0;
@@ -224,7 +412,7 @@ internal static class GraphEdgePorts
 
             if (OnSide(node, side, point))
             {
-                return before + Math.Clamp(Along(node, side, point), 0, span);
+                return (before + Math.Clamp(Along(node, side, point), 0, span)) % Usable(node);
             }
 
             before += span;
@@ -291,9 +479,11 @@ internal static class GraphEdgePorts
     private static bool Near(double left, double right) => Math.Abs(left - right) < 0.5;
 
     /// <summary>One arrow end, waiting for its point on the border of the card it joins.</summary>
-    /// <param name="Logical">Where the end would sit if the border had room for nothing else.</param>
+    /// <param name="Side">The side of the border its own neighbour stands toward.</param>
+    /// <param name="Along">How far along that side it asks to sit.</param>
+    /// <param name="Logical">Where it sits along the whole border, which orders the walk.</param>
     /// <param name="PeerIndex">The card at the other end of the constraint, which breaks a tie.</param>
     /// <param name="EdgeIndex">The constraint the end belongs to, which breaks the last tie.</param>
     /// <param name="IsChild">Whether the end is the storing end rather than the one pointed at.</param>
-    private sealed record Want(double Logical, int PeerIndex, int EdgeIndex, bool IsChild);
+    private sealed record Want(int Side, double Along, double Logical, int PeerIndex, int EdgeIndex, bool IsChild);
 }

@@ -161,50 +161,40 @@ internal static class GraphEdgeRouter
             }
         }
 
-        foreach (var candidate in AllWays(child, parent, ends, grid, shift))
+        // Every corridor's own centre line is weighed, both sides of the picture alike, before a winner
+        // is named. Stopping at the first way that cleared the cards and the claimed stretches is what
+        // let whichever corridor answered first swallow the whole picture while an empty one on the
+        // other side stayed empty.
+        foreach (var candidate in Ways(child, parent, ends, grid, shift, 0, 0))
         {
             Consider(candidate);
 
-            // The straight way is the shortest way there is between two ends, so once it keeps off every
-            // card and every claimed stretch there is nothing further to look for. Looking is the
-            // expensive part of a thousand-table picture, so the ways arrive lazily and stop here.
-            if (bestClears && !bestShared)
+            // The straight way is the shortest way there is between two ends, so once that one keeps off
+            // every card and every claimed stretch there is nothing further to look for. A turned way is
+            // not: the shorter clean turn may still be ahead, in a corridor the walk has not reached.
+            if (candidate.Count == 2 && bestClears && !bestShared)
             {
-                break;
+                return Build(edge, candidate);
+            }
+        }
+
+        // A clean way along a corridor's centre line is the answer, and the shortest of them wins. A lane
+        // is the same stroke drawn a step to one side, so it is worth looking at only after the corridors
+        // themselves have failed to leave the cards and the claimed stretches alone.
+        if (!bestClears || bestShared)
+        {
+            foreach (var (laneX, laneY) in Lanes())
+            {
+                foreach (var candidate in Ways(child, parent, ends, grid, shift, laneX, laneY))
+                {
+                    Consider(candidate);
+                }
             }
         }
 
         // The ends decide which corridor families are offered, and a card's own corridors always answer,
         // so the fallback only stands in for a picture whose corridor lattice has nothing in it at all.
         return Build(edge, best ?? [start, end]);
-    }
-
-    /// <summary>
-    /// Every way from one end to the other, in the order the picture prefers them: the corridors first,
-    /// then a lane beside a corridor, one lane after another. A route that takes a lane instead of the
-    /// corridor's own centre line is the same stroke drawn 12 px to one side, so it is worth looking at
-    /// only after the corridors themselves have failed to leave the cards and the claimed stretches
-    /// alone.
-    /// </summary>
-    private static IEnumerable<IReadOnlyList<GraphPoint>> AllWays(
-        NodePlacement child,
-        NodePlacement parent,
-        GraphEdgeEnds ends,
-        GraphGrid grid,
-        double shift)
-    {
-        foreach (var way in Ways(child, parent, ends, grid, shift, 0, 0))
-        {
-            yield return way;
-        }
-
-        foreach (var (laneX, laneY) in Lanes())
-        {
-            foreach (var way in Ways(child, parent, ends, grid, shift, laneX, laneY))
-            {
-                yield return way;
-            }
-        }
     }
 
     /// <summary>

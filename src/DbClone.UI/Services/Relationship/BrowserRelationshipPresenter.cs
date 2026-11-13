@@ -19,12 +19,13 @@ internal sealed class BrowserRelationshipPresenter : IRelationshipViewPresenter
 
     /// <inheritdoc />
     /// <remarks>
-    /// <paramref name="refresh"/> is unused: a browser tab has no control this app can offer, and a
-    /// reader who wants a fresh document asks for a new view.
+    /// <paramref name="refresh"/> and <paramref name="redraw"/> are unused: a browser tab has no
+    /// control this app can offer, and a reader who wants a fresh document asks for a new view.
     /// </remarks>
     public async Task PresentAsync(
         RelationshipDocument document,
         Func<CancellationToken, Task<RelationshipDocument>>? refresh,
+        Func<IReadOnlySet<int>, RelationshipDocument>? redraw,
         CancellationToken ct)
     {
         ArgumentNullException.ThrowIfNull(document);

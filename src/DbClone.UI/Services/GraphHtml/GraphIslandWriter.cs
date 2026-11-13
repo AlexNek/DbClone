@@ -32,18 +32,33 @@ internal sealed class GraphIslandWriter
 
     private readonly RelationshipGraphView _view;
     private readonly CatalogGraphModel _model;
+    private readonly CatalogGraphModel _whole;
+    private readonly IReadOnlySet<int> _offChips;
     private readonly GraphOriginWords _words;
 
     /// <summary>Creates the writer for one document.</summary>
     /// <param name="view">The origin as read back, for the facts the graph itself does not carry.</param>
     /// <param name="model">The analyzed graph.</param>
-    public GraphIslandWriter(RelationshipGraphView view, CatalogGraphModel model)
+    /// <param name="whole">
+    /// The analyzed whole catalog, whose totals the count line states when the picture is drawn for a
+    /// switched-off selection; the same model as <paramref name="model"/> for a whole-catalog picture.
+    /// </param>
+    /// <param name="offChips">The chips the picture was drawn without.</param>
+    public GraphIslandWriter(
+        RelationshipGraphView view,
+        CatalogGraphModel model,
+        CatalogGraphModel whole,
+        IReadOnlySet<int> offChips)
     {
         ArgumentNullException.ThrowIfNull(view);
         ArgumentNullException.ThrowIfNull(model);
+        ArgumentNullException.ThrowIfNull(whole);
+        ArgumentNullException.ThrowIfNull(offChips);
 
         _view = view;
         _model = model;
+        _whole = whole;
+        _offChips = offChips;
         _words = GraphOriginWords.For(model.Origin.Kind);
     }
 
@@ -55,14 +70,19 @@ internal sealed class GraphIslandWriter
 
         var payload = new
         {
-            tables = _model.TableCount,
-            relations = _model.RelationCount,
+            // The totals are the catalog's own, never the picture's: a filtered picture still states
+            // how much of the catalog it is showing (T23).
+            tables = _whole.TableCount,
+            relations = _whole.RelationCount,
             hasData = _model.HasData,
             source = _view.Origin.Dialect,
             // The two sentences the panel and the card print for a figure the origin cannot supply.
             // They travel with the island so the script never states a word of its own (D12).
             rowsNote = _words.RowsNote,
             outsideNote = _words.OutsideNote,
+            // The chips the picture was drawn without, so the bar opens on the same selection the
+            // cards were arranged for and a saved copy states it too.
+            off = _offChips.Order().ToArray(),
             nodes = NodeRows(),
             edges = EdgeRows(),
             details = DetailRows(),
@@ -157,8 +177,12 @@ internal sealed class GraphIslandWriter
         };
     }
 
+    /// <summary>
+    /// The bar's chips, numbered as the buttons state them: the whole catalog's, so a chip a filtered
+    /// picture never draws still has its kind beside the number the button carries (T28).
+    /// </summary>
     private object[] ChipRows() =>
-        [.. _model.Chips.Select(chip => new
+        [.. _whole.Chips.Select(chip => new
         {
             i = chip.Index,
             kind = chip.Kind.ToString(),

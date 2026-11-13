@@ -33,8 +33,9 @@ internal sealed class RelationshipViewPresenterResolver : IRelationshipViewPrese
     public Task PresentAsync(
         RelationshipDocument document,
         Func<CancellationToken, Task<RelationshipDocument>>? refresh,
+        Func<IReadOnlySet<int>, RelationshipDocument>? redraw,
         CancellationToken ct) =>
-        Choose().PresentAsync(document, refresh, ct);
+        Choose().PresentAsync(document, refresh, redraw, ct);
 
     private IRelationshipViewPresenter Choose() =>
         _window.HasWindow || _probe.IsAvailable() ? _window : _browser;

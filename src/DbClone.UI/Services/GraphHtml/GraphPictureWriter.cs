@@ -21,8 +21,10 @@ namespace DbClone.UI.Services.GraphHtml;
 /// the picture itself stays free of text in its corridors (D4, T22).
 /// </para>
 /// <para>
-/// A collapsed group's members are written and then hidden by class, never omitted: switching a chip
-/// or expanding a supernode changes what is displayed, never what the document knows (FR16, D7).
+/// A collapsed group's members are written and then hidden by class, never omitted: expanding a
+/// supernode changes what is displayed, never what the document knows (FR16, D7). A chip is answered the
+/// other way: the cluster it switches off takes its tables with it, and the picture is built again for
+/// the tables that remain, so nothing is left standing around a hole (T28).
 /// </para>
 /// <para>
 /// An arrow is written with the <c>away</c> class when one of the two tables it joins is not drawn:
@@ -37,19 +39,29 @@ internal sealed class GraphPictureWriter
     private readonly CatalogGraphModel _model;
     private readonly CatalogGraphLayout _layout;
     private readonly ClusterSwitchSet _switches;
+    private readonly IReadOnlyDictionary<int, IReadOnlyList<int>> _claims;
     private readonly HashSet<int> _drawn;
     private readonly GraphOriginWords _words;
 
     /// <summary>Creates the writer for one document.</summary>
     /// <param name="model">The analyzed graph.</param>
     /// <param name="layout">The computed coordinates.</param>
-    public GraphPictureWriter(CatalogGraphModel model, CatalogGraphLayout layout)
+    /// <param name="claims">
+    /// What each card prints as the chips that claim it; the model's own claims when
+    /// <see langword="null"/>. A picture drawn for a selection passes none, because it is already the
+    /// selection and the script's filter must leave its cards alone (T28).
+    /// </param>
+    public GraphPictureWriter(
+        CatalogGraphModel model,
+        CatalogGraphLayout layout,
+        IReadOnlyDictionary<int, IReadOnlyList<int>>? claims = null)
     {
         ArgumentNullException.ThrowIfNull(model);
         ArgumentNullException.ThrowIfNull(layout);
 
         _model = model;
         _layout = layout;
+        _claims = claims ?? model.ChipIndexesByNode;
         _switches = new ClusterSwitchSet(model);
         _drawn = Drawn();
         _words = GraphOriginWords.For(model.Origin.Kind);
@@ -252,7 +264,7 @@ internal sealed class GraphPictureWriter
     }
 
     private string Claims(int nodeIndex) =>
-        _model.ChipIndexesByNode.TryGetValue(nodeIndex, out var chips)
+        _claims.TryGetValue(nodeIndex, out var chips)
             ? string.Join(' ', _switches.Switchable(chips))
             : string.Empty;
 }

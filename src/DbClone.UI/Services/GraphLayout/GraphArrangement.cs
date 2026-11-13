@@ -42,6 +42,15 @@ internal sealed class GraphArrangement
     /// <summary>How many arrow pairs are compared before the count is taken as a proxy.</summary>
     private const int ComparisonBudget = 250_000;
 
+    /// <summary>
+    /// How much of a row a card fills. A card is drawn at the top of its row and the row gap is left
+    /// empty under it, so a span that slips through that gap passes beside the card, not over it —
+    /// and counting the empty part of the row as card makes a picture drawn on one line measure worse
+    /// than the same picture wrapped to open a corridor that was there all along.
+    /// </summary>
+    private static readonly double CardInRow =
+        GraphCard.Height / (GraphCard.Height + GraphRankedPlacement.RowGap);
+
     private readonly CatalogGraphModel _model;
     private readonly IReadOnlyList<List<int>> _units;
     private readonly (int Width, int Height)[] _shapes;
@@ -111,10 +120,16 @@ internal sealed class GraphArrangement
     /// <returns>The x of the unit's centre.</returns>
     public double CentreX(int unit) => ColumnOfUnit[unit] + (_shapes[unit].Width / 2.0);
 
-    /// <summary>Gets the vertical centre of a unit, in cells.</summary>
+    /// <summary>
+    /// Gets the vertical centre of a unit where its cards are drawn, in cells. A card fills the top of
+    /// its row and the row gap is left empty under it, so the centre of a row of cards sits above the
+    /// centre of the row's own cell, and a span measured between cell centres is measured between
+    /// points the cards do not reach.
+    /// </summary>
     /// <param name="unit">The unit to measure.</param>
-    /// <returns>The y of the unit's centre.</returns>
-    public double CentreY(int unit) => RowOfUnit[unit] + (_shapes[unit].Height / 2.0);
+    /// <returns>The y of the unit's drawn centre.</returns>
+    public double CentreY(int unit) =>
+        RowOfUnit[unit] + (((_shapes[unit].Height - 1) + CardInRow) / 2.0);
 
     /// <summary>Gets how many columns the arrangement spans.</summary>
     /// <returns>The number of cell columns, from the leftmost card to the rightmost.</returns>
@@ -151,6 +166,15 @@ internal sealed class GraphArrangement
     /// <summary>Copies the arrangement, so a candidate can be moved without touching its source.</summary>
     /// <returns>An independent arrangement with the same cells.</returns>
     public GraphArrangement Copy() => new(_model, _units, _shapes, RowOfUnit, ColumnOfUnit);
+
+    /// <summary>
+    /// Copies the arrangement with every unit moved to another column, which is how a candidate that
+    /// only rearranges the columns is measured against the one it came from.
+    /// </summary>
+    /// <param name="columnOfUnit">The left column of every unit.</param>
+    /// <returns>An independent arrangement with the same rows and the given columns.</returns>
+    public GraphArrangement WithColumns(IReadOnlyList<int> columnOfUnit) =>
+        new(_model, _units, _shapes, RowOfUnit, columnOfUnit);
 
     /// <summary>Whether a unit could stand at one cell without sharing it with another unit.</summary>
     /// <param name="unit">The unit to place.</param>
@@ -189,7 +213,15 @@ internal sealed class GraphArrangement
     /// crossing and blocking counted against the other arrows and cards of the same arrangement.
     /// </summary>
     /// <returns>How bad the arrangement is; smaller is better.</returns>
-    public double Cost()
+    public double Cost() => Measure().Cost;
+
+    /// <summary>
+    /// Measures the arrangement, and says separately how many arrows it draws over a card they do not
+    /// join — the one fault a picture's width can cause by itself, and therefore the one count that
+    /// decides how wide a picture is drawn.
+    /// </summary>
+    /// <returns>How bad the arrangement is, and how many arrows it blocks.</returns>
+    public (double Cost, int Blocked) Measure()
     {
         var edges = _model.Edges;
         var fromX = new double[edges.Count];
@@ -270,13 +302,12 @@ internal sealed class GraphArrangement
             }
         }
 
-        return (CrossingWeight * crossings)
-            + (BlockedWeight * blocked)
-            + travel
-            + (ColumnWeight * Columns());
+        return (
+            (CrossingWeight * crossings) + (BlockedWeight * blocked) + travel + (ColumnWeight * Columns()),
+            blocked);
     }
 
-    /// <summary>Whether a span passes through a unit's own cell rectangle.</summary>
+    /// <summary>Whether a span passes through the card a unit is drawn as, not through the whole cell.</summary>
     /// <param name="unit">The card to test against.</param>
     /// <param name="fromX">The span's first x.</param>
     /// <param name="fromY">The span's first y.</param>
@@ -288,6 +319,7 @@ internal sealed class GraphArrangement
         var (width, height) = _shapes[unit];
         var left = ColumnOfUnit[unit];
         var top = RowOfUnit[unit];
+        var bottom = top + height - 1 + CardInRow;
 
         var dx = toX - fromX;
         var dy = toY - fromY;
@@ -303,7 +335,7 @@ internal sealed class GraphArrangement
         return Clip(-dx, fromX - left, ref entering, ref leaving)
             && Clip(dx, left + width - fromX, ref entering, ref leaving)
             && Clip(-dy, fromY - top, ref entering, ref leaving)
-            && Clip(dy, top + height - fromY, ref entering, ref leaving)
+            && Clip(dy, bottom - fromY, ref entering, ref leaving)
             && entering < leaving;
     }
 

@@ -25,6 +25,13 @@ namespace DbClone.UI.Services.GraphLayout;
 /// nothing occupies are dropped before the drawing is measured.
 /// </para>
 /// <para>
+/// Where in that lattice a card stands is decided by two readings of the same graph. The bands are
+/// filled in order and slid under the tables above them, which keeps a band a contiguous patch, and
+/// the same bands are then aligned after Brandes and Köpf so that a run of tables joined end to end
+/// stands in one straight column instead of as a staircase. The two are measured against each other
+/// and the cheaper one is drawn, so a straightening that would cost a crossing is never taken.
+/// </para>
+/// <para>
 /// Every tie is settled by a node or unit index, never by hash-set iteration order, so the same model
 /// produces the same coordinates on every run and under any culture (T5). Crossing minimisation is a
 /// heuristic for fewer crossings, never a minimum: laying a graph out with minimal total edge length
@@ -57,8 +64,32 @@ internal static class GraphRankedPlacement
     /// <summary>How many order-then-reorder sweeps a picture is put through.</summary>
     private const int Sweeps = 4;
 
+    /// <summary>How many rounds of trading two neighbours of a band the other way round are tried.</summary>
+    private const int Transposes = 4;
+
     /// <summary>The widest a cyclic group's own block may be, in cells.</summary>
     private const int WidestBlock = 6;
+
+    /// <summary>
+    /// How many widths a picture may be measured at before the page's own guess stops being the only
+    /// one tried. A wider picture is worth measuring; measuring every column between the guess and the
+    /// widest band is not, because the work grows with the square of the picture's arms.
+    /// </summary>
+    private const int WidestTries = 6;
+
+    /// <summary>
+    /// How many rounds of trading two neighbours of a band the other way round are tried once the
+    /// picture is placed, which is the repair the measurement itself drives.
+    /// </summary>
+    private const int Repairs = 3;
+
+    /// <summary>
+    /// How many trades a picture may be measured at before it is taken as settled. A trade costs a
+    /// whole re-place and a measurement, so the count is bounded and the bound is the same on every
+    /// run — a catalog too large to be repaired move by move keeps the arrangement it was drawn at
+    /// (T5).
+    /// </summary>
+    private const int RepairTries = 96;
 
     /// <summary>Places every card in its band and orders each band.</summary>
     /// <param name="model">The analyzed graph.</param>
@@ -75,28 +106,286 @@ internal static class GraphRankedPlacement
         var units = Units(model, out var unitOfNode);
         var neighbours = Neighbourhoods(model, unitOfNode, units.Count);
 
-        // The column budget aims the picture at a page, and never narrower than a group block needs.
-        var columns = ColumnCount(count, widths);
-        var shapes = new (int Width, int Height)[units.Count];
-        for (var unit = 0; unit < units.Count; unit++)
-        {
-            shapes[unit] = BlockShape(units[unit].Count, columns);
-        }
-
-        columns = Math.Max(columns, shapes.Max(shape => shape.Width));
-
         var bands = Bands(Rank(model, unitOfNode, units.Count), units.Count);
         Refine(bands, neighbours);
 
-        var (columnOfNode, rowOfNode, _) = Fill(bands, shapes, units, neighbours, columns);
-
-        var best = Best(
-            neighbours,
-            new GraphArrangement(model, units, shapes, UnitRows(rowOfNode, units), UnitColumns(columnOfNode, units)));
-
+        var best = Search(model, units, neighbours, bands, widths, ColumnCount(count, widths), count);
+        best = Settled(model, units, neighbours, bands, best);
         var (columnsOfNode, rowsOfNode, usedColumns, usedRows) = Cells(best, count);
 
         return Emit(count, widths, columnsOfNode, rowsOfNode, usedColumns, usedRows);
+    }
+
+    /// <summary>
+    /// The arrangement the picture is drawn from: the page's own width, unless a wider one draws the
+    /// whole picture with no arrow over a card it does not join; and, for a picture no width can draw
+    /// cleanly, the width that leaves the fewest arrows over a card, then the one that wraps the
+    /// fewest bands onto a second line, then the one whose own arrows measure best.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// The page's own number is a guess from the card count, and a guess one column short is not a
+    /// narrower picture: it wraps the last card of a band onto a second line, which puts a table
+    /// between a parent and its child and makes two arrows detour round it. Widening is the page's
+    /// shape being overridden, so the narrowest width that buys the one thing a width can give — a
+    /// picture no arrow has to detour in — is the one drawn.
+    /// </para>
+    /// <para>
+    /// A picture no width can draw cleanly, such as a fan of twenty children reaching one parent,
+    /// has no such width to find, and the first one tried used to be drawn whatever it measured. That
+    /// is what laid five children of one table into a staircase three rows deep — the guess the page
+    /// made was the guess that bent them. Such a picture is now drawn at the width its own arrows
+    /// measure best: the fewest arrows over a table first, because that is the one fault a reader
+    /// cannot read past; then the fewest bands drawn on two lines, because a wrapped band is the
+    /// same fault one row further out — a child standing under its own siblings has to climb past
+    /// them; and the shorter of two that draw as many (T5).
+    /// </para>
+    /// </remarks>
+    /// <param name="model">The analyzed graph.</param>
+    /// <param name="units">The members of every unit.</param>
+    /// <param name="neighbours">The units each unit is joined to.</param>
+    /// <param name="bands">The units of every band, in drawing order.</param>
+    /// <param name="widths">The measured width of every card, in node order.</param>
+    /// <param name="budget">The column count the page's own aspect asks for.</param>
+    /// <param name="count">How many tables the picture holds.</param>
+    /// <returns>The arrangement to draw.</returns>
+    private static GraphArrangement Search(
+        CatalogGraphModel model,
+        IReadOnlyList<List<int>> units,
+        IReadOnlyList<List<int>> neighbours,
+        IReadOnlyList<List<int>> bands,
+        IReadOnlyList<double> widths,
+        int budget,
+        int count)
+    {
+        GraphArrangement? bent = null;
+        var bentBlocked = int.MaxValue;
+        var bentWrapped = int.MaxValue;
+        var bentCost = double.MaxValue;
+
+        foreach (var columns in Budgets(budget, bands, units, count))
+        {
+            var shapes = new (int Width, int Height)[units.Count];
+            for (var unit = 0; unit < units.Count; unit++)
+            {
+                shapes[unit] = BlockShape(units[unit].Count, columns);
+            }
+
+            var width = Math.Max(columns, shapes.Max(shape => shape.Width));
+            var (columnOfNode, rowOfNode, _) = Fill(bands, shapes, units, neighbours, width);
+            var seed = new GraphArrangement(
+                model, units, shapes, UnitRows(rowOfNode, units), UnitColumns(columnOfNode, units));
+            var candidate = Best(neighbours, seed);
+
+            if (candidate.Blocked == 0)
+            {
+                return candidate.Arrangement;
+            }
+
+            var cost = candidate.Arrangement.Cost();
+            var wrapped = Wrapped(bands, candidate.Arrangement);
+            if (candidate.Blocked < bentBlocked
+                || (candidate.Blocked == bentBlocked
+                    && (wrapped < bentWrapped || (wrapped == bentWrapped && cost < bentCost))))
+            {
+                bent = candidate.Arrangement;
+                bentBlocked = candidate.Blocked;
+                bentWrapped = wrapped;
+                bentCost = cost;
+            }
+        }
+
+        return bent ?? throw new InvalidOperationException("No column budget was tried.");
+    }
+
+    /// <summary>
+    /// Repairs the arrangement the picture is drawn from, two neighbours of a band at a time, until no
+    /// trade draws its own arrows any cheaper. The order a band is drawn in is set before the picture
+    /// is measured — by the means of its neighbours, which is a proxy — so the arrangement is re-read
+    /// here against the measurement itself: a trade is drawn and kept only when the arrows the picture
+    /// already has cost less afterwards, and a round that trades nothing ends the repair (T5, T25).
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// A band is re-placed in full after a trade, because which of its cards wraps onto the next line
+    /// is decided by the order it is filled in: trading the last two cards of a band can be the
+    /// difference between a child drawn beside its siblings and one drawn under them, and only the
+    /// measurement says which of the two is the better picture.
+    /// </para>
+    /// <para>
+    /// The repair never makes a picture worse: the arrangement it starts from is the one to beat, and
+    /// a trade that measures the same is put back as it was, so a picture that was already settled is
+    /// drawn exactly as it was placed.
+    /// </para>
+    /// </remarks>
+    /// <param name="model">The analyzed graph whose arrows are measured.</param>
+    /// <param name="units">The members of every unit.</param>
+    /// <param name="neighbours">The units each unit is joined to.</param>
+    /// <param name="bands">The units of every band, in drawing order.</param>
+    /// <param name="winner">The arrangement the width search chose.</param>
+    /// <returns>The arrangement to draw.</returns>
+    private static GraphArrangement Settled(
+        CatalogGraphModel model,
+        IReadOnlyList<List<int>> units,
+        IReadOnlyList<List<int>> neighbours,
+        IReadOnlyList<List<int>> bands,
+        GraphArrangement winner)
+    {
+        var shapes = new (int Width, int Height)[units.Count];
+        for (var unit = 0; unit < units.Count; unit++)
+        {
+            shapes[unit] = winner.ShapeOf(unit);
+        }
+
+        var width = Math.Max(1, winner.Columns());
+        var best = winner;
+        var bestCost = winner.Cost();
+        var tries = 0;
+
+        GraphArrangement? Attempt()
+        {
+            if (tries >= RepairTries)
+            {
+                return null;
+            }
+
+            tries++;
+            var (columnOfNode, rowOfNode, _) = Fill(bands, shapes, units, neighbours, width);
+            var seed = new GraphArrangement(
+                model, units, shapes, UnitRows(rowOfNode, units), UnitColumns(columnOfNode, units));
+
+            return Aligned(seed, neighbours);
+        }
+
+        for (var round = 0; round < Repairs && tries < RepairTries; round++)
+        {
+            var improved = false;
+
+            foreach (var band in bands)
+            {
+                // Two neighbours of a line the other way round: the order is the only thing a fit
+                // cannot change, so it is what the measurement is asked to settle.
+                for (var index = 0; index + 1 < band.Count; index++)
+                {
+                    (band[index], band[index + 1]) = (band[index + 1], band[index]);
+                    var moved = Attempt();
+
+                    if (moved is not null && moved.Cost() < bestCost)
+                    {
+                        best = moved;
+                        bestCost = moved.Cost();
+                        improved = true;
+                    }
+                    else
+                    {
+                        (band[index], band[index + 1]) = (band[index + 1], band[index]);
+                    }
+                }
+
+                // The band as a ring: every card in turn moved to the front, which is the one move
+                // that changes where the band's line breaks without changing the band's order.
+                for (var offset = 1; offset < band.Count; offset++)
+                {
+                    var front = band[0];
+                    band.RemoveAt(0);
+                    band.Add(front);
+
+                    var moved = Attempt();
+                    if (moved is not null && moved.Cost() < bestCost)
+                    {
+                        best = moved;
+                        bestCost = moved.Cost();
+                        improved = true;
+                    }
+                    else
+                    {
+                        band.RemoveAt(band.Count - 1);
+                        band.Insert(0, front);
+                    }
+                }
+            }
+
+            if (!improved)
+            {
+                break;
+            }
+        }
+
+        return best;
+    }
+
+    /// <summary>
+    /// How many bands the arrangement draws on more than one line. A band that wraps puts one of its
+    /// cards under its own siblings instead of beside them, so that card's arrow has to climb past a
+    /// row of cards it does not join — a fault of the width, which is why it is read before the cost
+    /// and after the arrows themselves (T25).
+    /// </summary>
+    /// <param name="bands">The units of every band, in drawing order.</param>
+    /// <param name="arrangement">The arrangement to measure.</param>
+    /// <returns>How many bands stand on more than one row.</returns>
+    private static int Wrapped(IReadOnlyList<List<int>> bands, GraphArrangement arrangement)
+    {
+        var wrapped = 0;
+
+        foreach (var band in bands)
+        {
+            var first = arrangement.RowOfUnit[band[0]];
+            foreach (var unit in band)
+            {
+                if (arrangement.RowOfUnit[unit] != first)
+                {
+                    wrapped++;
+                    break;
+                }
+            }
+        }
+
+        return wrapped;
+    }
+
+    /// <summary>
+    /// The column budgets to try: the one the page asks for, the two above it, and the width of the
+    /// widest band — never wider than one column per table.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// The page's number is a floor rather than a guess to be second-guessed. It is solved for a
+    /// rectangle of one cell per table, and bands can only ever want more rows than such a rectangle
+    /// has — so the picture it describes is at least as tall as the guess assumed, and the column it is
+    /// short of is the one that makes it wide enough for its own height. A narrower picture is never
+    /// drawn, because nothing the guess missed would ask for one (T5).
+    /// </para>
+    /// <para>
+    /// The widest band is the last width worth trying, because a width at least as wide as the widest
+    /// band is the one width at which no band is bent onto a second line. Without it a picture whose
+    /// children outnumber the guess could never be drawn unbent, however much its own arrows would
+    /// gain by it.
+    /// </para>
+    /// </remarks>
+    /// <param name="budget">The column count the page's own aspect asks for.</param>
+    /// <param name="bands">The units of every band, in drawing order.</param>
+    /// <param name="units">The members of every unit.</param>
+    /// <param name="count">How many tables the picture holds.</param>
+    /// <returns>The widths to measure, at most <see cref="WidestTries"/> of them.</returns>
+    private static IEnumerable<int> Budgets(
+        int budget,
+        IReadOnlyList<List<int>> bands,
+        IReadOnlyList<List<int>> units,
+        int count)
+    {
+        var widest = bands.Count == 0
+            ? Math.Min(count, budget + 2)
+            : bands.Max(band => band.Sum(unit => units[unit].Count));
+        var low = Math.Max(1, Math.Min(budget, count));
+        var top = Math.Max(low, Math.Min(count, Math.Max(Math.Min(budget + 2, count), widest)));
+        var step = Math.Max(1, (int)Math.Ceiling((top - low + 1) / (double)WidestTries));
+
+        for (var columns = low; columns < top; columns += step)
+        {
+            yield return columns;
+        }
+
+        yield return top;
     }
 
     /// <summary>
@@ -106,8 +395,8 @@ internal static class GraphRankedPlacement
     /// </summary>
     /// <param name="neighbours">The units each unit is joined to.</param>
     /// <param name="seed">The ranked arrangement, already placed.</param>
-    /// <returns>The best arrangement found.</returns>
-    private static GraphArrangement Best(
+    /// <returns>The arrangement to draw and how many arrows it blocks.</returns>
+    private static (GraphArrangement Arrangement, int Blocked) Best(
         IReadOnlyList<List<int>> neighbours,
         GraphArrangement seed)
     {
@@ -124,13 +413,14 @@ internal static class GraphRankedPlacement
             }
         }
 
-        return best;
+        return (best, best.Measure().Blocked);
     }
 
     /// <summary>
     /// The arrangements tried against the ranked one: its bands realigned toward the tables above
-    /// them, then toward the tables below them, then again toward the tables above — and the same
-    /// three starting from the arrangement a stranded leaf is pulled down into (pass 11).
+    /// them, then toward the tables below them, then again toward the tables above — the same three
+    /// starting from the arrangement a stranded leaf is pulled down into, and then the straight
+    /// columns Brandes and Köpf align the bands into, read from either end and from either side.
     /// </summary>
     /// <param name="neighbours">The units each unit is joined to.</param>
     /// <param name="seed">The ranked arrangement.</param>
@@ -148,6 +438,18 @@ internal static class GraphRankedPlacement
             yield return up;
 
             yield return Aligned(up, neighbours);
+        }
+
+        // A band is placed by its own ask, which keeps it a patch but cannot straighten a chain: the
+        // child of a table two columns out is drawn two columns out. The blocks are the answer to
+        // that, and they are offered after the aligned candidates so a picture whose arrows measure
+        // the same keeps the arrangement it had.
+        foreach (var down in new[] { true, false })
+        {
+            foreach (var right in new[] { true, false })
+            {
+                yield return seed.WithColumns(GraphBlockAlignment.Columns(seed, neighbours, down, right));
+            }
         }
     }
 
@@ -699,9 +1001,10 @@ internal static class GraphRankedPlacement
     }
 
     /// <summary>
-    /// Puts every band in the order that draws the fewest crossing arrows: a sweep from the top reads
+    /// Puts the bands in the order that draws the fewest crossing arrows: a sweep from the top reads
     /// each band against the one above and sorts it by its neighbours' mean position, then a sweep from
-    /// the bottom does the same against the band below, a few times over so the two readings settle.
+    /// the bottom does the same against the band below, a few times over so the two readings settle,
+    /// and a last pass trades two neighbours of a band whenever that crosses fewer arrows still.
     /// </summary>
     /// <param name="bands">The units of every band, reordered in place.</param>
     /// <param name="neighbours">The units each unit is joined to.</param>
@@ -719,6 +1022,132 @@ internal static class GraphRankedPlacement
                 Order(bands[band], neighbours, Positions(bands[band + 1]));
             }
         }
+
+        Transpose(bands, neighbours);
+    }
+
+    /// <summary>
+    /// Trades two neighbours of a band the other way round whenever that crosses fewer arrows with the
+    /// bands beside it. The mean position a band is ordered by is a guess that two cards of nearly the
+    /// same mean can sit the wrong way round; this pass reads the arrows themselves, so it settles what
+    /// the means could not. A swap is kept only when the crossings of the two bands it touches fall, so
+    /// a band is never reordered for nothing and the picture can only improve.
+    /// </summary>
+    /// <param name="bands">The units of every band, reordered in place.</param>
+    /// <param name="neighbours">The units each unit is joined to.</param>
+    private static void Transpose(IReadOnlyList<List<int>> bands, IReadOnlyList<List<int>> neighbours)
+    {
+        for (var round = 0; round < Transposes; round++)
+        {
+            var improved = false;
+
+            for (var band = 0; band < bands.Count; band++)
+            {
+                var units = bands[band];
+
+                for (var index = 0; index + 1 < units.Count; index++)
+                {
+                    var before = Crossings(bands, neighbours, band);
+                    (units[index], units[index + 1]) = (units[index + 1], units[index]);
+
+                    if (Crossings(bands, neighbours, band) < before)
+                    {
+                        improved = true;
+                    }
+                    else
+                    {
+                        (units[index], units[index + 1]) = (units[index + 1], units[index]);
+                    }
+                }
+            }
+
+            if (!improved)
+            {
+                return;
+            }
+        }
+    }
+
+    /// <summary>How many arrows cross each other around one band.</summary>
+    /// <param name="bands">The units of every band, in drawing order.</param>
+    /// <param name="neighbours">The units each unit is joined to.</param>
+    /// <param name="band">The band to measure.</param>
+    /// <returns>The crossings with the band above and with the band below, added.</returns>
+    private static int Crossings(
+        IReadOnlyList<List<int>> bands,
+        IReadOnlyList<List<int>> neighbours,
+        int band)
+    {
+        var crossings = 0;
+
+        if (band > 0)
+        {
+            crossings += Inversions(bands[band - 1], bands[band], neighbours);
+        }
+
+        if (band + 1 < bands.Count)
+        {
+            crossings += Inversions(bands[band], bands[band + 1], neighbours);
+        }
+
+        return crossings;
+    }
+
+    /// <summary>
+    /// How many arrows between two neighbouring bands cross each other: an arrow is read as the seat of
+    /// the card it joins in the band below, and two arrows cross when their seats fall in the opposite
+    /// order from the two cards they start at.
+    /// </summary>
+    /// <param name="upper">The units of the band above, in drawing order.</param>
+    /// <param name="lower">The units of the band below, in drawing order.</param>
+    /// <param name="neighbours">The units each unit is joined to.</param>
+    /// <returns>The number of crossing arrow pairs.</returns>
+    private static int Inversions(
+        IReadOnlyList<int> upper,
+        IReadOnlyList<int> lower,
+        IReadOnlyList<List<int>> neighbours)
+    {
+        var seats = new Dictionary<int, int>(lower.Count);
+        for (var seat = 0; seat < lower.Count; seat++)
+        {
+            seats[lower[seat]] = seat;
+        }
+
+        var crossings = 0;
+        var read = new List<int>(upper.Count * 2);
+
+        foreach (var unit in upper)
+        {
+            var ends = new List<int>(neighbours[unit].Count);
+
+            foreach (var neighbour in neighbours[unit])
+            {
+                if (seats.TryGetValue(neighbour, out var seat))
+                {
+                    ends.Add(seat);
+                }
+            }
+
+            ends.Sort();
+
+            foreach (var seat in ends)
+            {
+                // Every arrow read earlier whose end stands further along the band below crosses this
+                // one, because its start stands before this arrow's start and its end after its end.
+                foreach (var earlier in read)
+                {
+                    if (earlier > seat)
+                    {
+                        crossings++;
+                    }
+                }
+            }
+
+            read.AddRange(ends);
+            read.Sort();
+        }
+
+        return crossings;
     }
 
     /// <summary>The position of every unit of one band, for the band next to it to read.</summary>

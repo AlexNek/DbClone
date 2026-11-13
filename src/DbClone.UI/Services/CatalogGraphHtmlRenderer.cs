@@ -35,16 +35,30 @@ internal sealed class CatalogGraphHtmlRenderer
     /// <param name="model">The analyzed graph.</param>
     /// <param name="layout">The computed picture.</param>
     /// <param name="generatedAt">When the file was written, passed in so the document stays a function of its arguments.</param>
+    /// <param name="whole">
+    /// The analyzed whole catalog when <paramref name="model"/> is the picture of a switched-off
+    /// selection: the chip bar and the totals are stated from it, so the reader keeps every cluster to
+    /// switch back on. <see langword="null"/> when the picture is the whole catalog.
+    /// </param>
+    /// <param name="offChips">
+    /// The chips the reader switched off, which the bar prints as off so the document states the
+    /// selection it was drawn for. <see langword="null"/> when nothing is switched off.
+    /// </param>
     /// <returns>The document, as text.</returns>
     public string Render(
         RelationshipGraphView view,
         CatalogGraphModel model,
         CatalogGraphLayout layout,
-        DateTimeOffset generatedAt)
+        DateTimeOffset generatedAt,
+        CatalogGraphModel? whole = null,
+        IReadOnlySet<int>? offChips = null)
     {
         ArgumentNullException.ThrowIfNull(view);
         ArgumentNullException.ThrowIfNull(model);
         ArgumentNullException.ThrowIfNull(layout);
+
+        var bar = whole ?? model;
+        var off = offChips ?? NoChips;
 
         var html = new StringBuilder(1 << 16);
         WriteHead(html, view);
@@ -54,15 +68,29 @@ internal sealed class CatalogGraphHtmlRenderer
         GraphMarkerDefs.WriteTo(html);
 
         new GraphPageHeaderWriter(view, model, generatedAt).WriteTo(html);
-        new GraphClusterBarWriter(model).WriteTo(html);
-        new GraphWorkspaceWriter(model, layout, new GraphPictureWriter(model, layout)).WriteTo(html);
+        new GraphClusterBarWriter(bar, off).WriteTo(html);
+        new GraphWorkspaceWriter(model, layout, new GraphPictureWriter(model, layout, Claims(model, off))).WriteTo(html);
         new GraphRegisterWriter(model).WriteTo(html);
-        new GraphIslandWriter(view, model).WriteTo(html);
+        new GraphIslandWriter(view, model, bar, off).WriteTo(html);
         WriteScript(html);
 
         html.Append("</body>\n</html>\n");
         return html.ToString();
     }
+
+    /// <summary>The selection a whole-catalog picture is drawn for: no chip is switched off.</summary>
+    private static readonly HashSet<int> NoChips = [];
+
+    /// <summary>What a picture drawn for a selection prints as its cards' claims: nothing.</summary>
+    private static readonly Dictionary<int, IReadOnlyList<int>> NoClaims = [];
+
+    /// <summary>
+    /// The claims the cards carry. A picture drawn for a selection already holds only the clusters that
+    /// are on, so its cards claim nothing: the script's own filter then leaves every card standing
+    /// instead of hiding a table twice, and the bar's chips keep the whole catalog's numbers (T28).
+    /// </summary>
+    private static IReadOnlyDictionary<int, IReadOnlyList<int>> Claims(CatalogGraphModel model, IReadOnlySet<int> off) =>
+        off.Count == 0 ? model.ChipIndexesByNode : NoClaims;
 
     private static void WriteHead(StringBuilder html, RelationshipGraphView view)
     {

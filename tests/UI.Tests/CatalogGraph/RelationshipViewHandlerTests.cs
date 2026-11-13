@@ -179,6 +179,27 @@ public sealed class RelationshipViewHandlerTests : IDisposable
     }
 
     [Fact]
+    public async Task The_redraw_a_presenter_is_given_DrawsTheSameOriginForAnotherSelection()
+    {
+        // Arrange — the window offers the chips; a selection is drawn again without reading anything,
+        // and the tables it hides take no room in the arrangement (T28).
+        var catalog = CreateCatalog();
+        Reading(TwoSchemas());
+        var sut = CreateHandler();
+
+        // Act
+        await sut.ShowCatalogAsync(catalog, new WorkflowState());
+        _presenter.Redraw.Should().NotBeNull();
+        var stagingOff = _presenter.Redraw!(new HashSet<int> { 1 });
+
+        // Assert — the bar's second schema chip is the one switched off, so the picture holds only the
+        // schema that is on — while the count line still states the catalog's own totals.
+        stagingOff.Html.Should().Contain(">orders</text>").And.NotContain("imports");
+        stagingOff.Html.Should().Contain("\"tables\":3").And.Contain("aria-pressed=\"false\">staging</button>");
+        await _graph.Received(1).ReadCatalogAsync(catalog, Arg.Any<CancellationToken>());
+    }
+
+    [Fact]
     public async Task TryWriteAsync_PutsThePictureInsideTheCatalog_AndPresentsNothing()
     {
         // Arrange — what a finished store asks for (FR17): the file, not a window.
@@ -289,6 +310,26 @@ public sealed class RelationshipViewHandlerTests : IDisposable
                 onDelete: "cascade")
             .Build();
 
+    /// <summary>
+    /// Two schemas, so the bar offers a real choice: its chips are written in schema order, which makes
+    /// the staging chip the second one.
+    /// </summary>
+    private static RelationshipGraphView TwoSchemas() =>
+        CatalogGraphFixture.Create()
+            .Table("public", "customers", rowCount: 3, Column("id", "uuid", primaryKey: true))
+            .Table("public", "orders", rowCount: 5, Column("id", "uuid", primaryKey: true),
+                Column("customer_id", "uuid", referencing: true))
+            .Table("staging", "imports", rowCount: 1, Column("id", "uuid", primaryKey: true))
+            .Edge(
+                CatalogGraphFixture.TableId("public", "orders"),
+                CatalogGraphFixture.TableId("public", "customers"),
+                "orders_customer_fkey",
+                ["customer_id"],
+                ["id"],
+                mandatory: true,
+                onDelete: "cascade")
+            .Build();
+
     private static RelationshipGraphView EmptyDatabase() =>
         CatalogGraphFixture.Create()
             .Live("testdb", "test.example.com:5432/testdb")
@@ -323,24 +364,28 @@ public sealed class RelationshipViewHandlerTests : IDisposable
     private IEnumerable<string> TempFiles() =>
         Directory.EnumerateFiles(_root, "*.tmp", SearchOption.AllDirectories);
 
-    /// <summary>Records what it was asked to show, so the test can assert on the document and the refresh.</summary>
+    /// <summary>Records what it was asked to show, so the test can assert on the document and the delegates.</summary>
     private sealed class RecordingPresenter : IRelationshipViewPresenter
     {
         internal List<RelationshipDocument> Presented { get; } = [];
 
         internal Func<CancellationToken, Task<RelationshipDocument>>? Refresh { get; private set; }
 
+        internal Func<IReadOnlySet<int>, RelationshipDocument>? Redraw { get; private set; }
+
         internal Exception? Failure { get; init; }
 
         public Task PresentAsync(
             RelationshipDocument document,
             Func<CancellationToken, Task<RelationshipDocument>>? refresh,
+            Func<IReadOnlySet<int>, RelationshipDocument>? redraw,
             CancellationToken ct)
         {
             if (Failure is not null) throw Failure;
 
             Presented.Add(document);
             Refresh = refresh;
+            Redraw = redraw;
 
             return Task.CompletedTask;
         }

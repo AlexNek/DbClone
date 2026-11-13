@@ -1,6 +1,7 @@
 using System.ComponentModel;
 using System.IO;
 using System.Text;
+using System.Text.Json;
 
 using DbClone.Application.Relationship;
 using DbClone.UI.Services.Relationship;
@@ -18,10 +19,17 @@ namespace DbClone.UI.Views;
 /// copy. It never learns where the document came from beyond the origin it was handed.
 /// </summary>
 /// <remarks>
+/// <para>
 /// The document is answered through <see cref="CoreWebView2.WebResourceRequested"/> rather than
 /// <c>NavigateToString</c>, which caps a document at 2 MB while the data island carries every column,
 /// key, index and check expression (D5). Every other address is refused, so the document cannot reach
 /// the network even if a future edit adds an external reference.
+/// </para>
+/// <para>
+/// The document may speak once, and only about one thing: which clusters the reader switched off, so
+/// the window can draw the picture again without the tables that are not shown and the cards that
+/// remain are arranged for them (T28). The message never carries a fact from the catalog.
+/// </para>
 /// </remarks>
 internal sealed partial class RelationshipViewWindow : FluentWindow
 {
@@ -34,12 +42,26 @@ internal sealed partial class RelationshipViewWindow : FluentWindow
     /// <summary>UTF-8 without a byte-order mark, the encoding every writer in the product uses.</summary>
     private static readonly UTF8Encoding NoBomUtf8 = new(encoderShouldEmitUTF8Identifier: false);
 
+    /// <summary>The selection that switches nothing off.</summary>
+    private static readonly HashSet<int> EmptyChips = [];
+
+    /// <summary>How many chips one document may state, which no catalog's bar exceeds.</summary>
+    private const int MaxOffChips = 512;
+
+    /// <summary>
+    /// How long the one message may be: a selection of <see cref="MaxOffChips"/> indexes never needs more,
+    /// so a larger payload is not a selection and is not read.
+    /// </summary>
+    private const int MaxMessageLength = 8 * 1024;
+
     private readonly ILogger _logger;
     private readonly Func<RelationshipDocument, CancellationToken, Task> _openInBrowser;
     private readonly Func<RelationshipDocument, CancellationToken, Task> _saveAs;
 
     private RelationshipDocument? _document;
     private Func<CancellationToken, Task<RelationshipDocument>>? _refresh;
+    private Func<IReadOnlySet<int>, RelationshipDocument>? _reshape;
+    private IReadOnlySet<int> _offChips = EmptyChips;
     private CoreWebView2? _core;
     private int _version;
 
@@ -62,10 +84,15 @@ internal sealed partial class RelationshipViewWindow : FluentWindow
     /// <summary>Shows one document, replacing whatever the window held, and reuses the window itself.</summary>
     /// <param name="document">The document to show.</param>
     /// <param name="refresh">How to build the next one, or <see langword="null"/> when it cannot be built.</param>
+    /// <param name="reshape">
+    /// How to draw the same origin for another cluster selection, or <see langword="null"/> when the
+    /// document cannot be drawn again.
+    /// </param>
     /// <param name="ct">The caller's cancellation token.</param>
     internal async Task ShowDocumentAsync(
         RelationshipDocument document,
         Func<CancellationToken, Task<RelationshipDocument>>? refresh,
+        Func<IReadOnlySet<int>, RelationshipDocument>? reshape,
         CancellationToken ct)
     {
         ArgumentNullException.ThrowIfNull(document);
@@ -73,7 +100,10 @@ internal sealed partial class RelationshipViewWindow : FluentWindow
         if (!IsVisible) Show();
         Activate();
 
-        await SetDocumentAsync(document, refresh, ct).ConfigureAwait(true);
+        // A new view of an origin starts at the whole catalog, whatever the previous one was showing.
+        _offChips = EmptyChips;
+
+        await SetDocumentAsync(document, refresh, reshape, ct).ConfigureAwait(true);
     }
 
     /// <summary>
@@ -92,10 +122,12 @@ internal sealed partial class RelationshipViewWindow : FluentWindow
     private async Task SetDocumentAsync(
         RelationshipDocument document,
         Func<CancellationToken, Task<RelationshipDocument>>? refresh,
+        Func<IReadOnlySet<int>, RelationshipDocument>? reshape,
         CancellationToken ct)
     {
         _document = document;
         _refresh = refresh;
+        _reshape = reshape;
 
         RefreshButton.IsEnabled = refresh is not null;
         Status.Text = string.Empty;
@@ -137,12 +169,13 @@ internal sealed partial class RelationshipViewWindow : FluentWindow
         _core.Settings.AreDevToolsEnabled = false;
         _core.Settings.AreDefaultContextMenusEnabled = false;
         _core.Settings.IsStatusBarEnabled = false;
-        _core.Settings.IsWebMessageEnabled = false;
+        _core.Settings.IsWebMessageEnabled = true;
         _core.Settings.AreDefaultScriptDialogsEnabled = false;
 
         _core.AddWebResourceRequestedFilter(DocumentAddress + "*", CoreWebView2WebResourceContext.All);
         _core.AddWebResourceRequestedFilter("*", CoreWebView2WebResourceContext.All);
         _core.WebResourceRequested += OnWebResourceRequested;
+        _core.WebMessageReceived += OnWebMessage;
     }
 
     /// <summary>Answers the document's own address from memory and refuses every other address.</summary>
@@ -169,6 +202,103 @@ internal sealed partial class RelationshipViewWindow : FluentWindow
             "Content-Length: 0\r\n");
     }
 
+    /// <summary>
+    /// The one message a document may post: the clusters the reader switched off. A payload of any other
+    /// shape is ignored rather than guessed at, and a document that posts nothing changes nothing.
+    /// </summary>
+    private void OnWebMessage(object? sender, CoreWebView2WebMessageReceivedEventArgs e)
+    {
+        if (_core is null || _reshape is null) return;
+        if (!TryReadOffChips(e.WebMessageAsJson, out var offChips)) return;
+
+        Reshape(offChips);
+    }
+
+    /// <summary>
+    /// Draws the held document again for the clusters that are now on. Nothing is read: the origin is
+    /// the one the document already describes, and only the arrangement changes.
+    /// </summary>
+    private void Reshape(IReadOnlySet<int> offChips)
+    {
+        if (_reshape is null || _core is null) return;
+
+        try
+        {
+            _document = _reshape(offChips);
+            _offChips = offChips;
+
+            // A new address again, so the picture that was just drawn cannot be answered from a cache.
+            _version++;
+            _core.Navigate($"{DocumentAddress}?v={_version}");
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "The relationship view could not be drawn again for another selection");
+            Status.Text = ex.Message;
+        }
+    }
+
+    /// <summary>
+    /// Reads the one message a document may post: the clusters the reader switched off, which the script
+    /// sends as a JSON string holding <c>{"off":[index,…]}</c>. A payload that is not exactly that
+    /// is refused whole, so a document can state a selection but never choose what is read (D5).
+    /// </summary>
+    /// <param name="json">The message as the runtime states it.</param>
+    /// <param name="offChips">The chips the reader switched off, by chip index.</param>
+    /// <returns>Whether the message was a cluster selection.</returns>
+    internal static bool TryReadOffChips(string? json, out IReadOnlySet<int> offChips)
+    {
+        offChips = EmptyChips;
+
+        if (string.IsNullOrWhiteSpace(json) || json.Length > MaxMessageLength) return false;
+
+        try
+        {
+            using var message = JsonDocument.Parse(json);
+            var payload = message.RootElement;
+
+            // The script posts a string, and the runtime states that string as a JSON string.
+            if (payload.ValueKind != JsonValueKind.String)
+            {
+                return TryReadSelection(payload, out offChips);
+            }
+
+            using var selection = JsonDocument.Parse(payload.GetString() ?? string.Empty);
+            return TryReadSelection(selection.RootElement, out offChips);
+        }
+        catch (JsonException)
+        {
+            return false;
+        }
+    }
+
+    private static bool TryReadSelection(JsonElement payload, out IReadOnlySet<int> offChips)
+    {
+        offChips = EmptyChips;
+
+        if (payload.ValueKind != JsonValueKind.Object
+            || !payload.TryGetProperty("off", out var off)
+            || off.ValueKind != JsonValueKind.Array
+            || off.GetArrayLength() > MaxOffChips)
+        {
+            return false;
+        }
+
+        var chips = new HashSet<int>();
+        foreach (var entry in off.EnumerateArray())
+        {
+            if (entry.ValueKind != JsonValueKind.Number || !entry.TryGetInt32(out var index) || index < 0)
+            {
+                return false;
+            }
+
+            chips.Add(index);
+        }
+
+        offChips = chips;
+        return true;
+    }
+
     private void OnRefreshClick(object sender, System.Windows.RoutedEventArgs e) => _ = RefreshAsync();
 
     /// <summary>Re-runs the delegate the handler supplied: the same read, the same words, a new document.</summary>
@@ -182,7 +312,15 @@ internal sealed partial class RelationshipViewWindow : FluentWindow
         try
         {
             var document = await _refresh(CancellationToken.None).ConfigureAwait(true);
-            await SetDocumentAsync(document, _refresh, CancellationToken.None).ConfigureAwait(true);
+
+            // A refresh re-reads the origin, not the reader's selection: the clusters that were on stay
+            // on, so the picture a re-read produces is arranged for the same tables as the one it replaces.
+            if (_reshape is not null && _offChips.Count > 0)
+            {
+                document = _reshape(_offChips);
+            }
+
+            await SetDocumentAsync(document, _refresh, _reshape, CancellationToken.None).ConfigureAwait(true);
         }
         catch (Exception ex)
         {

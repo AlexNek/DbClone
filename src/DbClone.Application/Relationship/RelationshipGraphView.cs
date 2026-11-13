@@ -25,4 +25,66 @@ public sealed record RelationshipGraphView(
     IReadOnlyList<RelationshipOutsideTableView> OutsideTables,
     IReadOnlyList<RelationshipSchemaView> Schemas,
     IReadOnlyList<RelationshipEdgeView> Edges,
-    int UnrelatedTableCount);
+    int UnrelatedTableCount)
+{
+    /// <summary>This graph without the tables a cluster filter switched off, and without what only they stated.</summary>
+    /// <remarks>
+    /// <para>
+    /// A constraint survives only while both of its ends do, so the remaining picture never shows the
+    /// shape of a relation whose other end is not drawn. An outside end is kept only while a surviving
+    /// constraint still names it, for the same reason.
+    /// </para>
+    /// <para>
+    /// The schema rows and the unrelated count are recomputed from what is left, because both are what
+    /// the document prints about the graph it was given; the totals of the whole catalog are stated
+    /// separately by whoever asked for the reduced view.
+    /// </para>
+    /// </remarks>
+    /// <param name="hiddenTableIds">The ids of the captured tables to leave out.</param>
+    /// <returns>The remaining graph, or this graph when nothing is left out of it.</returns>
+    public RelationshipGraphView Without(IReadOnlySet<string> hiddenTableIds)
+    {
+        ArgumentNullException.ThrowIfNull(hiddenTableIds);
+
+        if (hiddenTableIds.Count == 0)
+        {
+            return this;
+        }
+
+        var tables = Tables
+            .Where(table => !hiddenTableIds.Contains(table.Id))
+            .ToList();
+
+        var edges = Edges
+            .Where(edge => !hiddenTableIds.Contains(edge.ChildId) && !hiddenTableIds.Contains(edge.ParentId))
+            .ToList();
+
+        var parents = new HashSet<string>(edges.Select(edge => edge.ParentId), StringComparer.Ordinal);
+        var outside = OutsideTables.Where(table => parents.Contains(table.Id)).ToList();
+
+        var related = new HashSet<string>(StringComparer.Ordinal);
+        foreach (var edge in edges)
+        {
+            related.Add(edge.ChildId);
+            related.Add(edge.ParentId);
+        }
+
+        var schemas = tables
+            .GroupBy(table => table.Schema, StringComparer.Ordinal)
+            .Select(group => new RelationshipSchemaView(
+                group.Key,
+                group.Count(),
+                group.Count(table => related.Contains(table.Id))))
+            .OrderBy(row => row.Schema, StringComparer.Ordinal)
+            .ToList();
+
+        return new RelationshipGraphView(
+            Origin,
+            HasData,
+            tables,
+            outside,
+            schemas,
+            edges,
+            tables.Count(table => !related.Contains(table.Id)));
+    }
+}

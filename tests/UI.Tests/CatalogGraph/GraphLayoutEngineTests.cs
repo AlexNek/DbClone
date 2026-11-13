@@ -290,6 +290,55 @@ public sealed class GraphLayoutEngineTests
         AssertNoRouteCrossesACard(layout, model);
     }
 
+    [Fact]
+    public void The_catalog_behind_the_reported_picture_keeps_every_arrow_clear_of_a_table()
+    {
+        // The catalog the last picture was reported from (pass 11): two schemas, nine tables, and one
+        // band of three template tables beside the two tables the picture opens with. The page's own
+        // width for nine cards was two columns, so that band wrapped and the third template table was
+        // drawn on a line of its own — between template_entries and the profile it points at, and
+        // between alliance_actions and the same profile. Two arrows then had to be carried round a
+        // table they do not join. The band needs one column more, so the width is measured against
+        // the arrows it draws instead of assumed: the picture is a page, and every arrow has a clear
+        // run at what it joins.
+        var alliances = CatalogGraphFixture.TableId("public", "alliances");
+        var profiles = CatalogGraphFixture.TableId("public", "profiles");
+        var actions = CatalogGraphFixture.TableId("public", "alliance_actions");
+        var templates = CatalogGraphFixture.TableId("public", "user_templates");
+        var stats = CatalogGraphFixture.TableId("public", "template_stats");
+        var entries = CatalogGraphFixture.TableId("public", "template_entries");
+        var buckets = CatalogGraphFixture.TableId("storage", "buckets_vectors");
+        var indexes = CatalogGraphFixture.TableId("storage", "vector_indexes");
+
+        var fixture = CatalogGraphFixture.Create()
+            .Table("public", "alliances", 12, Column("id"))
+            .Table("public", "profiles", 480, Column("alliance_id"))
+            .Table("public", "alliance_actions", 900, Column("alliance_id"), Column("profile_id"))
+            .Table("public", "user_templates", 60, Column("profile_id"))
+            .Table("public", "template_stats", 40, Column("template_id"))
+            .Table("public", "template_entries", 300, Column("profile_id"))
+            .Table("public", "users", 200, Column("id"))
+            .Table("storage", "buckets_vectors", 3, Column("id"))
+            .Table("storage", "vector_indexes", 7, Column("bucket_id"))
+            .Edge(profiles, alliances, "fk_profiles_alliances", ["alliance_id"])
+            .Edge(actions, alliances, "fk_actions_alliances", ["alliance_id"])
+            .Edge(actions, profiles, "fk_actions_profiles", ["profile_id"])
+            .Edge(templates, profiles, "fk_templates_profiles", ["profile_id"])
+            .Edge(stats, templates, "fk_stats_templates", ["template_id"])
+            .Edge(entries, profiles, "fk_entries_profiles", ["profile_id"])
+            .Edge(indexes, buckets, "fk_indexes_buckets", ["bucket_id"]);
+
+        var model = Analyze(fixture);
+        var grid = GridOf(model);
+        var layout = _engine.Compute(model);
+
+        Arrows(grid, model).Measure().Blocked.Should().Be(0, "no arrow is drawn over a table it does not join");
+        (grid.Width / grid.Height).Should().BeGreaterThan(
+            1.2, "the picture is a page: wider than it is tall");
+
+        AssertNoRouteCrossesACard(layout, model);
+    }
+
     // ── T5: determinism ───────────────────────────────────────────────────────────
 
     [Fact]
@@ -578,12 +627,76 @@ public sealed class GraphLayoutEngineTests
             children.Max(child => grid.ColumnOfNode[child]),
             "the parent is drawn over its children's own span, not off at one end of it");
 
-        var order = children
-            .Select(child => (grid.RowOfNode[child] * grid.ColumnLefts.Count) + grid.ColumnOfNode[child])
-            .Order()
+        // Twenty children do not fit one line of the page, so the band they stand in is drawn as two
+        // or more lines. A line is a run of the fan: no child stands apart from its neighbour, and no
+        // line stands apart from the line above it. A line narrower than the one above it is centred
+        // under the parent, which is what leaves the empty cells at its ends — a hole a reader reads
+        // as a gap in the fan only where it separates two children of it.
+        var lines = children
+            .GroupBy(child => grid.RowOfNode[child])
+            .OrderBy(line => line.Key)
             .ToList();
 
-        order[^1].Should().Be(order[0] + order.Count - 1, "the children are packed one after another with no hole between them");
+        for (var index = 0; index < lines.Count; index++)
+        {
+            var packed = lines[index].Select(child => grid.ColumnOfNode[child]).Order().ToList();
+            packed[^1].Should().Be(
+                packed[0] + packed.Count - 1,
+                "the children of one line are packed one after another with no hole between them");
+
+            if (index > 0)
+            {
+                lines[index].Key.Should().Be(
+                    lines[index - 1].Key + 1,
+                    "the lines of one fan follow one another with no empty row between them");
+            }
+        }
+    }
+
+    [Fact]
+    public void A_child_that_fits_beside_its_siblings_is_not_drawn_under_them()
+    {
+        // The auth catalog of nine tables: one table five tables point at, and one table two of them
+        // point at. Six children fit a line, so the seventh is not wrapped onto a line of its own —
+        // a wrapped band draws that child under its own siblings, and its arrow then has to climb
+        // past a row of cards it does not join, which the picture can avoid by being one column wider.
+        var users = CatalogGraphFixture.TableId("auth", "users");
+        var providers = CatalogGraphFixture.TableId("auth", "sso_providers");
+        var fixture = CatalogGraphFixture.Create()
+            .Table("auth", "users", 1200, Column("email"))
+            .Table("auth", "identities", 800, Column("user_id"))
+            .Table("auth", "sso_providers", 4)
+            .Table("auth", "sso_domains", 6, Column("sso_provider_id"))
+            .Table("auth", "saml_providers", 3, Column("sso_provider_id"))
+            .Table("auth", "oauth_consents", 40, Column("user_id"))
+            .Table("auth", "one_time_tokens", 90, Column("user_id"))
+            .Table("auth", "webauthn_challenges", 12, Column("user_id"))
+            .Table("public", "users", 1200);
+
+        fixture.Edge(CatalogGraphFixture.TableId("auth", "identities"), users, "fk_identities_users", ["user_id"]);
+        fixture.Edge(CatalogGraphFixture.TableId("auth", "oauth_consents"), users, "fk_consents_users", ["user_id"]);
+        fixture.Edge(CatalogGraphFixture.TableId("auth", "one_time_tokens"), users, "fk_tokens_users", ["user_id"]);
+        fixture.Edge(CatalogGraphFixture.TableId("auth", "webauthn_challenges"), users, "fk_webauthn_users", ["user_id"]);
+        fixture.Edge(CatalogGraphFixture.TableId("public", "users"), users, "fk_public_users", ["id"]);
+        fixture.Edge(CatalogGraphFixture.TableId("auth", "sso_domains"), providers, "fk_domains_providers", ["sso_provider_id"]);
+        fixture.Edge(CatalogGraphFixture.TableId("auth", "saml_providers"), providers, "fk_saml_providers", ["sso_provider_id"]);
+
+        var model = Analyze(fixture);
+        var grid = GridOf(model);
+        var layout = _engine.Compute(model);
+
+        layout.Edges.Should().OnlyContain(
+            route => route.Shape == EEdgeShape.Line && route.Points.Count == 2,
+            "a child that fits beside its siblings is joined to its parent by one straight arrow");
+
+        var children = new[] { "identities", "oauth_consents", "one_time_tokens", "webauthn_challenges" }
+            .Select(table => model.NodeIndexesById[CatalogGraphFixture.TableId("auth", table)])
+            .Append(model.NodeIndexesById[CatalogGraphFixture.TableId("public", "users")])
+            .ToList();
+
+        children.Select(child => grid.RowOfNode[child]).Distinct().Should().HaveCount(
+            1,
+            "the children of one table stand on one line under it");
     }
 
     [Fact]
@@ -797,6 +910,65 @@ public sealed class GraphLayoutEngineTests
     }
 
     [Fact]
+    public void An_arrow_arrives_on_the_side_the_table_it_comes_from_stands_on()
+    {
+        // The picture that reported it: one table is named by five others standing side by side under
+        // it, so all five arrivals ask for the same point of its border. The border was dealt by
+        // walking the loop from its widest gap and carrying every end that did not fit onward round
+        // the card, so four arrows arrived at the top of a table every one of them stands below, and
+        // the router had to climb over the picture's own margin to come back down into it.
+        var parent = CatalogGraphFixture.TableId("under", "parent");
+        var fixture = CatalogGraphFixture.Create().Table("under", "parent", 9);
+
+        for (var child = 0; child < 4; child++)
+        {
+            fixture.Table("under", $"child{child}", 3, Column("parent_id"));
+            fixture.Edge(
+                CatalogGraphFixture.TableId("under", $"child{child}"),
+                parent,
+                $"fk_under_{child}",
+                ["parent_id"]);
+        }
+
+        var model = Analyze(fixture);
+        var hub = model.NodeIndexesById[parent];
+
+        var placement = new NodePlacement[model.Nodes.Count];
+        placement[hub] = At(hub, 0);
+
+        for (var child = 0; child < 4; child++)
+        {
+            var index = model.NodeIndexesById[CatalogGraphFixture.TableId("under", $"child{child}")];
+            placement[index] = At(index, 200, child * 130.0);
+        }
+
+        var ends = GraphEdgePorts.Assign(model, placement);
+
+        foreach (var edge in model.Edges)
+        {
+            var card = placement[edge.ChildIndex];
+            var named = placement[edge.ParentIndex];
+
+            Faces(card, ends[edge.Index].Child.Side, named).Should().BeTrue(
+                "constraint {0} leaves the side of its own card that the table it names stands on", edge.Name);
+
+            Faces(named, ends[edge.Index].Parent.Side, card).Should().BeTrue(
+                "constraint {0} arrives at a side of the card its own table stands on, not round the back of it", edge.Name);
+        }
+
+        NodePlacement At(int node, double top, double left = 0) =>
+            new(node, new GraphPoint(left, top), GraphCard.WidthOf(model.Nodes[node], Words), GraphCard.Height);
+
+        static bool Faces(NodePlacement card, EEdgeSide side, NodePlacement peer) => side switch
+        {
+            EEdgeSide.Top => peer.Centre.Y <= card.TopLeft.Y,
+            EEdgeSide.Bottom => peer.Centre.Y >= card.Bottom,
+            EEdgeSide.Left => peer.Centre.X <= card.TopLeft.X,
+            _ => peer.Centre.X >= card.Right,
+        };
+    }
+
+    [Fact]
     public void An_arrow_never_runs_along_or_back_into_its_own_card()
     {
         // An end dealt onto a side is drawn out of that side: a first step along the border reads as a
@@ -856,6 +1028,56 @@ public sealed class GraphLayoutEngineTests
         arrived.Should().HaveCount(20);
         arrived.Select(end => end.Side).Distinct().Should().HaveCountGreaterThan(1,
             "a full side hands the ends it has no room for to the next one");
+    }
+
+    [Fact]
+    public void An_end_keeps_the_side_its_neighbour_stands_on_and_its_route_a_corridor_of_its_own()
+    {
+        // The picture that reported it: three constraints meet public.user_templates — one leaves for
+        // the table above it, one arrives from the table below, one arrives from the table at its
+        // left. The border is dealt by walking the loop from its widest gap, so the end leaving for
+        // the table above named a point behind that start; read as a plain number it looked taken and
+        // was pushed a whole turn round onto the card's left side. The arrow then had to leave
+        // leftwards, where the corridor already carried another route, and was drawn twelve pixels
+        // beside it — two strokes a reader cannot tell apart — while the corridor at the card's right
+        // stood empty (T26, T27).
+        var alliances = CatalogGraphFixture.TableId("public", "alliances");
+        var profiles = CatalogGraphFixture.TableId("public", "profiles");
+        var actions = CatalogGraphFixture.TableId("public", "alliance_actions");
+        var templates = CatalogGraphFixture.TableId("public", "user_templates");
+        var entries = CatalogGraphFixture.TableId("public", "template_entries");
+        var stats = CatalogGraphFixture.TableId("public", "template_stats");
+
+        var model = Analyze(CatalogGraphFixture.Create()
+            .Table("public", "alliances")
+            .Table("public", "profiles")
+            .Table("public", "alliance_actions")
+            .Table("public", "user_templates")
+            .Table("public", "template_stats")
+            .Table("public", "template_entries")
+            .Edge(actions, alliances, "fk_actions_alliances", ["alliance_id"])
+            .Edge(entries, profiles, "fk_entries_profiles", ["profile_id"])
+            .Edge(entries, templates, "fk_entries_templates", ["template_id"])
+            .Edge(templates, profiles, "fk_templates_profiles", ["profile_id"])
+            .Edge(stats, templates, "fk_stats_templates", ["template_id"]));
+
+        var (placement, grid) = ReportedPicture(model);
+        var ends = GraphEdgePorts.Assign(model, placement);
+
+        int Edge(string name) => model.Edges.Single(edge => edge.Name == name).Index;
+
+        ends[Edge("fk_templates_profiles")].Child.Side.Should().Be(
+            EEdgeSide.Top,
+            "the table it points at stands above it, so its arrow leaves the top of the card");
+
+        var routes = GraphEdgeRouter.Route(model, placement, grid);
+        var sides = new[] { "fk_actions_alliances", "fk_templates_profiles" }
+            .Select(name => Corridor(routes[Edge(name)], cardsCentre: 462.5) > 551 ? "right" : "left")
+            .ToList();
+
+        sides.Should().BeEquivalentTo(
+            ["right", "left"],
+            "each long constraint climbs a corridor of its own, never a lane beside the one already drawn");
     }
 
     // ── T26: the ink, not the shape ───────────────────────────────────────────────
@@ -921,6 +1143,64 @@ public sealed class GraphLayoutEngineTests
     private static bool SharesLine((double X, double From, double To) run, (double X, double From, double To) other) =>
         Math.Abs(run.X - other.X) < 0.01 && run.From < other.To && other.From < run.To;
 
+    /// <summary>The corridor line a route climbs: its vertical run that stands furthest from the cards it joins.</summary>
+    private static double Corridor(EdgeRoute route, double cardsCentre) =>
+        VerticalRuns(route.Points).MaxBy(run => Math.Abs(run.X - cardsCentre)).X;
+
+    /// <summary>
+    /// The arrangement the reported picture showed, read off the drawing's own coordinates: one column
+    /// of five cards with a second card beside the last of them, and the corridors either side.
+    /// </summary>
+    private static (NodePlacement[] Placement, GraphGrid Grid) ReportedPicture(CatalogGraphModel model)
+    {
+        var columnOf = new Dictionary<string, int>
+        {
+            ["alliances"] = 1,
+            ["profiles"] = 1,
+            ["alliance_actions"] = 1,
+            ["user_templates"] = 1,
+            ["template_stats"] = 1,
+            ["template_entries"] = 0,
+        };
+
+        var rowOf = new Dictionary<string, int>
+        {
+            ["alliances"] = 0,
+            ["profiles"] = 1,
+            ["alliance_actions"] = 3,
+            ["user_templates"] = 5,
+            ["template_stats"] = 6,
+            ["template_entries"] = 6,
+        };
+
+        double[] lefts = [63, 374];
+        double[] widths = [184, 177];
+        double[] tops = [28, 104, 180, 256, 332, 408, 484];
+
+        var columns = new int[model.Nodes.Count];
+        var rows = new int[model.Nodes.Count];
+        var placement = new NodePlacement[model.Nodes.Count];
+
+        for (var node = 0; node < model.Nodes.Count; node++)
+        {
+            columns[node] = columnOf[model.Nodes[node].Table!];
+            rows[node] = rowOf[model.Nodes[node].Table!];
+            placement[node] = new NodePlacement(
+                node, new GraphPoint(lefts[columns[node]], tops[rows[node]]), widths[columns[node]], GraphCard.Height);
+        }
+
+        return (placement, new GraphGrid(
+            lefts,
+            widths,
+            tops,
+            [3, 310.5, 611.5],
+            [-8, 86.5, 162.5, 238.5, 314.5, 390.5, 466.5, 542.5],
+            columns,
+            rows,
+            675,
+            583));
+    }
+
     /// <summary>
     /// Whether a route's first step goes out of the card it starts on: it begins at the end the card was
     /// given and moves away from the side that end stands on, rather than along it or back inside.
@@ -957,6 +1237,21 @@ public sealed class GraphLayoutEngineTests
     /// <summary>The lattice the engine placed the cards on, computed the same way so the cells can be asserted.</summary>
     private static GraphGrid GridOf(CatalogGraphModel model) =>
         GraphRankedPlacement.Place(model, [.. model.Nodes.Select(node => GraphCard.WidthOf(node, Words))]).Grid;
+
+    /// <summary>
+    /// The arrangement read back off the emitted lattice, one card per cell, so the arrows it would draw
+    /// can be measured the way placement measures them.
+    /// </summary>
+    /// <param name="grid">The lattice the engine emitted.</param>
+    /// <param name="model">The analyzed graph the lattice belongs to.</param>
+    /// <returns>The arrangement the lattice states.</returns>
+    private static GraphArrangement Arrows(GraphGrid grid, CatalogGraphModel model) =>
+        new(
+            model,
+            [.. model.Nodes.Select(node => new List<int> { node.Index })],
+            [.. model.Nodes.Select(_ => (Width: 1, Height: 1))],
+            [.. grid.RowOfNode],
+            [.. grid.ColumnOfNode]);
 
     /// <summary>How many grid steps separate two cards, counted the way placement counts them.</summary>
     private static int Step(GraphGrid grid, int first, int second) =>

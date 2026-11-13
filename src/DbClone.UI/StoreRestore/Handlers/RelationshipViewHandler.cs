@@ -58,6 +58,9 @@ internal sealed class RelationshipViewHandler : IRelationshipViewHandler
     private readonly RelationshipPictureWriter _pictureWriter;
     private readonly ILogger<RelationshipViewHandler> _logger;
 
+    /// <summary>The catalog behind the document on screen, which a later redraw arranges again.</summary>
+    private RelationshipGraphView? _presented;
+
     /// <summary>
     /// Composes the workflow from its collaborators. Public although the type is internal: the
     /// container only constructs a public constructor, and the services it receives are internal to
@@ -151,11 +154,14 @@ internal sealed class RelationshipViewHandler : IRelationshipViewHandler
         var view = await ReadAsync(read, state, cancellationToken).ConfigureAwait(false);
         if (view is null) return;
 
+        _presented = view;
         var document = _builder.Build(view);
 
         try
         {
-            await _presenter.PresentAsync(document, Refresh(read, state), cancellationToken).ConfigureAwait(false);
+            await _presenter
+                .PresentAsync(document, Refresh(read, state), Redraw(), cancellationToken)
+                .ConfigureAwait(false);
         }
         catch (OperationCanceledException)
         {
@@ -207,8 +213,20 @@ internal sealed class RelationshipViewHandler : IRelationshipViewHandler
                 var view = await read(token).ConfigureAwait(false);
                 Report(view, state);
 
+                _presented = view;
+
                 return _builder.Build(view);
             };
+
+    /// <summary>
+    /// The redraw a presenter offers: the same catalog arranged again for another cluster selection.
+    /// Nothing is read a second time — a chip changes what the picture draws, never what the origin
+    /// holds — and the tables that are not shown take no room in the arrangement (T28).
+    /// </summary>
+    private Func<IReadOnlySet<int>, RelationshipDocument> Redraw() =>
+        offChips => _builder.Build(
+            _presented ?? throw new InvalidOperationException("No relationship view has been presented."),
+            offChips);
 
     /// <summary>States what was read, and warns when the origin holds no table to draw.</summary>
     private static void Report(RelationshipGraphView view, WorkflowState state)
