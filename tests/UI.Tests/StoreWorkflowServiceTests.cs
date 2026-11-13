@@ -364,23 +364,58 @@ public sealed class StoreWorkflowServiceTests
         forwarded.Should().BeSameAs(progress);
     }
 
+    [Fact]
+    public async Task ExecuteAsync_states_why_a_store_failed_instead_of_only_that_it_did()
+    {
+        // Arrange — the product refused the read before it could write a usable catalog.
+        var interchange = Substitute.For<IInterchangeService>();
+        interchange
+            .StoreAsync(
+                Arg.Any<InterchangeStoreRequest>(),
+                Arg.Any<IProgress<InterchangeProgressView>?>(),
+                Arg.Any<CancellationToken>())
+            .Returns(Task.FromResult(StoreReportWritten(
+                outcome: EStoreOutcome.Failed,
+                reasons: ["The source refused the read of \"public.orders\"."])));
+
+        // Act
+        var result = await new StoreWorkflowService(
+                interchange, NullLogger<StoreWorkflowService>.Instance)
+            .ExecuteAsync(Request(), CancellationToken.None);
+
+        // Assert — the outcome names the reason the product reported, so a failed store is as
+        // actionable as a failed restore.
+        result.Success.Should().BeFalse();
+        result.Message.Should().Be("Store failed: The source refused the read of \"public.orders\".");
+    }
+
     /// <summary>A completed store of a small catalog, with or without the report's path.</summary>
     private static InterchangeStoreResult StoreReportWritten(
         string? catalogPath = null,
         string? summaryPath = @"C:\temp\testdb.catalog.rdbx\summary.md",
-        SqlScriptPaths? scripts = null) =>
+        SqlScriptPaths? scripts = null,
+        EStoreOutcome outcome = EStoreOutcome.Success,
+        IReadOnlyList<string>? reasons = null) =>
         new(
-            EStoreOutcome.Success,
+            outcome,
             SectionsWritten: 8,
             TablesExported: 2,
             RowsExported: 12,
             BytesExported: 4096,
             ChunksWritten: 2,
-            IsComplete: true,
+            IsComplete: outcome == EStoreOutcome.Success,
             ConsistencyModeUsed: "snapshot",
             TablesThatFellBackToSourceOrder: [],
             VerificationPassed: true,
-            Issues: [],
+            Issues:
+            [
+                .. (reasons ?? []).Select(reason => new InterchangeIssueView(
+                    EInterchangeSeverity.Error,
+                    "StoreIncomplete",
+                    reason,
+                    string.Empty,
+                    string.Empty)),
+            ],
             CatalogPath: catalogPath ?? @"C:\temp\testdb.catalog.rdbx",
             Elapsed: TimeSpan.FromSeconds(1),
             SummaryPath: summaryPath,

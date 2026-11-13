@@ -67,6 +67,32 @@ public sealed partial class StoreRestoreProgressViewModel : ObservableObject
         State.StatusMessage = Describe(progress);
     }
 
+    /// <summary>
+    /// Ends the card on how the run ended, instead of leaving it on the last thing the run managed to
+    /// report.
+    /// </summary>
+    /// <remarks>
+    /// A run that fails before its first stage — a catalog this version cannot read, a target it cannot
+    /// open — reports "Starting" and nothing else, so the card would stand at 0% for good while the one
+    /// sentence that says why lived only in a banner the reader can close. The phase states the ending
+    /// and the line under the bar carries that sentence, as a copy and a comparison already do on this
+    /// same card.
+    /// </remarks>
+    /// <param name="phase">
+    /// How the run ended — <c>Complete</c>, <c>Failed</c>, <c>Cancelled</c> or <c>Refused</c>. The
+    /// caller states it because only the caller knows the outcome; a bare "did it succeed" cannot tell
+    /// a refusal from a failure, and the card must say what the status bar beside it says.
+    /// </param>
+    /// <param name="message">The outcome sentence to leave under the bar.</param>
+    public void Finish(string phase, string message)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(phase);
+        ArgumentNullException.ThrowIfNull(message);
+
+        CurrentPhase = phase;
+        State.StatusMessage = message;
+    }
+
     /// <summary>The stage, and — while a section is walked — which object of how many.</summary>
     private static string Describe(InterchangeProgressView progress) =>
         progress.TableTotal > 0

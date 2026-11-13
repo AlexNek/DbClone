@@ -90,7 +90,7 @@ public class InterchangeReadGraphTests
         graph.Edges.Single(edge => edge.ConstraintName == "orders_shipping_fkey").IsMandatory.Should().BeFalse();
 
         graph.Origin.Kind.Should().Be(EGraphOriginKind.Catalog);
-        graph.Origin.FormatVersion.Should().Be(3);
+        graph.Origin.FormatVersion.Should().Be(4);
         graph.Origin.Dialect.Should().Be("testdialect");
         graph.Origin.Label.Should().Be(Path.GetFileName(fixture.Root));
         graph.Origin.Location.Should().Be(fixture.Root);

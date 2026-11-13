@@ -9,10 +9,11 @@ namespace DbAdapter.PostgreSql.Interchange;
 /// <remarks>
 /// <para>
 /// The rule is the plan's: use the command's own keyword where one exists, otherwise wrap or drop the
-/// object the statement is about, and never drop anything that holds data. So a schema, a sequence, a
-/// table, a materialized view and an index take <c>IF NOT EXISTS</c>; a view takes <c>OR REPLACE</c>; a
-/// type, which has no keyword, is wrapped in a block that treats a duplicate as done; a foreign key is
-/// dropped and re-added <c>NOT VALID</c>; and a trigger is dropped before it is created again.
+/// object the statement is about, and never drop anything that holds data. So a schema, an extension, a
+/// sequence, a table, a materialized view and an index take <c>IF NOT EXISTS</c>; a view takes <c>OR
+/// REPLACE</c>; a type, which has no keyword, is wrapped in a block that treats a duplicate as done; a
+/// foreign key is dropped and re-added <c>NOT VALID</c>; and a trigger is dropped before it is created
+/// again.
 /// </para>
 /// <para>
 /// The input is the text the writer already produces, so this is the one place the script's text and the
@@ -49,6 +50,13 @@ internal static class ScriptStatementGuard
         if (StartsWith(sql, "CREATE SCHEMA"))
         {
             return [Guarded(sql, "CREATE SCHEMA", "IF NOT EXISTS")];
+        }
+
+        // An extension is already written in its re-runnable form; "IF NOT EXISTS" is repeated here
+        // rather than promised by the writer, so a statement that arrives without it is still guarded.
+        if (StartsWith(sql, "CREATE EXTENSION"))
+        {
+            return [Guarded(sql, "CREATE EXTENSION", "IF NOT EXISTS")];
         }
 
         if (StartsWith(sql, "CREATE SEQUENCE"))

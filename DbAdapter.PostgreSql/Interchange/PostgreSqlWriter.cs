@@ -471,7 +471,8 @@ public sealed class PostgreSqlWriter : IDatabaseWriter
     /// structured home in the format at all, so the statement in the catalog's native file is the only
     /// record of it. That file carries more than types, and the objects it holds are routed to the stage
     /// that creates each of them before any of them is applied, so a stage is never handed an object it
-    /// has nothing to do with.
+    /// has nothing to do with. An extension is the one object whose statement is built from its
+    /// structured fields, because what it needs is only its name and the schema it is installed into.
     /// </para>
     /// </remarks>
     internal static IReadOnlyList<string> BuildStatements(
@@ -481,6 +482,7 @@ public sealed class PostgreSqlWriter : IDatabaseWriter
         stage switch
         {
             SchemaStage.Schemas => CreateSchemaStatements(objects),
+            SchemaStage.Extensions => CreateExtensionStatements(objects),
             SchemaStage.Types => CreateTypeStatements(dialect, objects),
             SchemaStage.Sequences => CreateSequenceStatements(objects),
             SchemaStage.Tables => CreateTableStatements(dialect, objects),
@@ -559,6 +561,53 @@ public sealed class PostgreSqlWriter : IDatabaseWriter
         }
 
         return Ddl.GenerateCreateSchemas(schemas);
+    }
+
+    /// <summary>
+    /// Installs the extensions the catalog recorded.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// An extension is created before the objects that name what it provides, because it is what
+    /// provides them: an index over the <c>gin_trgm_ops</c> operator class cannot be created until
+    /// <c>pg_trgm</c> is installed, and the stage order is the only place that dependency is known.
+    /// </para>
+    /// <para>
+    /// The statement is built from the extension's structured fields rather than from the fragment the
+    /// export synthesized — that text is not a captured declaration, so it is no more exact than what
+    /// this writes. The version is deliberately not pinned: a target whose server carries another
+    /// version of the same extension is a target that holds it, and pinning would refuse a restore the
+    /// source itself would accept. An extension installed into a schema the server owns — <c>plpgsql</c>
+    /// in <c>pg_catalog</c> — is skipped for the same reason a system schema is: every database the
+    /// server bootstrapped already holds it, so it is never created.
+    /// </para>
+    /// </remarks>
+    private static IReadOnlyList<string> CreateExtensionStatements(IReadOnlyList<ISchemaObject> objects)
+    {
+        var statements = new List<string>(objects.Count);
+
+        foreach (var obj in objects)
+        {
+            if (obj is not ExtensionDefinition extension)
+            {
+                throw WrongObject(SchemaStage.Extensions, nameof(ExtensionDefinition), obj);
+            }
+
+            if (!string.IsNullOrWhiteSpace(extension.Schema)
+                && PgSystemSchemas.AllSet.Contains(extension.Schema))
+            {
+                continue;
+            }
+
+            var schema = string.IsNullOrWhiteSpace(extension.Schema)
+                ? string.Empty
+                : $" SCHEMA {PgIdentifierQuoter.QuoteIdentifier(extension.Schema)}";
+
+            statements.Add(
+                $"CREATE EXTENSION IF NOT EXISTS {PgIdentifierQuoter.QuoteIdentifier(extension.Name)}{schema};");
+        }
+
+        return statements;
     }
 
     /// <summary>
@@ -650,12 +699,23 @@ public sealed class PostgreSqlWriter : IDatabaseWriter
     }
 
     /// <summary>
-    /// Creates the sequences the catalog recorded, in the schemas it says they live in.
+    /// Creates the sequences the catalog recorded, in the schemas it says they live in, except the
+    /// ones an identity column creates for itself.
     /// </summary>
     /// <remarks>
-    /// The catalog holds a sequence's options and nothing else about it: the live model's ownership
-    /// link (<c>OWNED BY</c>, identity backing) has no field in the format yet, so an owned sequence
-    /// is restored as a standalone one. The reader marks that loss in the object's notes.
+    /// <para>
+    /// An identity's sequence belongs to the column that declares the identity, and the table's
+    /// <c>GENERATED ... AS IDENTITY</c> creates it — the copy pipeline has always left those alone for
+    /// the same reason. Creating it here as well would leave the target holding two: this one,
+    /// standalone and drawn from by nothing, and the column's own, which the server has to give a
+    /// different name because the first one took it.
+    /// </para>
+    /// <para>
+    /// A sequence a serial column's <c>DEFAULT</c> names is still created here, before the tables,
+    /// because that default refers to it by name and the table could not be created without it. The
+    /// format carries no field for the owning column, so such a sequence is restored standalone and
+    /// the reader marks the loss in the object's notes.
+    /// </para>
     /// </remarks>
     private static IReadOnlyList<string> CreateSequenceStatements(
         IReadOnlyList<ISchemaObject> objects)
@@ -667,6 +727,11 @@ public sealed class PostgreSqlWriter : IDatabaseWriter
             if (obj is not SequenceDefinition sequence)
             {
                 throw WrongObject(SchemaStage.Sequences, nameof(SequenceDefinition), obj);
+            }
+
+            if (sequence.IsIdentity)
+            {
+                continue;
             }
 
             sequences.Add(new Models.SequenceDefinition(

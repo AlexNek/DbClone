@@ -28,6 +28,7 @@ public class PostgreSqlScriptRendererTests
     private static readonly SchemaStage[] RestoreStages =
     [
         SchemaStage.Schemas,
+        SchemaStage.Extensions,
         SchemaStage.Types,
         SchemaStage.Sequences,
         SchemaStage.Tables,
@@ -71,6 +72,7 @@ public class PostgreSqlScriptRendererTests
 
     [Theory]
     [InlineData(SchemaStage.Schemas, "CREATE SCHEMA IF NOT EXISTS sales;")]
+    [InlineData(SchemaStage.Extensions, "CREATE EXTENSION IF NOT EXISTS pg_trgm")]
     [InlineData(SchemaStage.Types, "CREATE TYPE public.mood AS ENUM ('sad', 'happy');")]
     [InlineData(SchemaStage.Sequences, "CREATE SEQUENCE IF NOT EXISTS public.order_seq AS bigint")]
     [InlineData(SchemaStage.Tables, "CREATE TABLE IF NOT EXISTS public.customers (")]
@@ -130,18 +132,44 @@ public class PostgreSqlScriptRendererTests
     }
 
     [Fact]
-    public void SchemaStatements_NothingCreatesAnExtension()
+    public void SchemaStatements_Extension_IsInstalledByNameAndSchemaBeforeAnythingNamesIt()
     {
-        // An extension's statement is not a statement the product writes: the native file is the only
-        // source of types, and no stage of the format takes an extension from it.
-        NativeObjectRouting.StageFor(EObjectKind.Extension).Should().BeNull();
+        // An extension is what provides the objects the later stages name — the operator class of an
+        // index, the type of a column — so it is written as a stage of its own, from the extension's
+        // own fields. The version the source carried is not pinned: a target holding another version
+        // of the same extension holds it.
+        var statements = Renderer().SchemaStatements(
+            SchemaStage.Extensions,
+            [
+                new ExtensionDefinition
+                {
+                    Ref = ObjectRef.Extension("pg_trgm"),
+                    Name = "pg_trgm",
+                    Schema = "public",
+                    Version = "1.6",
+                },
+            ]);
 
-        var statements = RestoreStages
-            .SelectMany(stage => Renderer().SchemaStatements(stage, ObjectsFor(stage)))
-            .ToList();
+        statements.Should().Equal("CREATE EXTENSION IF NOT EXISTS pg_trgm SCHEMA public;");
+    }
 
-        statements.Should().NotContain(
-            statement => statement.Contains("EXTENSION", StringComparison.OrdinalIgnoreCase));
+    [Fact]
+    public void SchemaStatements_ExtensionInASchemaTheServerOwns_IsNotWritten()
+    {
+        // plpgsql lives in pg_catalog in every database the server bootstrapped, so a catalog that
+        // records it is describing a presence rather than asking for one.
+        var statements = Renderer().SchemaStatements(
+            SchemaStage.Extensions,
+            [
+                new ExtensionDefinition
+                {
+                    Ref = ObjectRef.Extension("plpgsql"),
+                    Name = "plpgsql",
+                    Schema = "pg_catalog",
+                },
+            ]);
+
+        statements.Should().BeEmpty();
     }
 
     [Fact]
@@ -627,6 +655,15 @@ public class PostgreSqlScriptRendererTests
             SchemaStage.Schemas =>
             [
                 new SchemaDefinition { Ref = ObjectRef.Schema("sales"), Name = "sales" },
+            ],
+            SchemaStage.Extensions =>
+            [
+                new ExtensionDefinition
+                {
+                    Ref = ObjectRef.Extension("pg_trgm"),
+                    Name = "pg_trgm",
+                    Schema = "public",
+                },
             ],
             SchemaStage.Types =>
             [

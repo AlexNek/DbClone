@@ -9,6 +9,8 @@ using System.Xml;
 
 using AutoUpdaterDotNET;
 
+using DbClone.UI.Threading;
+
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.Logging;
 
@@ -177,8 +179,7 @@ public sealed class UpdateService : IUpdateService
             });
 
             // The installer has started — close the app so files can be replaced.
-            await System.Windows.Application.Current.Dispatcher.InvokeAsync(
-                () => System.Windows.Application.Current.Shutdown());
+            await UiDispatcher.InvokeAsync(() => System.Windows.Application.Current.Shutdown());
         }
         catch (Exception ex)
         {

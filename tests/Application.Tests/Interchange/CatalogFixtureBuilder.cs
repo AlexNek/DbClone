@@ -112,8 +112,8 @@ internal sealed class CatalogFixtureBuilder : IDisposable
 
         WriteJson(Path.Combine(_root, "manifest.json"), new
         {
-            formatVersion = 3,
-            minimumReader = 3,
+            formatVersion = 4,
+            minimumReader = 4,
             producer = "fixture",
             complete = true,
             modelFormat = "interchange",
@@ -133,7 +133,7 @@ internal sealed class CatalogFixtureBuilder : IDisposable
 
         WriteJson(Path.Combine(_root, "catalog.json"), new
         {
-            formatVersion = 3,
+            formatVersion = 4,
             sections = new[] { "schemas", "tables" },
             tableCount = _declaredTableCount ?? _tables.Count,
             tableFolders = folderEntries

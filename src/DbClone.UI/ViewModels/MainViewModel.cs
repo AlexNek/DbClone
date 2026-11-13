@@ -525,12 +525,14 @@ public sealed partial class MainViewModel : ObservableObject
         {
             finalState = EOperationState.Cancelled;
             _resultHandler.HandleCancellation(StoreRestoreState, operationName);
+            StoreRestoreProgress.Finish("Cancelled", $"{operationName} cancelled.");
         }
         catch (Exception ex)
         {
             finalState = EOperationState.Failed;
             _logger.LogError(ex, "{Operation} failed", operationName);
             _resultHandler.HandleError(StoreRestoreState, operationName, ex.Message);
+            StoreRestoreProgress.Finish("Failed", $"{operationName} failed: {ex.Message}");
         }
         finally
         {
@@ -575,6 +577,7 @@ public sealed partial class MainViewModel : ObservableObject
 
         var result = await _storeWorkflow.ExecuteAsync(request, ct);
         _resultHandler.HandleStoreResult(StoreRestoreState, result);
+        StoreRestoreProgress.Finish(result.Success ? "Complete" : "Failed", result.Message);
 
         // FR17: a catalog that finished arrives with its picture beside it, so the file is there before
         // anybody asks for it. A picture that cannot be written leaves the store a success and says why.
@@ -596,7 +599,22 @@ public sealed partial class MainViewModel : ObservableObject
 
         var result = await _restoreWorkflow.ExecuteAsync(request, ct);
         _resultHandler.HandleRestoreResult(StoreRestoreState, result);
+        StoreRestoreProgress.Finish(RestorePhase(result), result.Message);
     }
+
+    /// <summary>
+    /// The ending a restore reached, in the words the status bar beside the card already uses.
+    /// </summary>
+    /// <remarks>
+    /// A refused restore is neither a success nor a failure — it stops because the target is not empty —
+    /// so it is given its own ending instead of being drawn as a failure the reader would go looking for
+    /// a cause of.
+    /// </remarks>
+    private static string RestorePhase(RestoreResult result) =>
+        result.WasCancelled ? "Cancelled"
+        : result.WasRefused ? "Refused"
+        : result.Success ? "Complete"
+        : "Failed";
 
     // ── Private helpers ─────────────────────────────────────────────────────────
 

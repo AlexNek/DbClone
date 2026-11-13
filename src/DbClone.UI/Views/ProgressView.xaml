@@ -34,10 +34,21 @@
                     <ColumnDefinition Width="*" />
                     <ColumnDefinition Width="Auto" />
                 </Grid.ColumnDefinitions>
-                <TextBlock
-                    Grid.Column="0"
-                    FontWeight="SemiBold"
-                    Text="{Binding CurrentPhase, Mode=OneWay}" />
+                <TextBlock Grid.Column="0" FontWeight="SemiBold" Text="{Binding CurrentPhase, Mode=OneWay}">
+                    <TextBlock.Style>
+                        <Style TargetType="TextBlock">
+                            <Style.Triggers>
+                                <!--  The card's own ending words carry the error colour, so a run that failed says so before its reason is read  -->
+                                <DataTrigger Binding="{Binding CurrentPhase}" Value="Failed">
+                                    <Setter Property="Foreground" Value="{ui:ThemeResource SystemFillColorCriticalBrush}" />
+                                </DataTrigger>
+                                <DataTrigger Binding="{Binding CurrentPhase}" Value="Error">
+                                    <Setter Property="Foreground" Value="{ui:ThemeResource SystemFillColorCriticalBrush}" />
+                                </DataTrigger>
+                            </Style.Triggers>
+                        </Style>
+                    </TextBlock.Style>
+                </TextBlock>
                 <StackPanel Grid.Column="1" Orientation="Horizontal">
                     <TextBlock FontWeight="SemiBold" Text="{Binding ProgressPercent, StringFormat={}{0}%}" />
                     <TextBlock
@@ -104,8 +115,23 @@
 
             <TextBlock
                 Grid.Row="3"
-                Foreground="{ui:ThemeResource TextFillColorSecondaryBrush}"
-                Text="{Binding State.StatusMessage}" />
+                Text="{Binding State.StatusMessage}"
+                TextWrapping="Wrap">
+                <TextBlock.Style>
+                    <Style TargetType="TextBlock">
+                        <Setter Property="Foreground" Value="{ui:ThemeResource TextFillColorSecondaryBrush}" />
+                        <Style.Triggers>
+                            <!--  The reason a run stopped is an error and is shown as one: it is the only thing on this card a reader can act on  -->
+                            <DataTrigger Binding="{Binding CurrentPhase}" Value="Failed">
+                                <Setter Property="Foreground" Value="{ui:ThemeResource SystemFillColorCriticalBrush}" />
+                            </DataTrigger>
+                            <DataTrigger Binding="{Binding CurrentPhase}" Value="Error">
+                                <Setter Property="Foreground" Value="{ui:ThemeResource SystemFillColorCriticalBrush}" />
+                            </DataTrigger>
+                        </Style.Triggers>
+                    </Style>
+                </TextBlock.Style>
+            </TextBlock>
         </Grid>
     </ui:Card>
 </UserControl>

@@ -27,6 +27,10 @@ internal static class SchemaStagePlan
     /// Builds the ordered steps of one catalog.
     /// </summary>
     /// <param name="schemas">The captured schemas.</param>
+    /// <param name="extensions">
+    /// The captured extensions, created once their schemas exist and before anything that names an
+    /// object they provide.
+    /// </param>
     /// <param name="sequences">The captured sequences.</param>
     /// <param name="tables">The captured tables.</param>
     /// <param name="routines">The captured routines.</param>
@@ -38,6 +42,7 @@ internal static class SchemaStagePlan
     /// <returns>Every step, in the order it must run.</returns>
     internal static IReadOnlyList<SchemaStageStep> Build(
         IReadOnlyList<SchemaDefinition> schemas,
+        IReadOnlyList<ExtensionDefinition> extensions,
         IReadOnlyList<SequenceDefinition> sequences,
         IReadOnlyList<TableDefinition> tables,
         IReadOnlyList<RoutineDefinition> routines,
@@ -45,6 +50,7 @@ internal static class SchemaStagePlan
         IReadOnlyDictionary<SchemaStage, IReadOnlyList<NativeObjectDefinition>> nativeStages)
     {
         ArgumentNullException.ThrowIfNull(schemas);
+        ArgumentNullException.ThrowIfNull(extensions);
         ArgumentNullException.ThrowIfNull(sequences);
         ArgumentNullException.ThrowIfNull(tables);
         ArgumentNullException.ThrowIfNull(routines);
@@ -55,6 +61,12 @@ internal static class SchemaStagePlan
         {
             new() { Stage = SchemaStage.Schemas, Objects = AsObjects(schemas), Percentage = 20 },
         };
+
+        // An extension comes before the types because an operator class, a type or a function an
+        // extension provides is named by the statements that follow — an index over
+        // "gin_trgm_ops" cannot be created before "pg_trgm" is installed — and after the schemas
+        // because an extension is installed into one.
+        steps.Add(new() { Stage = SchemaStage.Extensions, Objects = AsObjects(extensions), Percentage = 22 });
 
         // Types come before the tables because a table column, a function signature and a domain can all
         // name one, so nothing that follows can be created before them.

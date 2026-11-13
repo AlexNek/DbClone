@@ -8,6 +8,12 @@ public enum SchemaStage
     /// <summary>Database and schemas.</summary>
     Schemas = 10,
 
+    /// <summary>
+    /// Extensions, created once the schemas they are installed into exist and before anything that
+    /// names an object they provide — an operator class in an index, a type in a column.
+    /// </summary>
+    Extensions = 15,
+
     /// <summary>Types (domains, enums, composites, ranges, collations, operators, casts).</summary>
     Types = 20,
 

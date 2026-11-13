@@ -220,6 +220,7 @@ public sealed class SnapshotImporter
         // reference (Ref), so no separate name resolution is needed.
         progress?.Report(new InterchangeProgress { Stage = "Reading catalog", Percentage = 15 });
         var schemas = await catalogReader.ReadSectionAsync<SchemaDefinition>("schemas", ct);
+        var extensions = await catalogReader.ReadSectionAsync<ExtensionDefinition>("extensions", ct);
         var sequences = await catalogReader.ReadSectionAsync<SequenceDefinition>("sequences", ct);
         var tables = await catalogReader.ReadSectionAsync<TableDefinition>("tables", ct);
         var routines = await catalogReader.ReadSectionAsync<RoutineDefinition>("routines", ct);
@@ -261,7 +262,17 @@ public sealed class SnapshotImporter
         // The stages run in the order the one plan states, which is a dependency order: an object is
         // applied once everything it names has been applied. A script over the same catalog walks the
         // same list, so the two can never disagree about what may be created before what.
-        foreach (var step in SchemaStagePlan.Build(schemas, sequences, tables, routines, views, nativeStages))
+        var issues = new List<InterchangeIssue>();
+        var objectsSkipped = 0;
+
+        // The two steps the restore cannot be built without: a schema holds every object, and a table is
+        // what the keys, indexes, triggers and rows are applied to. A failure in either is reported as a
+        // failed restore, because a target with neither the tables nor their rows did not receive the
+        // catalog. Every other step is one part of the structure, and its failure costs only that part.
+        var essentialStagesApplied = true;
+
+        foreach (var step in SchemaStagePlan.Build(
+                     schemas, extensions, sequences, tables, routines, views, nativeStages))
         {
             progress?.Report(new InterchangeProgress
             {
@@ -269,7 +280,51 @@ public sealed class SnapshotImporter
                 Percentage = step.Percentage,
             });
 
-            await writer.ApplySchemaAsync(step.Stage, step.Objects, ct);
+            try
+            {
+                await writer.ApplySchemaAsync(step.Stage, step.Objects, ct);
+            }
+            catch (OperationCanceledException)
+            {
+                throw;
+            }
+            catch (Exception ex)
+            {
+                // A stage is the commit unit the writer defines: its own transaction has already been
+                // rolled back, so the stages after it still run and everything they create still lands.
+                // Raising the failure here would throw all of that away for one statement the server
+                // refused — an index over an operator class the target could not install, say — so the
+                // failure is described in the result instead, the way the copy pipeline records a stage
+                // that failed and carries on to the next one.
+                _logger.LogError(
+                    ex,
+                    "Import stage {Stage} failed; the stages after it still run",
+                    step.Stage);
+
+                var stageName = step.Stage.ToString().ToLowerInvariant();
+
+                // The constraint and index steps are handed the tables rather than the keys and indexes
+                // themselves, so their objects are not what they create and the restore's own count of
+                // applied objects holds neither kind: only a step that creates counted objects adds to
+                // the skip, and the loss of a key or an index is stated in the tables it was handed
+                // rather than as a figure that belongs to no object at all.
+                var handedTables = step.Stage is SchemaStage.Constraints or SchemaStage.Indexes;
+                if (!handedTables)
+                {
+                    objectsSkipped += step.Objects.Count;
+                }
+
+                essentialStagesApplied &= step.Stage is not (SchemaStage.Schemas or SchemaStage.Tables);
+
+                var cost = handedTables
+                    ? $"nothing it creates over {step.Objects.Count} table(s) is on the target"
+                    : $"its {step.Objects.Count} object(s) are not on the target";
+
+                issues.Add(new InterchangeIssue(
+                    "RestoreStageFailed",
+                    EIssueSeverity.Error,
+                    $"The {stageName} stage could not be applied, so {cost}: {ex.Message}"));
+            }
         }
 
         // Import data
@@ -278,7 +333,18 @@ public sealed class SnapshotImporter
         var tablesProcessed = 0;
         var recordedRowCounts = new Dictionary<TableRef, long>();
 
-        foreach (var table in tables)
+        // A target with no table to receive a row is not walked table by table: one sentence says why
+        // the data is missing, where a failure per table would only repeat it.
+        if (!essentialStagesApplied && totalTables > 0)
+        {
+            issues.Add(new InterchangeIssue(
+                "RestoreDataNotWritten",
+                EIssueSeverity.Error,
+                $"The rows of {totalTables} table(s) were not written, because the tables themselves are "
+                + "not on the target."));
+        }
+
+        foreach (var table in essentialStagesApplied ? tables : [])
         {
             ct.ThrowIfCancellationRequested();
 
@@ -300,17 +366,40 @@ public sealed class SnapshotImporter
             // server computes for itself. A Binary value stored out-of-band arrives here as a range
             // payload, already validated by the format layer — the bytes are never rebuilt as text on the
             // way to the target (design §5, §6.9).
-            var rows = catalogReader.ReadRowsAsync(schemaName, table.Name, ct);
-            var applied = await writer.WriteTableRowsAsync(tableRef, table.Columns, rows, ct);
-            totalRows += applied;
-
-            // The count the table's own manifest states is what the target is checked against, because
-            // it was written by the capture and not by this restore. A catalog holding no data folder
-            // for a table — an export run without data — recorded no count, so nothing is expected.
-            var recorded = await catalogReader.ReadTableRowCountAsync(schemaName, table.Name, ct);
-            if (recorded is not null)
+            try
             {
-                recordedRowCounts[tableRef] = recorded.Value;
+                var rows = catalogReader.ReadRowsAsync(schemaName, table.Name, ct);
+                var applied = await writer.WriteTableRowsAsync(tableRef, table.Columns, rows, ct);
+                totalRows += applied;
+
+                // The count the table's own manifest states is what the target is checked against, because
+                // it was written by the capture and not by this restore. A catalog holding no data folder
+                // for a table — an export run without data — recorded no count, so nothing is expected.
+                var recorded = await catalogReader.ReadTableRowCountAsync(schemaName, table.Name, ct);
+                if (recorded is not null)
+                {
+                    recordedRowCounts[tableRef] = recorded.Value;
+                }
+            }
+            catch (OperationCanceledException)
+            {
+                throw;
+            }
+            catch (Exception ex)
+            {
+                // One table's rows are its own: a value the target refuses, a constraint the source's
+                // rows disagree with, a trigger that throws — none of them is a fact about the next
+                // table, so the failure is reported against this one and the walk goes on.
+                _logger.LogError(
+                    ex,
+                    "Import of the rows of {Table} failed; the next table still runs",
+                    tableRef);
+
+                issues.Add(new InterchangeIssue(
+                    "RestoreTableDataFailed",
+                    EIssueSeverity.Error,
+                    $"The rows of {schemaName}.{table.Name} could not be written: {ex.Message}",
+                    table.Ref));
             }
 
             tablesProcessed++;
@@ -333,9 +422,11 @@ public sealed class SnapshotImporter
 
             // Only the kinds this restore applies through a stage of its own are expected, and each of
             // them has to be answered by a collection the target's live model keeps. Asking about a
-            // kind the import never applies — the security section, the extension section — would
-            // report a target holding nothing of it as a mismatch of the restore rather than as what
-            // it is: a part of the catalog no stage writes yet.
+            // kind the import never applies — the security section — would report a target holding
+            // nothing of it as a mismatch of the restore rather than as what it is: a part of the
+            // catalog no stage writes yet. The extensions are counted out for the opposite reason:
+            // every database the server bootstrapped carries extensions of its own — plpgsql at the
+            // least — so a target is never expected to hold exactly the catalog's number of them.
             var expectation = new TargetExpectation
             {
                 ObjectCounts = BuildObjectCounts(
@@ -352,17 +443,41 @@ public sealed class SnapshotImporter
                 TableRowCounts = recordedRowCounts,
             };
 
-            validationReport = await writer.ValidateAsync(expectation, ct);
+            try
+            {
+                validationReport = await writer.ValidateAsync(expectation, ct);
+            }
+            catch (OperationCanceledException)
+            {
+                throw;
+            }
+            catch (Exception ex)
+            {
+                // The restore is finished by now, so what failed is the check on it. Saying that the
+                // check did not run is more honest than reporting a pass that never happened, and it
+                // does not throw away a restore that already landed.
+                _logger.LogError(ex, "The target could not be checked after the restore");
+
+                issues.Add(new InterchangeIssue(
+                    "RestoreValidationNotRun",
+                    EIssueSeverity.Warning,
+                    $"The target could not be checked after the restore: {ex.Message}"));
+            }
         }
 
         progress?.Report(new InterchangeProgress { Stage = "Complete", Percentage = 100 });
 
         return new ImportResult
         {
-            Success = true,
-            ObjectsApplied = schemas.Count + tables.Count + views.Count + routines.Count
-                + sequences.Count + nativeObjects.Count,
+            // The restore ran to the end unless a step it cannot be built on failed: the issues say
+            // what is missing from the target, and the outcome the caller reports is "completed with
+            // issues" rather than a failure that hides everything the other steps applied.
+            Success = essentialStagesApplied,
+            ObjectsApplied = schemas.Count + extensions.Count + tables.Count + views.Count
+                + routines.Count + sequences.Count + nativeObjects.Count - objectsSkipped,
+            ObjectsSkipped = objectsSkipped,
             RowsImported = totalRows,
+            Issues = issues,
             ValidationReport = validationReport,
         };
     }
@@ -398,7 +513,16 @@ public sealed class SnapshotImporter
             [EObjectKind.Table] = tables.Count,
             [EObjectKind.View] = views.Count(v => !v.IsMaterialized),
             [EObjectKind.MaterializedView] = views.Count(v => v.IsMaterialized),
-            [EObjectKind.Sequence] = sequences.Count,
+
+            // A sequence an identity column created is not applied as an object of its own: the column
+            // that declares the identity creates it with the table. It is therefore counted where it is
+            // made — at the identity columns of the tables this catalog holds — and the recorded
+            // sequences are counted by the ones the restore writes itself. Counting every recorded
+            // sequence would expect one the restore deliberately leaves to its column, and would expect
+            // one for a table the catalog does not hold, since a store records a sequence whether or
+            // not the table it belongs to was captured with it.
+            [EObjectKind.Sequence] = sequences.Count(sequence => !sequence.IsIdentity)
+                + tables.Sum(table => table.Columns.Count(column => !string.IsNullOrWhiteSpace(column.Identity))),
             [EObjectKind.Function] = routines.Count(r => r.Kind != EObjectKind.Procedure),
             [EObjectKind.Procedure] = routines.Count(r => r.Kind == EObjectKind.Procedure),
         };

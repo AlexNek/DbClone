@@ -84,6 +84,12 @@ public sealed record SequenceDefinition : ISchemaObject
     /// <summary>Gets or sets whether the sequence cycles.</summary>
     public bool Cycle { get; init; }
 
+    /// <summary>
+    /// Gets or sets whether the sequence backs an identity column, which creates it — a restore
+    /// leaves such a sequence to its column instead of creating it on its own.
+    /// </summary>
+    public bool IsIdentity { get; init; }
+
     /// <summary>Gets or sets the current value (captured state).</summary>
     public long? CurrentValue { get; init; }
 

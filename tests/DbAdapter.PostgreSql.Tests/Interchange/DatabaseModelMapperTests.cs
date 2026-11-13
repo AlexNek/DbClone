@@ -329,6 +329,7 @@ public class DatabaseModelMapperTests
         sequence.Increment.Should().Be(1);
         sequence.Cache.Should().Be(1);
         sequence.Cycle.Should().BeFalse();
+        sequence.IsIdentity.Should().BeFalse();
         sequence.CurrentValue.Should().BeNull();
     }
 
@@ -624,7 +625,7 @@ public class DatabaseModelMapperTests
     }
 
     [Fact]
-    public void Map_OwnedSequence_RecordsThatTheFormatCannotCarryTheOwnershipLink()
+    public void Map_IdentitySequence_IsMarkedSoTheRestoreLeavesItToItsColumn()
     {
         var model = InterchangeTestModel.Empty() with
         {
@@ -649,8 +650,43 @@ public class DatabaseModelMapperTests
 
         var sequence = Mapper.Map(model).Sequences.Single();
 
+        // The flag is what keeps the restore from creating the sequence a second time: the column
+        // that declares the identity creates it, and nothing is lost by not doing it here.
+        sequence.IsIdentity.Should().BeTrue();
+        sequence.Notes.Should().Contain(n => n.Code == "SequenceCreatedByIdentityColumn");
+        sequence.Notes.Should().NotContain(n => n.Code == "SequenceOwnershipNotCaptured");
+        sequence.Notes.Should().Contain(n => n.Code == "SequenceStateNotCaptured");
+    }
+
+    [Fact]
+    public void Map_SequenceASerialColumnDrawsFrom_RecordsThatTheFormatCannotCarryTheOwnershipLink()
+    {
+        var model = InterchangeTestModel.Empty() with
+        {
+            Sequences =
+            [
+                new Models.SequenceDefinition(
+                    "public",
+                    "orders_id_seq",
+                    1,
+                    1,
+                    null,
+                    null,
+                    1,
+                    false,
+                    "bigint",
+                    null,
+                    OwnerTable: "public.orders",
+                    OwnerColumn: "id",
+                    IsIdentity: false),
+            ],
+        };
+
+        var sequence = Mapper.Map(model).Sequences.Single();
+
         // The restore recreates this sequence standalone, so the catalog has to say that the link it
         // is losing was there — otherwise the import looks faithful and is not.
+        sequence.IsIdentity.Should().BeFalse();
         sequence.Notes.Should().Contain(n => n.Code == "SequenceOwnershipNotCaptured");
         sequence.Notes.Should().Contain(n => n.Code == "SequenceStateNotCaptured");
     }

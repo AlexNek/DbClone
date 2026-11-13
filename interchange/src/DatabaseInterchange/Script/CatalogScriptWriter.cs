@@ -158,6 +158,7 @@ internal sealed class CatalogScriptWriter
 
             var steps = SchemaStagePlan.Build(
                 catalog.Schemas,
+                catalog.Extensions,
                 catalog.Sequences,
                 catalog.Tables,
                 catalog.Routines,
@@ -1029,9 +1030,12 @@ internal sealed class CatalogScriptWriter
             "-- A view whose column list changed fails with the server's own message naming it.",
             $"-- Foreign keys are added NOT VALID and validated at the end of {validation}.",
             "-- No role, grant, policy or ownership is written.",
-            "-- An extension is not written: the catalog records one but no stage creates it.",
+            "-- An extension is installed by its name and the schema it was found in; the version the",
+            "-- source carried is not pinned.",
             "-- A sequence keeps the position its own declaration gives it: a catalog records no",
-            "-- current value.");
+            "-- current value.",
+            "-- A sequence an identity column created is not written: the column's declaration",
+            "-- creates it, and writing it here as well would leave a second, unused sequence behind.");
         file.Comment(string.Empty);
     }
 
@@ -1234,6 +1238,7 @@ internal sealed class CatalogScriptWriter
         CancellationToken ct)
     {
         var schemas = await reader.ReadSectionAsync<SchemaDefinition>("schemas", ct);
+        var extensions = await reader.ReadSectionAsync<ExtensionDefinition>("extensions", ct);
         var sequences = await reader.ReadSectionAsync<SequenceDefinition>("sequences", ct);
         var tables = await reader.ReadSectionAsync<TableDefinition>("tables", ct);
         var routines = await reader.ReadSectionAsync<RoutineDefinition>("routines", ct);
@@ -1249,6 +1254,7 @@ internal sealed class CatalogScriptWriter
         // schema.sql instead (D2).
         return new CatalogContent(
             schemas,
+            extensions,
             sequences,
             tables,
             routines,
@@ -1526,6 +1532,7 @@ internal sealed class CatalogScriptWriter
     /// <summary>What the pass reads out of the catalog, before any text is produced.</summary>
     private sealed record CatalogContent(
         IReadOnlyList<SchemaDefinition> Schemas,
+        IReadOnlyList<ExtensionDefinition> Extensions,
         IReadOnlyList<SequenceDefinition> Sequences,
         IReadOnlyList<TableDefinition> Tables,
         IReadOnlyList<RoutineDefinition> Routines,

@@ -176,6 +176,52 @@ public class PostgreSqlWriterTests
     }
 
     [Fact]
+    public void BuildStatements_Extensions_InstallsEachRecordedExtensionInItsOwnSchema()
+    {
+        // An extension is installed before the index that names its operator class, so the statement is
+        // built from the extension's own fields: its name, and the schema the capture found it in.
+        var objects = new ISchemaObject[]
+        {
+            new ExtensionDefinition { Ref = ObjectRef.Extension("pg_trgm"), Name = "pg_trgm", Schema = "public" },
+            new ExtensionDefinition
+            {
+                Ref = ObjectRef.Extension("uuid-ossp"), Name = "uuid-ossp", Schema = "Sales Report",
+            },
+        };
+
+        PostgreSqlWriter.BuildStatements("postgresql", SchemaStage.Extensions, objects)
+            .Should()
+            .Equal(
+                "CREATE EXTENSION IF NOT EXISTS pg_trgm SCHEMA public;",
+                "CREATE EXTENSION IF NOT EXISTS \"uuid-ossp\" SCHEMA \"Sales Report\";");
+    }
+
+    [Fact]
+    public void BuildStatements_Extensions_GivenOneTheServerBootstrapped_InstallsNothingForIt()
+    {
+        // plpgsql is in every database the server bootstrapped, installed into a schema no restore may
+        // create — so a catalog that records it describes a presence rather than asking for one.
+        var objects = new ISchemaObject[]
+        {
+            new ExtensionDefinition { Ref = ObjectRef.Extension("plpgsql"), Name = "plpgsql", Schema = "pg_catalog" },
+        };
+
+        PostgreSqlWriter.BuildStatements("postgresql", SchemaStage.Extensions, objects).Should().BeEmpty();
+    }
+
+    [Fact]
+    public void BuildStatements_Extensions_GivenAnotherKindOfObject_IsRefused()
+    {
+        var act = () =>
+            PostgreSqlWriter.BuildStatements("postgresql",
+                SchemaStage.Extensions,
+                [new SchemaDefinition { Name = "sales" }]);
+
+        act.Should().Throw<ArgumentException>().Which.Message
+            .Should().Contain("ExtensionDefinition");
+    }
+
+    [Fact]
     public async Task BuildStatements_Types_RunsEachRecordedStatementAndOrdersByKind()
     {
         await using var writer = CreateWriter();
@@ -303,6 +349,26 @@ public class PostgreSqlWriterTests
             new SequenceDefinition { Name = "order_seq", SchemaRef = SalesSchemaRef },
         };
 
+        PostgreSqlWriter.BuildStatements("postgresql", SchemaStage.Sequences, objects)
+            .Should()
+            .Equal(
+                "CREATE SEQUENCE sales.order_seq AS bigint INCREMENT BY 1 START WITH 1 "
+                + "NO MINVALUE NO MAXVALUE CACHE 1;");
+    }
+
+    [Fact]
+    public async Task BuildStatements_IdentitySequence_IsLeftToTheColumnThatCreatesIt()
+    {
+        await using var writer = CreateWriter();
+        var objects = new ISchemaObject[]
+        {
+            new SequenceDefinition { Name = "orders_Id_seq", SchemaRef = SalesSchemaRef, IsIdentity = true },
+            new SequenceDefinition { Name = "order_seq", SchemaRef = SalesSchemaRef },
+        };
+
+        // One statement for the sequence a default names, none for the identity's: the column's
+        // GENERATED clause creates that one, and creating it twice would leave the target with an
+        // orphan beside the sequence the column actually draws from.
         PostgreSqlWriter.BuildStatements("postgresql", SchemaStage.Sequences, objects)
             .Should()
             .Equal(

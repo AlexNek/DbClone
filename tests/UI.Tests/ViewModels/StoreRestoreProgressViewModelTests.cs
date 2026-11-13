@@ -116,6 +116,51 @@ public sealed class StoreRestoreProgressViewModelTests
         property.SetMethod!.IsPublic.Should().BeTrue();
     }
 
+    [Fact]
+    public void Finish_ends_the_card_on_a_failure_and_keeps_the_reason_on_it()
+    {
+        // Arrange — a run that failed before its first stage: "Starting" is the only report it sent.
+        var state = new WorkflowState();
+        var sut = new StoreRestoreProgressViewModel(state);
+        sut.Report(Progress(stage: "Starting", percentage: 0));
+
+        // Act — the outcome the workflow states for the same run.
+        sut.Finish("Failed", "Restore failed: the catalog cannot be read");
+
+        // Assert — the card says how the run ended and why, instead of standing at "Starting" for good
+        // while the reason lives only in a banner the reader can close.
+        sut.CurrentPhase.Should().Be("Failed");
+        state.StatusMessage.Should().Be("Restore failed: the catalog cannot be read");
+    }
+
+    [Fact]
+    public void Finish_states_the_ending_it_is_handed_instead_of_collapsing_every_other_one_into_a_failure()
+    {
+        // Arrange — one card per ending a store or a restore can reach. A refusal is not a failure: the
+        // target held objects, so the run stopped and nothing was wrong with it.
+        var completedState = new WorkflowState();
+        var completed = new StoreRestoreProgressViewModel(completedState);
+
+        var cancelledState = new WorkflowState();
+        var cancelled = new StoreRestoreProgressViewModel(cancelledState);
+
+        var refusedState = new WorkflowState();
+        var refused = new StoreRestoreProgressViewModel(refusedState);
+
+        // Act
+        completed.Finish("Complete", "Store succeeded");
+        cancelled.Finish("Cancelled", "Restore cancelled after 3 objects");
+        refused.Finish("Refused", "Restore refused — target database not empty");
+
+        // Assert
+        completed.CurrentPhase.Should().Be("Complete");
+        completedState.StatusMessage.Should().Be("Store succeeded");
+        cancelled.CurrentPhase.Should().Be("Cancelled");
+        cancelledState.StatusMessage.Should().Be("Restore cancelled after 3 objects");
+        refused.CurrentPhase.Should().Be("Refused");
+        refusedState.StatusMessage.Should().Be("Restore refused — target database not empty");
+    }
+
     private static InterchangeProgressView Progress(
         string stage,
         int percentage,

@@ -545,6 +545,12 @@ internal sealed class DatabaseModelMapper
                         MaxValue = s.MaxValue,
                         Cache = s.CacheSize,
                         Cycle = s.IsCycled,
+
+                        // The one fact about ownership the restore acts on: a sequence an identity
+                        // column created belongs to the column, which creates it again when the table
+                        // is created. Without it the restore would create the sequence itself and the
+                        // column would make a second one under a name the server picks.
+                        IsIdentity = s.IsIdentity,
                         Notes = SequenceNotes(s, seqRef),
                     };
                 }),
@@ -569,11 +575,26 @@ internal sealed class DatabaseModelMapper
                 seqRef),
         };
 
-        if (sequence.IsOwned)
+        if (sequence.IsIdentity)
         {
-            // The format has no field for the owning column, so a restore recreates this sequence
-            // standalone — it exists, but no column draws from it and nothing marks it as the
-            // sequence behind an identity. Naming the loss keeps the catalog honest about that.
+            // An identity's sequence is not restored as an object of its own: the column that declares
+            // the identity creates it, exactly as the copy pipeline has always required. Nothing is
+            // lost by that — the catalog carries the declaration so the restore can tell this sequence
+            // apart from one a default names.
+            notes.Add(new InterchangeIssue(
+                "SequenceCreatedByIdentityColumn",
+                EIssueSeverity.Info,
+                $"Sequence {sequence.SchemaName}.{sequence.Name} backs the identity column "
+                + $"{sequence.OwnerTable}.{sequence.OwnerColumn}, so the restore does not create it: "
+                + "the column that declares the identity creates it.",
+                seqRef));
+        }
+        else if (sequence.IsOwned)
+        {
+            // A serial column's sequence is drawn from by name in its DEFAULT, so the restore has to
+            // create it before the table, on its own. The format has no field for the owning column,
+            // so nothing marks the sequence as that column's afterwards. Naming the loss keeps the
+            // catalog honest about that.
             notes.Add(new InterchangeIssue(
                 "SequenceOwnershipNotCaptured",
                 EIssueSeverity.Warning,

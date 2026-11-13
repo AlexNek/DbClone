@@ -1,4 +1,5 @@
 using DbClone.Application.Relationship;
+using DbClone.UI.Threading;
 using DbClone.UI.Views;
 
 using Microsoft.Extensions.Logging;
@@ -50,12 +51,8 @@ internal sealed class WebViewRelationshipPresenter : IInAppRelationshipPresenter
 
         try
         {
-            var dispatcher = System.Windows.Application.Current?.Dispatcher
-                ?? throw new InvalidOperationException("The application is shutting down, so no window can be shown.");
-
-            await dispatcher
+            await UiDispatcher
                 .InvokeAsync(() => PresentOnUiThreadAsync(document, refresh, redraw, ct))
-                .Task.Unwrap()
                 .ConfigureAwait(false);
         }
         catch (OperationCanceledException)

@@ -75,9 +75,12 @@ public sealed class SnapshotImporterTests : IDisposable
         // Assert
         // SchemaStage's order is a dependency order: routines come before views because a view may
         // call a function, and the constraints come after every table because a foreign key points
-        // between tables that all have to exist first.
+        // between tables that all have to exist first. An extension is installed after the schemas
+        // because it is installed into one, and before everything else because the objects that
+        // follow may name what it provides — the operator class of an index, for one.
         writer.Stages.Should().Equal(
             SchemaStage.Schemas,
+            SchemaStage.Extensions,
             SchemaStage.Types,
             SchemaStage.Sequences,
             SchemaStage.Tables,
@@ -99,6 +102,10 @@ public sealed class SnapshotImporterTests : IDisposable
         // A trigger needs nothing from its siblings once its table can be named, so the trigger objects
         // themselves are what travel to their stage.
         writer.Objects[SchemaStage.Triggers].Single().Should().BeAssignableTo<TriggerDefinition>();
+
+        // The extension of the catalog's own section travels to the stage that installs it, which is the
+        // stage that has to run before anything names what the extension provides.
+        writer.Objects[SchemaStage.Extensions].Single().Should().BeAssignableTo<ExtensionDefinition>();
 
         // The native file's objects travel to the stage the routing table says creates their kind, and
         // only there: one of these objects is a type and one is not, so the two part company instead of
@@ -281,6 +288,134 @@ public sealed class SnapshotImporterTests : IDisposable
     }
 
     [Fact]
+    public async Task ImportAsync_ExpectationCountsAnIdentitySequencesAtTheColumnThatCreatesIt()
+    {
+        // Arrange
+        await WriteCatalogWithIdentityColumn();
+        var writer = new RecordingWriter();
+
+        // Act
+        await Import(writer);
+
+        // Assert
+        // One sequence the restore writes itself, and one the identity column creates. The catalog's
+        // own record of the identity's sequence adds nothing to the total, and a recorded sequence
+        // whose table the catalog does not hold expects nothing on the target: both of those describe
+        // the column, and counting them again would report a difference the restore does not have.
+        writer.Expectation.Should().NotBeNull();
+        writer.Expectation!.ObjectCounts[EObjectKind.Sequence].Should().Be(2);
+    }
+
+    [Fact]
+    public async Task ImportAsync_StageThatFails_IsReportedAndTheLaterStagesStillRun()
+    {
+        // Arrange — the target refuses the step that creates the indexes, which is one part of the
+        // structure and no fact at all about the steps that follow it.
+        await WriteCatalog();
+        var writer = new RecordingWriter();
+        writer.FailingStages.Add(SchemaStage.Indexes);
+
+        // Act
+        var result = await Import(writer);
+
+        // Assert — the walk went on past the failure, and the failure itself is what the user reads.
+        writer.Stages.Should().Contain(SchemaStage.Triggers, "the steps after the failed one still run");
+        result.Success.Should().BeTrue("everything the other steps create still landed");
+
+        // The skipped figure counts the objects the restore applies and reports, and keys and indexes
+        // are not among them: an index the target refused is not a table it never created. The loss is
+        // still stated — in the tables the step was handed, not in a figure that belongs to no object.
+        result.ObjectsSkipped.Should().Be(0);
+
+        var issue = result.Issues.Should()
+            .ContainSingle(i => i.Code == "RestoreStageFailed").Which;
+        issue.Severity.Should().Be(EIssueSeverity.Error);
+        issue.Message.Should().Contain("indexes").And.Contain("refused");
+        issue.Message.Should().Contain($"over {writer.Objects[SchemaStage.Indexes].Count} table(s)");
+    }
+
+    [Fact]
+    public async Task ImportAsync_StageOfCountedObjectsFails_ReportsTheCountItCost()
+    {
+        // Arrange — the target refuses the step that creates the sequences, which the restore's own
+        // count of applied objects does include.
+        await WriteCatalog();
+        var writer = new RecordingWriter();
+        writer.FailingStages.Add(SchemaStage.Sequences);
+
+        // Act
+        var result = await Import(writer);
+
+        // Assert — the one sequence this catalog holds is reported as missing instead of counted as
+        // applied, and the run is still a completed restore rather than a failure.
+        result.Success.Should().BeTrue();
+        result.ObjectsSkipped.Should().Be(1);
+
+        var issue = result.Issues.Should()
+            .ContainSingle(i => i.Code == "RestoreStageFailed").Which;
+        issue.Message.Should().Contain("sequences").And.Contain("1 object(s)");
+    }
+
+    [Fact]
+    public async Task ImportAsync_TableWhoseRowsAreRefused_IsReportedAndTheCheckStillRuns()
+    {
+        // Arrange — the target refuses the rows of the one table the catalog holds data for.
+        await WriteCatalogWithData();
+        var writer = new RecordingWriter();
+        writer.FailingTables.Add(new TableRef("public", "customers"));
+
+        // Act
+        var result = await Import(writer);
+
+        // Assert — the failure belongs to that table alone: the restore completes, states that none of
+        // its rows arrived, and the check after the data runs all the same.
+        result.Success.Should().BeTrue();
+        result.RowsImported.Should().Be(0);
+        result.Issues.Should()
+            .ContainSingle(i => i.Code == "RestoreTableDataFailed")
+            .Which.Message.Should().Contain("public.customers");
+        writer.Expectation.Should().NotBeNull("the check after the data still runs");
+    }
+
+    [Fact]
+    public async Task ImportAsync_TablesStepFails_RowsAreNotAttemptedAndTheRestoreIsReportedAsFailed()
+    {
+        // Arrange — the step that creates the tables is the one nothing else can be built on.
+        await WriteCatalogWithData();
+        var writer = new RecordingWriter();
+        writer.FailingStages.Add(SchemaStage.Tables);
+
+        // Act
+        var result = await Import(writer);
+
+        // Assert — no table means no place for a row, said once instead of once per table, and the run
+        // is a failed restore rather than a completed one with a note.
+        writer.RowTargets.Should().BeEmpty();
+        result.Success.Should().BeFalse("nothing can be built on a table that was not created");
+        result.Issues.Select(issued => issued.Code)
+            .Should().Contain("RestoreStageFailed").And.Contain("RestoreDataNotWritten");
+    }
+
+    [Fact]
+    public async Task ImportAsync_CheckAfterTheDataFails_IsReportedWithoutReplacingTheRestore()
+    {
+        // Arrange — everything lands and the check on it cannot read the target.
+        await WriteCatalogWithData();
+        var writer = new RecordingWriter { ValidationFails = true };
+
+        // Act
+        var result = await Import(writer);
+
+        // Assert — a restore is not undone by its own check: it completes, no report is invented, and
+        // the user is told that the check did not run.
+        result.Success.Should().BeTrue();
+        result.ValidationReport.Should().BeNull();
+        result.Issues.Should()
+            .ContainSingle(i => i.Code == "RestoreValidationNotRun")
+            .Which.Severity.Should().Be(EIssueSeverity.Warning);
+    }
+
+    [Fact]
     public async Task ImportAsync_ExpectationNamesEverySchemaTheCatalogRecords()
     {
         // Arrange
@@ -408,6 +543,17 @@ public sealed class SnapshotImporterTests : IDisposable
             sourceDialect: "postgresql");
 
         await catalog.WriteSectionAsync("schemas", schemas);
+
+        // An extension is captured in a section of its own rather than in the native file: the export
+        // records its name, schema and version, and the restore installs it before anything names what
+        // it provides.
+        await catalog.WriteSectionAsync(
+            "extensions",
+            new List<ExtensionDefinition>
+            {
+                new() { Ref = ObjectRef.Extension("pg_trgm"), Name = "pg_trgm", Schema = "public" },
+            });
+
         await catalog.WriteSectionAsync("tables", tables);
         await catalog.WriteSectionAsync("sequences", sequences);
         await catalog.WriteNativeObjectsAsync(
@@ -420,6 +566,69 @@ public sealed class SnapshotImporterTests : IDisposable
         Func<IReadOnlyList<NativeObjectDefinition>, IReadOnlyList<NativeObjectDefinition>>? nativeOverride =
             null) =>
         WriteCatalog(_catalogPath, schemalessTable, nativeOverride);
+
+    /// <summary>
+    /// A catalog that holds an identity column, the sequence that column created, a sequence the
+    /// restore writes itself, and a sequence whose table the catalog does not hold at all — the four
+    /// facts a count of applied sequences has to tell apart.
+    /// </summary>
+    private async Task WriteCatalogWithIdentityColumn()
+    {
+        var customers = new TableDefinition
+        {
+            Ref = CustomersRef,
+            Name = "customers",
+            SchemaRef = PublicRef,
+            Columns =
+            [
+                new ColumnDefinition
+                {
+                    Ref = ObjectRef.Column("public", "customers", "id"),
+                    Name = "id",
+                    TableRef = CustomersRef,
+                    Ordinal = 1,
+                    NativeType = new NativeType("integer"),
+                    Identity = "yes",
+                },
+            ],
+        };
+
+        var sequences = new List<SequenceDefinition>
+        {
+            new()
+            {
+                Ref = ObjectRef.Sequence("public", "customers_Id_seq"),
+                Name = "customers_Id_seq",
+                SchemaRef = PublicRef,
+                IsIdentity = true,
+            },
+            new()
+            {
+                Ref = ObjectRef.Sequence("public", "audit_seq"),
+                Name = "audit_seq",
+                SchemaRef = PublicRef,
+            },
+            new()
+            {
+                Ref = ObjectRef.Sequence("public", "dropped_Id_seq"),
+                Name = "dropped_Id_seq",
+                SchemaRef = PublicRef,
+                IsIdentity = true,
+            },
+        };
+
+        await using var catalog = await CatalogWriter.CreateAsync(
+            _catalogPath,
+            producer: "DbClone-test",
+            sourceDialect: "postgresql");
+
+        await catalog.WriteSectionAsync(
+            "schemas",
+            new List<SchemaDefinition> { new() { Ref = PublicRef, Name = "public" } });
+        await catalog.WriteSectionAsync("tables", new List<TableDefinition> { customers });
+        await catalog.WriteSectionAsync("sequences", sequences);
+        await catalog.CompleteAsync();
+    }
 
     /// <summary>
     /// A catalog that holds a table with two columns and two rows of data, which is what lets a test
@@ -616,6 +825,18 @@ public sealed class SnapshotImporterTests : IDisposable
 
         public TargetExpectation? Expectation { get; private set; }
 
+        /// <summary>
+        /// The stages this double refuses, so a test can watch what one failure costs the rest of the
+        /// restore rather than only what the successful walk looks like.
+        /// </summary>
+        public HashSet<SchemaStage> FailingStages { get; } = [];
+
+        /// <summary>The tables whose rows this double refuses instead of writing them.</summary>
+        public HashSet<TableRef> FailingTables { get; } = [];
+
+        /// <summary>Whether the check after the data fails instead of answering.</summary>
+        public bool ValidationFails { get; set; }
+
         public IDatabaseAdapter Adapter { get; } = Substitute.For<IDatabaseAdapter>();
 
         public ICapabilityDetector CapabilityDetector => null!;
@@ -630,6 +851,11 @@ public sealed class SnapshotImporterTests : IDisposable
             Stages.Add(stage);
             Objects[stage] = objects;
 
+            if (FailingStages.Contains(stage))
+            {
+                throw new InvalidOperationException($"the {stage} stage was refused by the target");
+            }
+
             return Task.CompletedTask;
         }
 
@@ -641,6 +867,11 @@ public sealed class SnapshotImporterTests : IDisposable
         {
             RowTargets.Add(table);
             RowColumns[table] = columns;
+
+            if (FailingTables.Contains(table))
+            {
+                throw new InvalidOperationException($"the rows of {table} were refused by the target");
+            }
 
             // The rows are counted as they pass, the way a writer must count them to report what it
             // applied. What the test reads afterwards is the importer's accumulation of those counts.
@@ -665,6 +896,11 @@ public sealed class SnapshotImporterTests : IDisposable
             CancellationToken ct)
         {
             Expectation = expectation;
+
+            if (ValidationFails)
+            {
+                throw new InvalidOperationException("the check could not read the target");
+            }
 
             return Task.FromResult(new ImportValidationReport());
         }

@@ -73,8 +73,10 @@ public sealed class StoreWorkflowService : IWorkflowService<StoreRequest, StoreR
         {
             EStoreOutcome.Success => $"Store succeeded: {result.TablesExported} tables, {result.RowsExported:N0} rows{summary}",
             EStoreOutcome.CompletedWithIssues => $"Store completed with issues: {result.TablesExported} tables{summary}",
-            EStoreOutcome.Incomplete => "Store incomplete — catalog not usable",
-            EStoreOutcome.Failed => "Store failed",
+            EStoreOutcome.Incomplete => IssueSummary.ForOutcome(
+                "Store incomplete — catalog not usable",
+                result.Issues),
+            EStoreOutcome.Failed => IssueSummary.ForOutcome("Store failed", result.Issues),
             _ => "Unknown outcome"
         };
     }

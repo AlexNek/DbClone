@@ -168,7 +168,7 @@ public sealed class RestoreWorkflowService : IWorkflowService<RestoreRequest, Re
         ERestoreOutcome.CompletedWithIssues => $"Restore completed with issues: {result.ObjectsApplied} objects",
         ERestoreOutcome.Cancelled => $"Restore cancelled after {result.ObjectsApplied} objects",
         ERestoreOutcome.Refused => "Restore refused — target database not empty",
-        ERestoreOutcome.Failed => $"Restore failed: {result.Issues.Count} issue(s)",
+        ERestoreOutcome.Failed => IssueSummary.ForOutcome("Restore failed", result.Issues),
         _ => "Restore outcome unavailable"
     };
 }

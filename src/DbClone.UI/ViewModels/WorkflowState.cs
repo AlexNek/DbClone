@@ -3,6 +3,7 @@ using System.Collections.ObjectModel;
 using CommunityToolkit.Mvvm.ComponentModel;
 
 using DbClone.UI.Models;
+using DbClone.UI.Threading;
 
 using Wpf.Ui.Controls;
 using CanonicalModel.Enums;
@@ -92,23 +93,32 @@ public sealed partial class WorkflowState : ObservableObject
 
     /// <summary>Adds a timestamped informational entry.</summary>
     public void Log(string message) =>
-        LogMessages.Add(new LogEntry(ELogLevel.Info, message, DateTime.Now));
+        Append(new LogEntry(ELogLevel.Info, message, DateTime.Now));
 
     /// <summary>Adds an untimestamped continuation line belonging to the previous entry.</summary>
     public void LogDetail(string message, ELogLevel level = ELogLevel.Info) =>
-        LogMessages.Add(new LogEntry(level, $"        {message}"));
+        Append(new LogEntry(level, $"        {message}"));
 
     /// <summary>Adds a timestamped error entry.</summary>
     public void LogError(string message) =>
-        LogMessages.Add(new LogEntry(ELogLevel.Error, message, DateTime.Now));
+        Append(new LogEntry(ELogLevel.Error, message, DateTime.Now));
 
     /// <summary>Adds a timestamped hint entry (explanatory info about behavior/configuration).</summary>
     public void LogHint(string message) =>
-        LogMessages.Add(new LogEntry(ELogLevel.Hint, message, DateTime.Now));
+        Append(new LogEntry(ELogLevel.Hint, message, DateTime.Now));
 
     /// <summary>Adds a timestamped warning entry.</summary>
     public void LogWarning(string message) =>
-        LogMessages.Add(new LogEntry(ELogLevel.Warning, message, DateTime.Now));
+        Append(new LogEntry(ELogLevel.Warning, message, DateTime.Now));
+
+    /// <summary>Adds one entry to <see cref="LogMessages"/> on the thread that owns its view.</summary>
+    /// <remarks>
+    /// The pane shows this collection through a <c>CollectionView</c>, and WPF refuses a source change
+    /// from another thread. A run reports from wherever its work finished — a step that does file work
+    /// awaits without the caller's context to keep that work off the UI thread — so the entry is
+    /// marshalled rather than every caller being trusted to be on the dispatcher.
+    /// </remarks>
+    private void Append(LogEntry entry) => UiDispatcher.Invoke(() => LogMessages.Add(entry));
 
     /// <summary>Shows the main-window notification banner (e.g. connection test result).</summary>
     public void ShowBanner(string title, string message, InfoBarSeverity severity)

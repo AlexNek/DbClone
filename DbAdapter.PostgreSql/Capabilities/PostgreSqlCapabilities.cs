@@ -74,6 +74,7 @@ public sealed class PostgreSqlCapabilities : IDatabaseCapabilities
     public IReadOnlyList<SchemaStage> SupportedSchemaStages =>
     [
         SchemaStage.Schemas,
+        SchemaStage.Extensions,
         SchemaStage.Types,
         SchemaStage.Sequences,
         SchemaStage.Tables,
