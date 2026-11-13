@@ -82,7 +82,7 @@
                     <Style TargetType="ui:InfoBar">
                         <Setter Property="DataContext" Value="{Binding DataContext.ActiveState, RelativeSource={RelativeSource AncestorType=Window}}" />
                         <Style.Triggers>
-                            <DataTrigger Binding="{Binding DataContext.IsStoreRunning, RelativeSource={RelativeSource AncestorType=Window}}" Value="True">
+                            <DataTrigger Binding="{Binding DataContext.IsStoreRestoreDisplayed, RelativeSource={RelativeSource AncestorType=Window}}" Value="True">
                                 <Setter Property="DataContext" Value="{Binding DataContext.StoreRestoreState, RelativeSource={RelativeSource AncestorType=Window}}" />
                             </DataTrigger>
                         </Style.Triggers>
@@ -329,7 +329,7 @@
                         </StackPanel>
                     </Grid>
 
-                    <!--  Progress (DataContext switches by mode; StoreRestore takes priority when running)  -->
+                    <!--  Progress (DataContext switches by mode; StoreRestore takes priority while its state owns the display)  -->
                     <views:ProgressView Grid.Row="2">
                         <views:ProgressView.Style>
                             <Style TargetType="views:ProgressView">
@@ -338,8 +338,8 @@
                                     <DataTrigger Binding="{Binding DataContext.Toolbar.SelectedMode, RelativeSource={RelativeSource AncestorType=Window}}" Value="Compare">
                                         <Setter Property="DataContext" Value="{Binding DataContext.Compare, RelativeSource={RelativeSource AncestorType=Window}}" />
                                     </DataTrigger>
-                                    <DataTrigger Binding="{Binding DataContext.IsStoreRunning, RelativeSource={RelativeSource AncestorType=Window}}" Value="True">
-                                        <Setter Property="DataContext" Value="{Binding DataContext.StoreRestoreState, RelativeSource={RelativeSource AncestorType=Window}}" />
+                                    <DataTrigger Binding="{Binding DataContext.IsStoreRestoreDisplayed, RelativeSource={RelativeSource AncestorType=Window}}" Value="True">
+                                        <Setter Property="DataContext" Value="{Binding DataContext.StoreRestoreProgress, RelativeSource={RelativeSource AncestorType=Window}}" />
                                     </DataTrigger>
                                 </Style.Triggers>
                             </Style>
@@ -388,7 +388,7 @@
                         <Setter Property="Visibility" Value="Collapsed" />
                         <Style.Triggers>
                             <!--  Visible when the active workflow's log pane is expanded  -->
-                            <DataTrigger Binding="{Binding DataContext.ActiveState.IsLogPaneExpanded, RelativeSource={RelativeSource AncestorType=Window}}" Value="True">
+                            <DataTrigger Binding="{Binding DataContext.Log.ActiveState.IsLogPaneExpanded, RelativeSource={RelativeSource AncestorType=Window}}" Value="True">
                                 <Setter Property="Visibility" Value="Visible" />
                             </DataTrigger>
                         </Style.Triggers>
@@ -414,7 +414,7 @@
                         <Setter Property="Visibility" Value="Visible" />
                         <Style.Triggers>
                             <!--  Hidden when the active workflow's log pane is expanded  -->
-                            <DataTrigger Binding="{Binding DataContext.ActiveState.IsLogPaneExpanded, RelativeSource={RelativeSource AncestorType=Window}}" Value="True">
+                            <DataTrigger Binding="{Binding DataContext.Log.ActiveState.IsLogPaneExpanded, RelativeSource={RelativeSource AncestorType=Window}}" Value="True">
                                 <Setter Property="Visibility" Value="Collapsed" />
                             </DataTrigger>
                         </Style.Triggers>

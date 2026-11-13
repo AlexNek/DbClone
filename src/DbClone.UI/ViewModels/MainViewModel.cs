@@ -8,6 +8,7 @@ using DbClone.Application.Comparison;
 using DbClone.Application.Copy;
 using DbClone.Application.Enums;
 using DbClone.Application.Interfaces;
+using DbClone.Application.Interchange;
 using DbClone.Application.Relationship;
 using DbClone.UI.Models;
 using DbClone.UI.Services;
@@ -64,6 +65,7 @@ public sealed partial class MainViewModel : ObservableObject
     private readonly ICatalogPathResolver _storePathResolver;
     private readonly IDialogService _storeDialogService;
     private readonly IRelationshipViewHandler _relationshipView;
+    private readonly ViewModelStateManager _stateManager;
     private CancellationTokenSource? _storeCts;
 
     /// <summary>The three workflow components behind their common contract.</summary>
@@ -110,8 +112,19 @@ public sealed partial class MainViewModel : ObservableObject
     /// <summary>Store/Restore workflow state for XAML bindings (banner, objects strip, status bar).</summary>
     public WorkflowState StoreRestoreState { get; } = new();
 
+    /// <summary>Store/Restore progress for XAML bindings — the shared progress card binds to it.</summary>
+    public StoreRestoreProgressViewModel StoreRestoreProgress { get; }
+
     [ObservableProperty]
     private bool _isStoreRunning;
+
+    /// <summary>
+    /// Whether the store/restore state owns the progress card, the banner, the status bar and the
+    /// log pane. Set when a run starts and cleared when another workflow starts or the connection
+    /// changes, so a finished run's outcome stays on screen until something replaces it.
+    /// </summary>
+    [ObservableProperty]
+    private bool _isStoreRestoreDisplayed;
 
     [ObservableProperty]
     private bool _isStorePaused;
@@ -208,6 +221,11 @@ public sealed partial class MainViewModel : ObservableObject
 
         // State manager for operation lifecycle
         var stateManager = new ViewModelStateManager();
+        _stateManager = stateManager;
+
+        // The progress card binds one shape for every workflow; store/restore answers it from
+        // the product's own reports while its own state keeps the log and the banner.
+        StoreRestoreProgress = new StoreRestoreProgressViewModel(StoreRestoreState);
 
         // Create child ViewModels (Copy/Compare first — Log needs their WorkflowState)
         Compare = new CompareViewModel(
@@ -270,11 +288,13 @@ public sealed partial class MainViewModel : ObservableObject
                 StoreRestoreState.ElapsedTime = elapsed;
         };
 
-        Log = new LogPaneViewModel(new Dictionary<EWorkspaceMode, WorkflowState>
-        {
-            [EWorkspaceMode.Copy] = Copy.State,
-            [EWorkspaceMode.Compare] = Compare.State
-        });
+        Log = new LogPaneViewModel(
+            new Dictionary<EWorkspaceMode, WorkflowState>
+            {
+                [EWorkspaceMode.Copy] = Copy.State,
+                [EWorkspaceMode.Compare] = Compare.State
+            },
+            StoreRestoreState);
 
         Connections = new ConnectionSectionViewModel(
             connectionGroupStore,
@@ -379,12 +399,18 @@ public sealed partial class MainViewModel : ObservableObject
         Compare.PropertyChanged += (_, e) =>
         {
             if (e.PropertyName == nameof(Compare.IsCompareRunning) && Compare.IsCompareRunning)
+            {
+                IsStoreRestoreDisplayed = false;
                 Toolbar.SelectedMode = EWorkspaceMode.Compare;
+            }
         };
         Copy.PropertyChanged += (_, e) =>
         {
             if (e.PropertyName == nameof(Copy.IsCopyRunning) && Copy.IsCopyRunning)
+            {
+                IsStoreRestoreDisplayed = false;
                 Toolbar.SelectedMode = EWorkspaceMode.Copy;
+            }
         };
 
         settingsPersister.Resume();
@@ -484,7 +510,12 @@ public sealed partial class MainViewModel : ObservableObject
         _storeCts = new CancellationTokenSource();
         Context.IsBusy = true;
         IsStoreRunning = true;
+        IsStoreRestoreDisplayed = true;
         StoreRestoreState.BeginNewRun();
+        StoreRestoreProgress.Reset();
+        _stateManager.BeginOperation();
+
+        var finalState = EOperationState.Completed;
 
         try
         {
@@ -492,15 +523,18 @@ public sealed partial class MainViewModel : ObservableObject
         }
         catch (OperationCanceledException)
         {
+            finalState = EOperationState.Cancelled;
             _resultHandler.HandleCancellation(StoreRestoreState, operationName);
         }
         catch (Exception ex)
         {
+            finalState = EOperationState.Failed;
             _logger.LogError(ex, "{Operation} failed", operationName);
             _resultHandler.HandleError(StoreRestoreState, operationName, ex.Message);
         }
         finally
         {
+            _stateManager.EndOperation(finalState);
             Context.IsBusy = false;
             IsStoreRunning = false;
             IsStorePaused = false;
@@ -508,6 +542,17 @@ public sealed partial class MainViewModel : ObservableObject
             _storeCts = null;
         }
     }
+
+    /// <summary>
+    /// Hands the run's progress to the card while its state owns the display, and puts the log
+    /// pane back on the selected mode's log when it no longer does.
+    /// </summary>
+    partial void OnIsStoreRestoreDisplayedChanged(bool value) =>
+        Log.SetActiveStoreRestore(value);
+
+    /// <summary>Reports one stage or object advance of a running store/restore on the card.</summary>
+    private IProgress<InterchangeProgressView> StoreRestoreReporter() =>
+        new Progress<InterchangeProgressView>(StoreRestoreProgress.Report);
 
     private async Task RunStoreAsync(string catalogPath, CancellationToken ct)
     {
@@ -525,7 +570,8 @@ public sealed partial class MainViewModel : ObservableObject
             TableSelection: _tableSelectionService.OperationSpec,
             IncludeSummaryReport: options.WriteSummaryMarkdown,
             IncludeSqlScripts: options.SqlScripts,
-            SqlScriptsMaxFileMb: options.SqlScriptsMaxFileMb);
+            SqlScriptsMaxFileMb: options.SqlScriptsMaxFileMb,
+            Progress: StoreRestoreReporter());
 
         var result = await _storeWorkflow.ExecuteAsync(request, ct);
         _resultHandler.HandleStoreResult(StoreRestoreState, result);
@@ -545,7 +591,8 @@ public sealed partial class MainViewModel : ObservableObject
         var request = new RestoreRequest(
             Connection: connection,
             CatalogPath: catalogPath,
-            UnsupportedFeaturePolicy: Settings.StoreRestore.UnsupportedFeaturePolicy);
+            UnsupportedFeaturePolicy: Settings.StoreRestore.UnsupportedFeaturePolicy,
+            Progress: StoreRestoreReporter());
 
         var result = await _restoreWorkflow.ExecuteAsync(request, ct);
         _resultHandler.HandleRestoreResult(StoreRestoreState, result);
@@ -591,6 +638,7 @@ public sealed partial class MainViewModel : ObservableObject
             // drop the visible error display (never while an operation is running)
             if (!Context.IsBusy)
             {
+                IsStoreRestoreDisplayed = false;
                 Copy.State.ClearResultDisplay();
                 Compare.State.ClearResultDisplay();
                 StoreRestoreState.ClearResultDisplay();

@@ -10,11 +10,19 @@
         BorderBrush="{ui:ThemeResource ControlStrokeColorDefaultBrush}"
         BorderThickness="0,1,0,0">
         <StatusBarItem>
-            <TextBlock
-                FontSize="12"
-                FontWeight="SemiBold"
-                DataContext="{Binding DataContext.ActiveState, RelativeSource={RelativeSource AncestorType=Window}}"
-                Text="{Binding StatusBarSummary}" />
+            <TextBlock FontSize="12" FontWeight="SemiBold" Text="{Binding StatusBarSummary}">
+                <TextBlock.Style>
+                    <Style TargetType="TextBlock">
+                        <Setter Property="DataContext" Value="{Binding DataContext.ActiveState, RelativeSource={RelativeSource AncestorType=Window}}" />
+                        <Style.Triggers>
+                            <!--  A store/restore that owns the display states its own outcome  -->
+                            <DataTrigger Binding="{Binding DataContext.IsStoreRestoreDisplayed, RelativeSource={RelativeSource AncestorType=Window}}" Value="True">
+                                <Setter Property="DataContext" Value="{Binding DataContext.StoreRestoreState, RelativeSource={RelativeSource AncestorType=Window}}" />
+                            </DataTrigger>
+                        </Style.Triggers>
+                    </Style>
+                </TextBlock.Style>
+            </TextBlock>
         </StatusBarItem>
         <Separator />
         <StatusBarItem>

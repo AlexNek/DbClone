@@ -31,6 +31,8 @@ namespace DbClone.UI;
 
 public partial class App : System.Windows.Application, IDisposable
 {
+    private static bool _unhandledReported;
+
     private bool _disposed;
 
     private IHost? _host;
@@ -87,6 +89,10 @@ public partial class App : System.Windows.Application, IDisposable
             // Set up Serilog BEFORE building the host
             Log.Logger = LoggingConfiguration.CreateLogger();
 
+            // A UI-thread exception nobody caught terminates the process with no window and no log
+            // line, so the app simply vanishes — the crash this handler turns into something findable.
+            DispatcherUnhandledException += (_, args) => ReportUnhandled(args.Exception);
+
             // D10: the fallback's single file never outlives the session that wrote it.
             RelationshipViewFile.TryDelete();
 
@@ -110,12 +116,7 @@ public partial class App : System.Windows.Application, IDisposable
         }
         catch (Exception ex)
         {
-            var crashDir = Path.Combine(
-                Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
-                AppFolder.Name);
-            Directory.CreateDirectory(crashDir);
-            var crashLog = Path.Combine(crashDir, "crash.log");
-            File.WriteAllText(crashLog, $"CRASH at {DateTime.Now:O}\n{ex}");
+            var crashLog = WriteCrashLog(ex, $"CRASH at {DateTime.Now:O}");
 
             var logDir = LoggingConfiguration.GetLogDirectory();
             var msg =
@@ -127,6 +128,35 @@ public partial class App : System.Windows.Application, IDisposable
             MessageBox.Show(msg, "DbClone Crash");
             Shutdown(1);
         }
+    }
+
+    /// <summary>
+    /// Records what killed the process before it dies. The exception is not marked handled: after an
+    /// uncaught exception the UI state is undefined, so the process still ends — but now with a logged
+    /// trace, a readable crash file and one window that says so instead of a silent disappearance.
+    /// </summary>
+    private static void ReportUnhandled(Exception exception)
+    {
+        if (_unhandledReported) return;
+        _unhandledReported = true;
+
+        Log.Error(exception, "Unhandled exception on the UI thread");
+
+        var crashLog = WriteCrashLog(exception, $"CRASH (unhandled) at {DateTime.Now:O}");
+        MessageBox.Show(
+            $"DbClone hit an unexpected error and has to close.\n\n{exception.GetType().Name}: {exception.Message}\n\nCrash details: {crashLog}",
+            "DbClone Crash");
+    }
+
+    private static string WriteCrashLog(Exception exception, string heading)
+    {
+        var crashDir = Path.Combine(
+            Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
+            AppFolder.Name);
+        Directory.CreateDirectory(crashDir);
+        var crashLog = Path.Combine(crashDir, "crash.log");
+        File.WriteAllText(crashLog, $"{heading}\n{exception}");
+        return crashLog;
     }
 
     private static IHost BuildHost(SettingsService settingsService)

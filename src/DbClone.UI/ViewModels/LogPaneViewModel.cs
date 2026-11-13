@@ -17,11 +17,19 @@ namespace DbClone.UI.ViewModels;
 /// Owns log display and commands. Displays the active workflow's log —
 /// switching modes swaps the visible collection and the expansion state
 /// (each workflow keeps its own history and its own pane layout).
+/// Store/Restore is not a mode, so its log takes the pane while that operation owns the
+/// display and the selected mode's log returns when it no longer does.
 /// Exposed as MainViewModel.Log; LogPaneView binds to it.
 /// </summary>
 public sealed partial class LogPaneViewModel : ObservableObject
 {
     private readonly IReadOnlyDictionary<EWorkspaceMode, WorkflowState> _states;
+
+    private readonly WorkflowState? _storeRestoreState;
+
+    private EWorkspaceMode _selectedMode = EWorkspaceMode.Copy;
+
+    private bool _isStoreRestoreActive;
 
     private WorkflowState _activeState;
 
@@ -60,10 +68,12 @@ public sealed partial class LogPaneViewModel : ObservableObject
     public string LogToggleSymbol => IsExpanded ? "▼" : "▶";
 
     public LogPaneViewModel(
-        IReadOnlyDictionary<EWorkspaceMode, WorkflowState> states)
+        IReadOnlyDictionary<EWorkspaceMode, WorkflowState> states,
+        WorkflowState? storeRestoreState = null)
     {
         ArgumentNullException.ThrowIfNull(states);
         _states = states;
+        _storeRestoreState = storeRestoreState;
         _activeState = states[EWorkspaceMode.Copy];
         FilteredLogMessages = BuildFilteredView();
 
@@ -71,12 +81,34 @@ public sealed partial class LogPaneViewModel : ObservableObject
         {
             state.PropertyChanged += OnWorkflowStateChanged;
         }
+
+        if (storeRestoreState is not null)
+            storeRestoreState.PropertyChanged += OnWorkflowStateChanged;
     }
 
     /// <summary>Switches the visible log collection to the given workspace mode.</summary>
     public void SetActiveMode(EWorkspaceMode mode)
     {
-        var target = _states[mode];
+        _selectedMode = mode;
+        if (!_isStoreRestoreActive)
+            SwitchTo(_states[mode]);
+    }
+
+    /// <summary>
+    /// Takes the pane while a store/restore owns the display, and gives it back to the
+    /// selected mode's log when that run no longer owns it.
+    /// </summary>
+    public void SetActiveStoreRestore(bool active)
+    {
+        if (_storeRestoreState is null || _isStoreRestoreActive == active)
+            return;
+
+        _isStoreRestoreActive = active;
+        SwitchTo(active ? _storeRestoreState : _states[_selectedMode]);
+    }
+
+    private void SwitchTo(WorkflowState target)
+    {
         if (ReferenceEquals(_activeState, target)) return;
 
         _activeState = target;

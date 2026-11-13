@@ -47,7 +47,7 @@ public sealed class RestoreWorkflowService : IWorkflowService<RestoreRequest, Re
             Connection: prepared.Connection!,
             UnsupportedFeaturePolicy: request.UnsupportedFeaturePolicy);
 
-        var result = await _interchangeService.RestoreAsync(interchangeRequest, progress: null, ct);
+        var result = await _interchangeService.RestoreAsync(interchangeRequest, request.Progress, ct);
         return MapResult(result);
     }
 

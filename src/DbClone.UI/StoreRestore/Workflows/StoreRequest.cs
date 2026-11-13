@@ -1,4 +1,5 @@
 using DbClone.Application.DTOs;
+using DbClone.Application.Interchange;
 using DbClone.Application.TableFilter;
 
 namespace DbClone.UI.StoreRestore.Workflows;
@@ -13,6 +14,8 @@ namespace DbClone.UI.StoreRestore.Workflows;
 /// caller that says nothing runs exactly the store this workflow ran before the scripts existed.
 /// <c>SqlScriptsMaxFileMb</c> is the size the user picked and defaults to the preference's own 32 MB, so
 /// the split is on for a caller that says nothing, the way the checkbox beside it is (D11).
+/// <c>Progress</c> is the caller's sink for the run's stage and object reports and defaults to null, so
+/// a caller that shows no progress says nothing and gets the silence it had before.
 /// </remarks>
 public sealed record StoreRequest(
     ConnectionInfo Connection,
@@ -25,4 +28,5 @@ public sealed record StoreRequest(
     TableSelectionSpec? TableSelection,
     bool IncludeSummaryReport = true,
     bool IncludeSqlScripts = false,
-    int SqlScriptsMaxFileMb = 32);
+    int SqlScriptsMaxFileMb = 32,
+    IProgress<InterchangeProgressView>? Progress = null);

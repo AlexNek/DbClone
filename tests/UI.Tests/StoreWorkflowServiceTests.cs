@@ -340,6 +340,30 @@ public sealed class StoreWorkflowServiceTests
         sent!.SqlScriptsMaxFileMb.Should().Be(32);
     }
 
+    [Fact]
+    public async Task ExecuteAsync_hands_the_run_s_progress_sink_to_the_interchange_service()
+    {
+        // Arrange — the progress card can only move if the reports reach the sink it listens to.
+        IProgress<InterchangeProgressView>? forwarded = null;
+        var interchange = Substitute.For<IInterchangeService>();
+        interchange
+            .StoreAsync(
+                Arg.Any<InterchangeStoreRequest>(),
+                Arg.Do<IProgress<InterchangeProgressView>?>(p => forwarded = p),
+                Arg.Any<CancellationToken>())
+            .Returns(Task.FromResult(StoreReportWritten()));
+
+        var progress = new Progress<InterchangeProgressView>();
+
+        // Act
+        await new StoreWorkflowService(
+                interchange, NullLogger<StoreWorkflowService>.Instance)
+            .ExecuteAsync(Request() with { Progress = progress }, CancellationToken.None);
+
+        // Assert — the same sink, not a null and not a fresh one nobody listens to.
+        forwarded.Should().BeSameAs(progress);
+    }
+
     /// <summary>A completed store of a small catalog, with or without the report's path.</summary>
     private static InterchangeStoreResult StoreReportWritten(
         string? catalogPath = null,

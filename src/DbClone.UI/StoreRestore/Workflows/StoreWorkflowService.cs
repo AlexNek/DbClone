@@ -38,7 +38,7 @@ public sealed class StoreWorkflowService : IWorkflowService<StoreRequest, StoreR
             IncludeSqlScripts: request.IncludeSqlScripts,
             SqlScriptsMaxFileMb: request.SqlScriptsMaxFileMb);
 
-        var result = await _interchangeService.StoreAsync(interchangeRequest, progress: null, ct);
+        var result = await _interchangeService.StoreAsync(interchangeRequest, request.Progress, ct);
         return MapResult(result, request.CatalogPath, request.IncludeSummaryReport, request.IncludeSqlScripts);
     }
 

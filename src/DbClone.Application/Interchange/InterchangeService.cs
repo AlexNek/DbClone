@@ -87,6 +87,7 @@ public sealed class InterchangeService : IInterchangeService
             var progressAdapter = progress is null ? null : new Progress<InterchangeProgress>(p =>
                 progress.Report(new InterchangeProgressView(
                     p.Stage,
+                    p.Percentage,
                     p.ObjectsProcessed,
                     p.TotalObjects,
                     p.CurrentObject ?? string.Empty,
@@ -261,6 +262,7 @@ public sealed class InterchangeService : IInterchangeService
             var progressAdapter = progress is null ? null : new Progress<InterchangeProgress>(p =>
                 progress.Report(new InterchangeProgressView(
                     p.Stage,
+                    p.Percentage,
                     p.ObjectsProcessed,
                     p.TotalObjects,
                     p.CurrentObject ?? string.Empty,
