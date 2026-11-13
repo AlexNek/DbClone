@@ -144,6 +144,24 @@ public class PostgreSqlWriterTests
     }
 
     [Fact]
+    public void BuildStatements_Schemas_GivenASystemSchema_CreatesNothingForIt()
+    {
+        // The server rejects the name itself (42939) whatever IF NOT EXISTS says, and every target
+        // it bootstrapped already holds the schema — a catalog captured before the export stopped
+        // recording them must still restore.
+        var objects = new ISchemaObject[]
+        {
+            new SchemaDefinition { Name = "public" },
+            new SchemaDefinition { Name = "information_schema" },
+            new SchemaDefinition { Name = "pg_catalog" },
+            new SchemaDefinition { Name = "PG_TOAST" },
+        };
+
+        PostgreSqlWriter.BuildStatements("postgresql", SchemaStage.Schemas, objects)
+            .Should().Equal("CREATE SCHEMA IF NOT EXISTS public;");
+    }
+
+    [Fact]
     public async Task BuildStatements_Schemas_GivenAnotherKindOfObject_IsRefused()
     {
         await using var writer = CreateWriter();
@@ -1416,6 +1434,35 @@ public class PostgreSqlWriterTests
     }
 
     [Fact]
+    public void CountTargetObjects_SystemSchemas_AreCountedOnlyWhenTheCatalogNamesThem()
+    {
+        var target = InterchangeTestModel.Empty() with
+        {
+            Schemas =
+            [
+                new Models.SchemaDefinition("public", "test_user"),
+                new Models.SchemaDefinition("pg_catalog", "test_user", IsSystem: true),
+            ],
+        };
+
+        // A catalog that names the system schema is answered by the copy the target already holds.
+        PostgreSqlWriter.CountTargetObjects(target, ["public", "pg_catalog"])[EObjectKind.Schema]
+            .Should().Be(2);
+
+        // A catalog that names only its own schemas is answered by the target's user schemas alone.
+        PostgreSqlWriter.CountTargetObjects(target, ["public"])[EObjectKind.Schema].Should().Be(1);
+
+        // A system schema the target lacks is not counted at all: the restore cannot create it.
+        PostgreSqlWriter.CountTargetObjects(
+                InterchangeTestModel.Empty() with
+                {
+                    Schemas = [new Models.SchemaDefinition("public", "test_user")],
+                },
+                ["public", "pg_catalog"])[EObjectKind.Schema]
+            .Should().Be(1);
+    }
+
+    [Fact]
     public void CountTargetObjects_KindTheLiveModelHasNoCollectionFor_IsLeftOut()
     {
         var counted = PostgreSqlWriter.CountTargetObjects(InterchangeTestModel.Empty());
@@ -1460,6 +1507,34 @@ public class PostgreSqlWriterTests
         report.Passed.Should().BeFalse();
         report.Issues.Should().ContainSingle()
             .Which.Message.Should().Contain("3").And.Contain("1").And.Contain("Table");
+    }
+
+    [Fact]
+    public async Task ValidateAsync_CatalogNamingASystemSchema_PassesAgainstTheTargetsOwnCopy()
+    {
+        // A restore creates no system schema, so the target's own copy is what the count is
+        // answered by — which is what keeps a catalog captured before this rule restorable.
+        Given(
+            InterchangeTestModel.Empty() with
+            {
+                Schemas =
+                [
+                    new Models.SchemaDefinition("public", "test_user"),
+                    new Models.SchemaDefinition("pg_catalog", "test_user", IsSystem: true),
+                ],
+            });
+        await using var writer = CreateWriter();
+
+        var report = await writer.ValidateAsync(
+            new TargetExpectation
+            {
+                ObjectCounts = new Dictionary<EObjectKind, int> { [EObjectKind.Schema] = 2 },
+                SchemaNames = ["public", "pg_catalog"],
+            },
+            CancellationToken.None);
+
+        report.Passed.Should().BeTrue();
+        report.FoundObjectCounts[EObjectKind.Schema].Should().Be(2);
     }
 
     [Fact]

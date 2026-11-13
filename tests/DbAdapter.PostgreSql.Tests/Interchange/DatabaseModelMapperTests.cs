@@ -41,6 +41,25 @@ public class DatabaseModelMapperTests
     }
 
     [Fact]
+    public void Map_ASystemSchemaIsNotCaptured()
+    {
+        // The operational model lists a system schema so copy and compare can compare its presence.
+        // A catalog holds what a restore creates, and no target lets one of these be created.
+        var snapshot = Mapper.Map(
+            InterchangeTestModel.Full() with
+            {
+                Schemas =
+                [
+                    new Models.SchemaDefinition("public", "test_user"),
+                    new Models.SchemaDefinition("pg_catalog", "test_user", IsSystem: true),
+                    new Models.SchemaDefinition("information_schema", "test_user", IsSystem: true),
+                ],
+            });
+
+        snapshot.Schemas.Select(s => s.Name).Should().Equal("public");
+    }
+
+    [Fact]
     public void Map_TablesAreSortedAndPointAtTheirSchemaByRef()
     {
         var snapshot = MapFull();

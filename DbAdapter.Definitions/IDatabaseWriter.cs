@@ -85,6 +85,14 @@ public sealed record TargetExpectation
     public IReadOnlyDictionary<EObjectKind, int> ObjectCounts { get; init; } =
         new Dictionary<EObjectKind, int>();
 
+    /// <summary>Gets or sets the schema names the catalog records, in the order it records them.</summary>
+    /// <remarks>
+    /// A name the engine owns exists on every target that engine bootstrapped, so an adapter counts
+    /// such a name as present whether or not it creates anything for it — a catalog captured before
+    /// its adapter stopped recording those names still validates.
+    /// </remarks>
+    public IReadOnlyList<string> SchemaNames { get; init; } = [];
+
     /// <summary>Gets or sets the expected table row counts.</summary>
     public IReadOnlyDictionary<TableRef, long> TableRowCounts { get; init; } =
         new Dictionary<TableRef, long>();

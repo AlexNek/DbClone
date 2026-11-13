@@ -365,7 +365,7 @@ public sealed class PostgreSqlWriter : IDatabaseWriter
         // report, because a green summary that stands for a check that never ran is the failure the
         // format's rules name.
         var model = await _metadataSource.ReadDatabaseModelAsync(excludePlatformSchemas: true, ct);
-        var countedObjects = CountTargetObjects(model);
+        var countedObjects = CountTargetObjects(model, expectation.SchemaNames);
         var issues = new List<InterchangeIssue>();
         var foundObjectCounts = new Dictionary<EObjectKind, int>();
         var foundRowCounts = new Dictionary<TableRef, long>();
@@ -541,6 +541,16 @@ public sealed class PostgreSqlWriter : IDatabaseWriter
             if (obj is not SchemaDefinition schema)
             {
                 throw WrongObject(SchemaStage.Schemas, nameof(SchemaDefinition), obj);
+            }
+
+            // A name the server owns is never created. PostgreSQL rejects the name itself — 42939
+            // "unacceptable schema name" — whatever IF NOT EXISTS says, and every target the server
+            // bootstrapped already holds the schema. A catalog captured before the export stopped
+            // recording system schemas still names them, so they are skipped here rather than
+            // refusing the whole restore.
+            if (PgSystemSchemas.AllSet.Contains(schema.Name))
+            {
+                continue;
             }
 
             // Ownership is not part of this statement. The import assigns owners in its own security
@@ -1696,10 +1706,17 @@ public sealed class PostgreSqlWriter : IDatabaseWriter
     /// error.
     /// </remarks>
     internal static IReadOnlyDictionary<EObjectKind, int> CountTargetObjects(
-        Models.DatabaseModel model) =>
+        Models.DatabaseModel model,
+        IReadOnlyList<string>? catalogSchemaNames = null) =>
         new Dictionary<EObjectKind, int>
         {
-            [EObjectKind.Schema] = model.Schemas.Count,
+            // A system schema is counted only when the catalog names it: the target holds its own
+            // copy whatever a restore does, so a release that captured system schemas is answered
+            // by the presence it recorded rather than reported as a target holding too many. A
+            // system schema the target lacks stays uncounted — the restore cannot create it either.
+            [EObjectKind.Schema] = model.Schemas.Count(
+                s => !s.IsSystem
+                     || catalogSchemaNames?.Contains(s.Name, StringComparer.OrdinalIgnoreCase) is true),
             [EObjectKind.Table] = model.Tables.Count,
             [EObjectKind.View] = model.Views.Count,
             [EObjectKind.MaterializedView] = model.MaterializedViews.Count,

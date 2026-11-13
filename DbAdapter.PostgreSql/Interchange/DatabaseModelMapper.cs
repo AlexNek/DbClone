@@ -142,7 +142,12 @@ internal sealed class DatabaseModelMapper
     private static IReadOnlyList<SchemaDefinition> MapSchemas(
         Models.DatabaseModel model) =>
         [
+            // A system schema is a presence marker the operational model keeps so copy and compare
+            // can compare it. The catalog holds what a restore creates, and no target lets one be
+            // created: the server rejects the name itself (42939), because every database it
+            // bootstrapped already holds that schema.
             .. model.Schemas
+                .Where(s => !s.IsSystem)
                 .OrderBy(s => s.Name, StringComparer.Ordinal)
                 .Select(s => new SchemaDefinition
                 {

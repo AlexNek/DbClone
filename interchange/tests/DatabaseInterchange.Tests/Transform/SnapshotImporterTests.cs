@@ -281,6 +281,23 @@ public sealed class SnapshotImporterTests : IDisposable
     }
 
     [Fact]
+    public async Task ImportAsync_ExpectationNamesEverySchemaTheCatalogRecords()
+    {
+        // Arrange
+        await WriteCatalog();
+        var writer = new RecordingWriter();
+
+        // Act
+        await Import(writer);
+
+        // Assert
+        // The names travel beside the counts: an adapter answers a schema it creates apart from one
+        // its own engine already keeps, and a total cannot tell the two apart.
+        writer.Expectation.Should().NotBeNull();
+        writer.Expectation!.SchemaNames.Should().Equal("public", "reporting");
+    }
+
+    [Fact]
     public async Task ImportAsync_TableWhoseSchemaTheCatalogDoesNotName_StopsBeforeReadingRows()
     {
         // Arrange

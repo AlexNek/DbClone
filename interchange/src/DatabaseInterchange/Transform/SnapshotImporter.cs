@@ -345,6 +345,10 @@ public sealed class SnapshotImporter
                     routines,
                     sequences,
                     nativeObjects),
+
+                // The names travel with the counts so an adapter can tell a schema it creates from
+                // one the target's own engine already keeps — the two are answered differently.
+                SchemaNames = [.. schemas.Select(s => s.Name)],
                 TableRowCounts = recordedRowCounts,
             };
 
