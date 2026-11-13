@@ -46,11 +46,6 @@ public sealed class PostgreSqlWriter : IDatabaseWriter
     private const string DefaultSchema = "public";
 
     /// <summary>
-    /// The extension PostgreSQL installs in every database, excluded for the same reason.
-    /// </summary>
-    private static readonly string[] BuiltInExtensions = ["plpgsql"];
-
-    /// <summary>
     /// The rows one <c>INSERT</c> statement carries. A batch is the unit the data pass commits, so this
     /// also says how much a failing batch writes back.
     /// </summary>
@@ -112,10 +107,13 @@ public sealed class PostgreSqlWriter : IDatabaseWriter
 
         if (findings.Count > 0)
         {
+            // The sentence names what the target holds and stops there, because two readers act on it:
+            // the preflight turns it into the question the user answers, and a refused run turns it
+            // into the reason in the banner. What a restore requires of a target travels in the
+            // issue's details instead, for the log rather than for the sentence.
             throw new InvalidOperationException(
-                $"The target database \"{model.DatabaseName}\" is not empty: it already holds " +
-                $"{string.Join(", ", findings)}. A restore applies its catalog to an empty " +
-                "database, and cleaning the target is a separate act performed beforehand.");
+                $"The target database \"{model.DatabaseName}\" already holds " +
+                $"{string.Join(", ", findings)}.");
         }
     }
 
@@ -365,7 +363,17 @@ public sealed class PostgreSqlWriter : IDatabaseWriter
         // report, because a green summary that stands for a check that never ran is the failure the
         // format's rules name.
         var model = await _metadataSource.ReadDatabaseModelAsync(excludePlatformSchemas: true, ct);
-        var countedObjects = CountTargetObjects(model, expectation.SchemaNames);
+        var countedObjects = new Dictionary<EObjectKind, int>(
+            CountTargetObjects(model, expectation.SchemaNames));
+
+        // The count above answers with what the read kept, and a schema the catalog names but the
+        // model lacks is the one place those two can part: the read leaves a schema out for reasons
+        // of its own — one owned by the database's own role, one a platform file claims — while the
+        // target still holds it. Asking the target about the difference keeps a correct restore from
+        // being reported as one that created nothing. The row counts ask by name for the same reason.
+        countedObjects[EObjectKind.Schema] +=
+            await CountSchemasTheReadLeftOutAsync(model, expectation.SchemaNames, ct);
+
         var issues = new List<InterchangeIssue>();
         var foundObjectCounts = new Dictionary<EObjectKind, int>();
         var foundRowCounts = new Dictionary<TableRef, long>();
@@ -527,7 +535,7 @@ public sealed class PostgreSqlWriter : IDatabaseWriter
             (model.Publications.Count, "publication"),
             (model.Subscriptions.Count, "subscription"),
             (model.Extensions.Count(
-                 e => !BuiltInExtensions.Contains(e.Name, StringComparer.OrdinalIgnoreCase)),
+                 e => !PgBuiltInExtensions.All.Contains(e.Name, StringComparer.OrdinalIgnoreCase)),
              "extension"),
         };
 
@@ -1790,6 +1798,11 @@ public sealed class PostgreSqlWriter : IDatabaseWriter
             [EObjectKind.Domain] = model.Domains.Count,
             [EObjectKind.CompositeType] = model.CompositeTypes.Count,
 
+            // An extension is content a restore creates, and the catalog counts every one it records.
+            // The live model keeps them, so the target is counted the same way rather than reported
+            // as a kind that could not be checked.
+            [EObjectKind.Extension] = model.Extensions.Count,
+
             // The reader reports a procedure beside a function, and the interchange model separates
             // them by kind, so the two are counted apart.
             [EObjectKind.Function] = model.Functions.Count(f => !f.IsProcedure),
@@ -1820,6 +1833,47 @@ public sealed class PostgreSqlWriter : IDatabaseWriter
 
         return count is long value ? value : Convert.ToInt64(count);
     }
+
+    /// <summary>
+    /// Counts the schemas the catalog names, the target holds, and the filtered read left out.
+    /// </summary>
+    /// <remarks>
+    /// Only the names the read did not report are put to <c>pg_namespace</c>: the rest are already
+    /// counted by the model, and a name the read did report needs no second opinion. A name the read
+    /// left out has two explanations — the restore never created it, or the read's own filters hid
+    /// it — and only the target can say which.
+    /// </remarks>
+    private async Task<int> CountSchemasTheReadLeftOutAsync(
+        Models.DatabaseModel model,
+        IReadOnlyList<string> catalogSchemaNames,
+        CancellationToken ct)
+    {
+        var leftOut = SchemasTheReadLeftOut(model, catalogSchemaNames);
+        if (leftOut.Count == 0)
+        {
+            return 0;
+        }
+
+        var connection = await EnsureConnectionAsync(ct);
+        await using var command = new NpgsqlCommand(
+            "SELECT count(*) FROM pg_namespace WHERE nspname = ANY(@names)",
+            connection);
+        command.Parameters.AddWithValue("names", leftOut.ToArray());
+
+        var count = await command.ExecuteScalarAsync(ct);
+
+        return (int)(count is long value ? value : Convert.ToInt64(count));
+    }
+
+    /// <summary>
+    /// Names the schemas the catalog records that the model the read returned does not hold.
+    /// </summary>
+    internal static IReadOnlyList<string> SchemasTheReadLeftOut(
+        Models.DatabaseModel model,
+        IReadOnlyList<string> catalogSchemaNames) =>
+        [.. catalogSchemaNames.Where(
+            name => !model.Schemas.Any(
+                s => string.Equals(s.Name, name, StringComparison.OrdinalIgnoreCase)))];
 
     private static string QuoteTableName(TableRef table) =>
         string.IsNullOrEmpty(table.Schema)

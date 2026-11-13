@@ -8,7 +8,7 @@ namespace DbAdapter.PostgreSql.Interchange;
 /// <para>
 /// The format stores the <see cref="ELogicalType"/>/<see cref="NativeType"/> pair and never
 /// guesses, so an unmapped name stays <see cref="ELogicalType.Unknown"/> and is carried by its
-/// native text alone (refactors/04/interchangeFormatDesign.md, "Where type mapping lives").
+/// native text alone.
 /// Names are matched after normalization; the PostgreSQL-prefixed forms (<c>pg_catalog.</c>)
 /// and quoted identifiers are accepted because the metadata reader can report either.
 /// </para>

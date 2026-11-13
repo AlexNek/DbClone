@@ -158,6 +158,29 @@ public sealed class SnapshotImporterTests : IDisposable
     }
 
     [Fact]
+    public async Task ImportAsync_RefusedTarget_StatesWhatItHoldsAndLeavesTheRequirementInTheDetails()
+    {
+        // Arrange — a target whose only content is an extension, which is what a database restored
+        // from the same catalog keeps.
+        const string reason = "The target database \"testdb\" already holds 1 extension.";
+        await WriteCatalog();
+        var writer = new RecordingWriter { Refusal = reason };
+
+        // Act
+        var result = await Import(writer);
+
+        // Assert — the sentence is what the target holds and nothing else, because the UI turns it into
+        // the question it asks before a restore and into the reason a refused restore reports. What a
+        // restore requires of a target would read as an instruction in both, so it travels in Details.
+        result.Success.Should().BeFalse();
+        var issue = result.Issues.Should().ContainSingle().Subject;
+        issue.Code.Should().Be("RestoreRefused");
+        issue.Message.Should().Be(reason);
+        issue.Details.Should().Contain("empty database").And.Contain("separate act");
+        writer.Stages.Should().BeEmpty();
+    }
+
+    [Fact]
     public async Task ImportAsync_HandsTheWriterTheNamesBehindTheIds()
     {
         // Arrange
@@ -374,7 +397,12 @@ public sealed class SnapshotImporterTests : IDisposable
         result.Issues.Should()
             .ContainSingle(i => i.Code == "RestoreTableDataFailed")
             .Which.Message.Should().Contain("public.customers");
+
+        // The table the target refused is still counted against the catalog's record of it. A count read
+        // after the write would drop it — the write threw, so there would be nothing to read — and the
+        // check would then find the restore agreeing with itself while the table sits empty.
         writer.Expectation.Should().NotBeNull("the check after the data still runs");
+        writer.Expectation!.TableRowCounts[new TableRef("public", "customers")].Should().Be(2);
     }
 
     [Fact]
@@ -461,6 +489,26 @@ public sealed class SnapshotImporterTests : IDisposable
         // An empty stage is passed through rather than skipped: what emptiness means is the adapter's
         // decision, not the importer's.
         writer.Objects[SchemaStage.Views].Should().BeEmpty();
+    }
+
+    [Fact]
+    public async Task ImportAsync_RowsFollowTheKeys_SoATableIsWrittenBeforeTheRowsThatNameIt()
+    {
+        // Arrange — the catalog holds a child whose name sorts before the table its key points at, which
+        // is the alphabetical order the section is written in.
+        await WriteCatalogWithChildBeforeParent();
+        var writer = new RecordingWriter();
+
+        // Act
+        await Import(writer);
+
+        // Assert
+        // The constraints stage has already created the foreign key and a key is checked on every row
+        // inserted after it, so the parent's rows have to be there first. The order of the section is no
+        // load order at all: walking it as written refuses the child's rows, and theirs alone.
+        writer.RowTargets.Should().Equal(
+            new TableRef("public", "z_accounts"),
+            new TableRef("public", "a_notes"));
     }
 
     private static async Task WriteCatalog(
@@ -566,6 +614,66 @@ public sealed class SnapshotImporterTests : IDisposable
         Func<IReadOnlyList<NativeObjectDefinition>, IReadOnlyList<NativeObjectDefinition>>? nativeOverride =
             null) =>
         WriteCatalog(_catalogPath, schemalessTable, nativeOverride);
+
+    /// <summary>
+    /// A catalog holding two related tables in the alphabetical order the section is written in: the
+    /// child <c>a_notes</c> and the <c>z_accounts</c> its one key points at.
+    /// </summary>
+    private async Task WriteCatalogWithChildBeforeParent()
+    {
+        var parentRef = ObjectRef.Table("public", "z_accounts");
+        var childRef = ObjectRef.Table("public", "a_notes");
+
+        var parent = new TableDefinition
+        {
+            Ref = parentRef,
+            Name = "z_accounts",
+            SchemaRef = PublicRef,
+            Columns = [IntegerColumn("z_accounts", parentRef, "id")],
+        };
+
+        var child = new TableDefinition
+        {
+            Ref = childRef,
+            Name = "a_notes",
+            SchemaRef = PublicRef,
+            Columns = [IntegerColumn("a_notes", childRef, "account_id")],
+            ForeignKeys =
+            [
+                new ForeignKeyDefinition
+                {
+                    Ref = ObjectRef.SubObject(
+                        "foreignkey", "public", "a_notes", "a_notes_account_fkey"),
+                    Name = "a_notes_account_fkey",
+                    TableRef = childRef,
+                    Columns = ["account_id"],
+                    ReferencedTableRef = parentRef,
+                    ReferencedColumns = ["id"],
+                },
+            ],
+        };
+
+        await using var catalog = await CatalogWriter.CreateAsync(
+            _catalogPath,
+            producer: "DbClone-test",
+            sourceDialect: "postgresql");
+
+        await catalog.WriteSectionAsync(
+            "schemas",
+            new List<SchemaDefinition> { new() { Ref = PublicRef, Name = "public" } });
+        await catalog.WriteSectionAsync("tables", new List<TableDefinition> { child, parent });
+        await catalog.CompleteAsync();
+    }
+
+    private static ColumnDefinition IntegerColumn(string table, ObjectRef tableRef, string name) =>
+        new()
+        {
+            Ref = ObjectRef.Column("public", table, name),
+            Name = name,
+            TableRef = tableRef,
+            Ordinal = 1,
+            NativeType = new NativeType("integer"),
+        };
 
     /// <summary>
     /// A catalog that holds an identity column, the sequence that column created, a sequence the
@@ -837,11 +945,19 @@ public sealed class SnapshotImporterTests : IDisposable
         /// <summary>Whether the check after the data fails instead of answering.</summary>
         public bool ValidationFails { get; set; }
 
+        /// <summary>
+        /// The sentence this double refuses the target with, or <see langword="null"/> to accept it.
+        /// </summary>
+        public string? Refusal { get; set; }
+
         public IDatabaseAdapter Adapter { get; } = Substitute.For<IDatabaseAdapter>();
 
         public ICapabilityDetector CapabilityDetector => null!;
 
-        public Task EnsureEmptyTargetAsync(CancellationToken ct) => Task.CompletedTask;
+        public Task EnsureEmptyTargetAsync(CancellationToken ct) =>
+            Refusal is null
+                ? Task.CompletedTask
+                : Task.FromException(new InvalidOperationException(Refusal));
 
         public Task ApplySchemaAsync(
             SchemaStage stage,

@@ -77,7 +77,7 @@ public sealed partial class UserSettings : ObservableObject
 
     /// <summary>Gets or sets the default format Id for quick clipboard export. Empty means "use the
     /// active engine's default", resolved from <see cref="DbClone.Application.Interfaces.IConnectionTextService"/>
-    /// — no engine format id is written here (refactors/09 P5).</summary>
+    /// — no engine format id is written here.</summary>
     public string DefaultClipboardFormatId { get; set; } = string.Empty;
 
     /// <summary>Gets or sets the saved destination connection.</summary>

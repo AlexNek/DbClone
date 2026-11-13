@@ -10,8 +10,8 @@ using FluentAssertions;
 namespace Application.Tests;
 
 /// <summary>
-/// Guards the layer facts the adapter refactor (<c>refactors/08</c>) rests on.
-/// Phase 0 records the tree as it stands today; later phases extend the rule set.
+/// Guards the layer facts the adapter boundary rests on: the rule set covers the tree as it
+/// stands today and grows with the boundary.
 /// </summary>
 public class ArchitectureTests
 {
@@ -111,7 +111,7 @@ public class ArchitectureTests
             .ToList();
 
         // Assert
-        // Table filtering left the pipeline in Phase 3, so every stage now lives in the block.
+        // Table filtering has left the pipeline, so every stage now lives in the block.
         stages.Should().BeEmpty(
             "the pipeline's stages all live in the engine block");
     }
@@ -129,7 +129,7 @@ public class ArchitectureTests
 
         // Act
         // The contract now holds the shared copy runner and the platform reader, so the old
-        // "declarations only" rule is replaced by a narrower, checkable one (refactors/09 P5):
+        // "declarations only" rule is replaced by a narrower, checkable one:
         // no file here writes SQL and no file here names an engine or a driver. Prose is out of
         // scope — the project's existing remarks (in files this refactor does not move) carry
         // engine examples, so the scan runs over code with comments stripped, not raw text.
@@ -141,7 +141,7 @@ public class ArchitectureTests
 
         // Assert
         offenders.Should().BeEmpty(
-            "DbAdapter.Definitions holds no SQL, no engine name and no driver reference in code (refactors/09 P5)");
+            "DbAdapter.Definitions holds no SQL, no engine name and no driver reference in code");
     }
 
 
@@ -153,7 +153,7 @@ public class ArchitectureTests
     [Fact]
     public void InterchangeFacadeDeserializesNoCatalogFileOfItsOwn()
     {
-        // Arrange — the app-side half of feature 07 T7.
+        // Arrange — one deserialization path for every catalog read.
         var facadeRoot = Path.Combine(RepoRoot, "src", "DbClone.Application", "Interchange");
 
         // Act
@@ -179,7 +179,7 @@ public class ArchitectureTests
     [Fact]
     public void NoSrcFileNamesTheEngineBlockOrAdapter()
     {
-        // Arrange — refactors/09 Phase 4 box 78.
+        // Arrange
         var srcRoot = Path.Combine(RepoRoot, "src");
 
         // Act
@@ -193,7 +193,7 @@ public class ArchitectureTests
         // Assert — only DbClone.UI.csproj may name the adapter project (a build-ordering ProjectReference
         // plus the PublishAdapters target), and only that csproj — no C# file under src.
         offenders.Should().BeEmpty(
-            "no C# file under src may name the engine block or its adapter class (refactors/09 Phase 4)");
+            "no C# file under src may name the engine block or its adapter class");
     }
 
     /// <summary>Gets the regular expression matching a name of the interchange product assembly.</summary>
@@ -259,7 +259,7 @@ public class ArchitectureTests
         // Assert — the block depends only on the shared boundary and the shared model.
         references.Should().NotContain(
             reference => reference.Equals("DbClone.Application.csproj", StringComparison.Ordinal),
-            "the engine block must not reference the application (refactors/09 Phase 4)");
+            "the engine block must not reference the application");
     }
 
     [Fact]
@@ -273,7 +273,7 @@ public class ArchitectureTests
         var packageReferences = PackageReferencesOf(definitionsProject);
         // The shared copy runner and platform reader log, so the logging abstraction is now the
         // one package the contract may declare and the one Microsoft.Extensions namespace its code
-        // may reach (refactors/09 P5). Anything beyond logging still fails the rule.
+        // may reach. Anything beyond logging still fails the rule.
         var offenders = ProjectFiles(definitionsProject)
             .Where(file => NonLoggingExtensionsUsing.IsMatch(File.ReadAllText(file)))
             .Select(file => Path.GetRelativePath(RepoRoot, file))

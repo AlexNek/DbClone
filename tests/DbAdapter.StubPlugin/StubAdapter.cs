@@ -11,7 +11,7 @@ using Microsoft.Extensions.Logging;
 namespace DbAdapter.StubPlugin;
 
 /// <summary>
-/// The P9 proof adapter (refactors/09). A second "engine" that ships as nothing but this assembly,
+/// The stub-plugin proof adapter. A second "engine" that ships as nothing but this assembly,
 /// so the plugin catalog can be shown to discover an adapter from a folder, select it by its dialect
 /// and run a copy to completion without any change to a production file. It holds in-memory metadata
 /// and two pipeline stages — no SQL, no driver — and reads its platform data from the folder it was
@@ -130,7 +130,7 @@ public sealed class StubAdapter : IDatabaseAdapter
     /// <summary>
     /// The platform role, reading <c>.platform</c> files from <c>&lt;pluginDirectory&gt;/platforms/&lt;dialect&gt;</c>
     /// — the folder the catalog handed this adapter, never the application's folder. The proof asserts the
-    /// platform the catalog lists comes from that file (refactors/09 P3/P9).
+    /// platform the catalog lists comes from that file.
     /// </summary>
     private sealed class StubPlatformResolver : IPlatformResolver
     {
@@ -205,7 +205,7 @@ public sealed class StubAdapter : IDatabaseAdapter
 
     /// <summary>
     /// A copy session that runs the shared <see cref="CopyPipeline"/> over two trivial stages. It supplies
-    /// stages, not a runner — the point of moving the loop into the definitions (refactors/09 P5).
+    /// stages, not a runner — the point of moving the loop into the definitions.
     /// </summary>
     private sealed class StubCopySession : ICopySession
     {

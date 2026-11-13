@@ -25,6 +25,7 @@ public sealed class CatalogWriter : IAsyncDisposable
     private readonly List<string> _sections = [];
     private readonly List<CatalogTableFolder> _tableFolders = [];
     private readonly List<TableWriteStats> _tableStats = [];
+    private int _totalSchemas;
     private int _totalTables;
     private int _totalColumns;
     private long _totalRows;
@@ -206,6 +207,10 @@ public sealed class CatalogWriter : IAsyncDisposable
         {
             _totalColumns = objects.Count;
         }
+        else if (sectionName == "schemas")
+        {
+            _totalSchemas = objects.Count;
+        }
     }
 
     /// <summary>
@@ -296,9 +301,8 @@ public sealed class CatalogWriter : IAsyncDisposable
     /// <returns><c>true</c> when a file was written; an empty section writes nothing.</returns>
     /// <remarks>
     /// Security is one compound object rather than a list of same-kind objects, so its file carries
-    /// the section header with a single <c>object</c> member instead of an <c>objects</c> array
-    /// (refactors/04/interchangeFormatDesign.md). <see cref="CatalogReader.ReadSecurityAsync"/> is
-    /// its counterpart.
+    /// the section header with a single <c>object</c> member instead of an <c>objects</c> array.
+    /// <see cref="CatalogReader.ReadSecurityAsync"/> is its counterpart.
     /// Skipping an empty section is deliberate. Roles and grants are not part of the metadata this
     /// block can read, so a file of three empty lists would state that the source has no roles — a
     /// claim nobody checked. An absent section says the true thing: nothing was captured.
@@ -443,6 +447,7 @@ public sealed class CatalogWriter : IAsyncDisposable
         }
 
         // Update counts from the model
+        _totalSchemas = model.Schemas.Count;
         _totalTables = model.Tables.Count;
         _totalColumns = model.Tables.Sum(t => t.Columns.Count);
     }
@@ -536,10 +541,9 @@ public sealed class CatalogWriter : IAsyncDisposable
 
             // Blob containers are listed in the table folder's own checksums.sha256 and nowhere else:
             // adding them to manifest.json would put an array that grows with the data back into the
-            // file every reader loads whole (design §8).
+            // file every reader loads whole.
 
             // Write checksums.sha256 — the authoritative per-file list for this table folder.
-            // Phase 4B: replaces the inline chunks[] array in table.json.
             await WriteChecksumsFileAsync(tableDir, rowWriter, encodedSchema, encodedTable, ct);
 
             // Write table.json — scalars and bounded maps only, no chunks[] array
@@ -613,7 +617,7 @@ public sealed class CatalogWriter : IAsyncDisposable
     /// per data file (row chunks and blob containers) with its relative path and SHA-256 hash.
     /// </summary>
     /// <remarks>
-    /// Phase 4B: This file is the authoritative per-file list for restore. The reader discovers
+    /// This file is the authoritative per-file list for restore. The reader discovers
     /// chunk files by parsing this file rather than reading a <c>chunks[]</c> array from <c>table.json</c>.
     /// </remarks>
     private async Task WriteChecksumsFileAsync(
@@ -715,6 +719,7 @@ public sealed class CatalogWriter : IAsyncDisposable
             Data = new ManifestData { Encoding = "csv" },
             Counts = new ManifestCounts
             {
+                Schemas = _totalSchemas,
                 Tables = _totalTables,
                 Columns = _totalColumns,
                 Rows = _totalRows,
@@ -801,7 +806,7 @@ internal sealed record ExportMetadata
 /// Table manifest (table.json) structure.
 /// </summary>
 /// <remarks>
-/// <para>Phase 4B: The manifest no longer carries a per-chunk array (which would grow with the database).
+/// <para>The manifest carries no per-chunk array, which would grow with the database.
 /// Instead, it holds scalars and bounded maps only. The authoritative per-file list lives in
 /// <c>checksums.sha256</c> within the table folder.</para>
 /// </remarks>

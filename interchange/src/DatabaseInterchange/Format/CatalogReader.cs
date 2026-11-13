@@ -215,7 +215,7 @@ public sealed class CatalogReader : IAsyncDisposable
     /// <see cref="BinaryFieldGrammar"/>, so a blob reference is validated and turned into a range payload at
     /// the moment it is read — the row that reaches the caller already carries bytes-or-a-pointer decided by
     /// the column's own logical type.</para>
-    /// <para>Phase 4B: Chunk files are discovered via <c>checksums.sha256</c> rather than from a
+    /// <para>Chunk files are discovered via <c>checksums.sha256</c> rather than from a
     /// <c>chunks[]</c> array in <c>table.json</c>. This keeps the manifest bounded in size regardless
     /// of how many chunks the table has.</para>
     /// </remarks>
@@ -256,7 +256,7 @@ public sealed class CatalogReader : IAsyncDisposable
             columnTypes.Add(Enum.Parse<ELogicalType>(column.LogicalType, ignoreCase: true));
         }
 
-        // Discover chunk files from checksums.sha256 (Phase 4B)
+        // Discover chunk files from checksums.sha256
         var chunkFiles = await DiscoverChunkFilesAsync(tableDir, ct);
 
         // One grammar per table: it owns the container reader the references of this folder resolve against.
@@ -291,7 +291,7 @@ public sealed class CatalogReader : IAsyncDisposable
     /// Discovers chunk files from the <c>checksums.sha256</c> file in the table directory.
     /// </summary>
     /// <remarks>
-    /// Phase 4B: The checksums file is the authoritative per-file list. Chunk files are identified
+    /// The checksums file is the authoritative per-file list. Chunk files are identified
     /// by their canonical <c>data.NNNNN.csv</c> name and returned in sorted order.
     /// </remarks>
     /// <param name="tableDir">The table's data directory.</param>

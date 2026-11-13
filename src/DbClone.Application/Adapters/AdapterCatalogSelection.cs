@@ -5,8 +5,8 @@ using DbClone.Application.Exceptions;
 namespace DbClone.Application.Adapters;
 
 /// <summary>
-/// The single selection rule that maps a connection's engine value to an installed adapter
-/// (refactors/09 P4). A blank value means "whatever is installed": the sole adapter serves it,
+/// The single selection rule that maps a connection's engine value to an installed adapter.
+/// A blank value means "whatever is installed": the sole adapter serves it,
 /// which is today's behaviour with files saved before the engine was recorded; zero or several
 /// make the choice undecidable and are reported, never guessed. A named value resolves through
 /// <see cref="IAdapterCatalog.Find"/>, and an unknown name is a reported error rather than a

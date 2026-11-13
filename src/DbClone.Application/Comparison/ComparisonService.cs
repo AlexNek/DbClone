@@ -70,7 +70,7 @@ public sealed class ComparisonService : IComparisonService
         var comparer = sourceAdapter.CreateComparer();
         // The seven provider-neutral comparers arrive from the host; the engine-specific ones
         // (TableDdlComparer today) come from the adapter, appended last — the same set in the
-        // same order the host registered before adapters became plugins (refactors/09 P6).
+        // same order the host registered before adapters became plugins.
         var modelComparers = _modelComparers.Concat(sourceAdapter.CreateModelComparers()).ToList();
 
         // ─── Log effective compare settings ───

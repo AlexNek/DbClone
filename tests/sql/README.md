@@ -132,7 +132,7 @@ several of them; running the scripts twice is expected to return the same state.
 
 > **Not run in this environment.** This machine has PostgreSQL services but no `psql`
 > on `PATH` and no disposable database, so the two-run proof of a split family stays
-> unproven here — the same gap feature 08 recorded for its single file.
+> unproven here.
 
 ## Notes
 

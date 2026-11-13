@@ -18,7 +18,7 @@ This page collects ideas for potential future enhancements — **nothing here is
 
 | Feature | Priority | Description |
 |---------|----------|-------------|
-| **Pack catalogs into `.rdbx.zip`** | 💡 Backlog | Implement product-owned, atomic archive creation beside a completed catalog, safe archive restore, verification, cancellation handling, and a Store option that is exposed only after the full round trip works. See the repository feature plan at `features/04-pack-catalog/plan.md`. |
+| **Pack catalogs into `.rdbx.zip`** | 💡 Backlog | Implement product-owned, atomic archive creation beside a completed catalog, safe archive restore, verification, cancellation handling, and a Store option that is exposed only after the full round trip works. |
 
 ---
 

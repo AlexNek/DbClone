@@ -122,6 +122,10 @@ public sealed class CatalogWriterTests : IDisposable
         reader.Manifest.ModelFormat.Should().Be("direct");
         reader.Manifest.SourceDialect.Should().Be("postgresql");
         reader.Manifest.Counts.Tables.Should().Be(1);
+
+        // A count the manifest does not fill in reads as a catalog holding no schema at all, while the
+        // section beside it holds one — the number a reader trusts must describe that section.
+        reader.Manifest.Counts.Schemas.Should().Be(1);
     }
 
     [Fact]

@@ -69,13 +69,14 @@ public sealed class RestoreWorkflowService : IWorkflowService<RestoreRequest, Re
         if (serverVersion is null)
             return (null, Failed("Cannot connect to the selected restore database."));
 
-        if (!await _catalogService.CheckDestinationHasDataAsync(request.Connection, ct))
+        var refusal = await _interchangeService.DescribeRestoreRefusalAsync(request.Connection, ct);
+        if (refusal is null)
             return (request.Connection, null);
 
         var choice = await _confirmationService.ConfirmRestoreTargetAsync(
             "Restore target is not empty",
-            $"The selected database '{request.Connection.DatabaseName}' already contains user objects. "
-            + "Choose Update selected database to remove them, or Create new database to preserve it.");
+            $"{refusal} Choose Update selected database to remove them, or Create new database "
+            + $"to preserve '{request.Connection.DatabaseName}'.");
 
         return choice switch
         {
@@ -93,9 +94,18 @@ public sealed class RestoreWorkflowService : IWorkflowService<RestoreRequest, Re
             connection,
             message => _logger.LogInformation("Restore cleanup: {Message}", message),
             ct);
-        return cleaned
+        if (!cleaned)
+            return (null, Failed("The selected database could not be cleaned. No restore was started."));
+
+        // The clean reports what it could not drop as a warning and still finishes, so the only
+        // evidence that the target is now one a restore accepts is the restore's own check, asked
+        // again. Without this the run reached the product's refusal and the user, who had just asked
+        // for the database to be overwritten, was told only that it was not empty.
+        var refusal = await _interchangeService.DescribeRestoreRefusalAsync(connection, ct);
+        return refusal is null
             ? (connection, null)
-            : (null, Failed("The selected database could not be cleaned. No restore was started."));
+            : (null, Failed(
+                $"The selected database is still not empty after cleaning: {refusal} No restore was started."));
     }
 
     private async Task<(ConnectionInfo? Connection, RestoreResult? EarlyResult)> PrepareNewTargetAsync(
@@ -128,6 +138,7 @@ public sealed class RestoreWorkflowService : IWorkflowService<RestoreRequest, Re
         WasCancelled: true,
         WasRefused: false,
         RowCountMismatches: 0,
+        TablesChecked: 0,
         LastCompletedChunk: null,
         Issues: []);
 
@@ -141,6 +152,7 @@ public sealed class RestoreWorkflowService : IWorkflowService<RestoreRequest, Re
         WasCancelled: false,
         WasRefused: false,
         RowCountMismatches: 0,
+        TablesChecked: 0,
         LastCompletedChunk: null,
         Issues: []);
 
@@ -158,6 +170,7 @@ public sealed class RestoreWorkflowService : IWorkflowService<RestoreRequest, Re
             WasCancelled: result.Outcome == ERestoreOutcome.Cancelled,
             WasRefused: result.Outcome == ERestoreOutcome.Refused,
             RowCountMismatches: result.RowCountMismatches,
+            TablesChecked: result.TablesChecked,
             LastCompletedChunk: result.LastCompletedChunk,
             Issues: result.Issues);
     }
@@ -165,10 +178,21 @@ public sealed class RestoreWorkflowService : IWorkflowService<RestoreRequest, Re
     private static string BuildMessage(InterchangeRestoreResult result) => result.Outcome switch
     {
         ERestoreOutcome.Success => $"Restore succeeded: {result.ObjectsApplied} objects, {result.RowsRestored:N0} rows",
-        ERestoreOutcome.CompletedWithIssues => $"Restore completed with issues: {result.ObjectsApplied} objects",
+        ERestoreOutcome.CompletedWithIssues => SummarizeIssues(result),
         ERestoreOutcome.Cancelled => $"Restore cancelled after {result.ObjectsApplied} objects",
-        ERestoreOutcome.Refused => "Restore refused — target database not empty",
+        ERestoreOutcome.Refused => IssueSummary.ForOutcome("Restore refused", result.Issues),
         ERestoreOutcome.Failed => IssueSummary.ForOutcome("Restore failed", result.Issues),
         _ => "Restore outcome unavailable"
     };
+
+    /// <summary>
+    /// States what a restore that ran did not carry. The object count is not the answer: a table whose
+    /// rows the target refused is still an object the run created, so a restore that lost its data reads
+    /// exactly like a complete one. The check after the data is what saw the loss, so its two numbers are
+    /// the sentence — how many tables disagree with the catalog, out of how many it compared.
+    /// </summary>
+    private static string SummarizeIssues(InterchangeRestoreResult result) =>
+        result.RowCountMismatches > 0 && result.TablesChecked > 0
+            ? $"Restore completed with issues — {result.RowCountMismatches} of {result.TablesChecked} table(s) hold a different row count"
+            : IssueSummary.ForOutcome("Restore completed with issues", result.Issues);
 }

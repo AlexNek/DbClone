@@ -249,7 +249,7 @@
                                 </ui:Button.Content>
                             </ui:Button>
 
-                            <!--  Relationship view: the source database read live, and any catalog on disk (feature 11)  -->
+                            <!--  Relationship view: the source database read live, and any catalog on disk  -->
                             <StackPanel
                                 Margin="0,8,0,0"
                                 HorizontalAlignment="Center"
@@ -312,7 +312,7 @@
                                 </ui:Button.Content>
                             </ui:Button>
 
-                            <!--  Relationship view: the destination database read live (feature 11)  -->
+                            <!--  Relationship view: the destination database read live  -->
                             <ui:Button
                                 Margin="0,8,0,0"
                                 HorizontalAlignment="Center"

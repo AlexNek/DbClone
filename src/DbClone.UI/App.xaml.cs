@@ -173,9 +173,9 @@ public partial class App : System.Windows.Application, IDisposable
             )
             .ConfigureServices((_, services) =>
                 {
-                    // The plugin catalog is the single route from a connection to an adapter
-                    // (refactors/09 P2/P3). It scans the publish folder's plugins/ directory; the
-                    // engine is discovered there, never registered by name in this file.
+                    // The plugin catalog is the single route from a connection to an adapter.
+                    // It scans the publish folder's plugins/ directory; the engine is
+                    // discovered there, never registered by name in this file.
                     services.AddSingleton<IAdapterCatalog>(sp =>
                         new DatabaseAdapterCatalog(
                             Path.Combine(AppContext.BaseDirectory, "plugins"),

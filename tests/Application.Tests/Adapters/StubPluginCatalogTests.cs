@@ -15,7 +15,7 @@ using Microsoft.Extensions.Logging.Abstractions;
 namespace Application.Tests.Adapters;
 
 /// <summary>
-/// The P9 proof (refactors/09): a second "engine", compiled as the <c>DbAdapter.StubPlugin</c>
+/// The stub-plugin proof: a second "engine", compiled as the <c>DbAdapter.StubPlugin</c>
 /// assembly and staged into a temporary plugin folder, is discovered by the catalog, selected by
 /// its dialect and run to completion through the shared pipeline — with no production file touched.
 /// The same run asserts the platform the catalog lists was read from the plugin's own <c>.platform</c>
@@ -114,7 +114,7 @@ public sealed class StubPluginCatalogTests : IDisposable
         Subscriptions: [],
         Extensions: []);
 
-    // Obviously-fake platform data (no real host, port, user or engine fact) — refactors/09 test rules.
+    // Obviously-fake platform data (no real host, port, user or engine fact).
     private const string StubPlatformFile = """
         {
           "id": "stubhosted",

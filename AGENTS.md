@@ -15,7 +15,7 @@ plugins/postgresql   → a publish of DbAdapter.PostgreSql; never a project refe
 - **CanonicalModel** — the model records, enums (including `ESslMode`), and table identity. Names no engine.
 - **DbClone.Application** — the plugin catalog (`IAdapterCatalog`/`DatabaseAdapterCatalog`), DTOs, copy workflow, comparison, selection, settings, reports. References Definitions and CanonicalModel only. NO provider-specific implementations. NuGet dependencies: `Microsoft.Extensions.Logging.Abstractions` and `Microsoft.Extensions.DependencyInjection.Abstractions`.
 - **DbAdapter.PostgreSql** — implements the Definitions roles for PostgreSQL and composes its own engine graph (no DI container). Published into `plugins/postgresql`, never referenced by the UI at compile time.
-- **DbClone.UI** — project-references Application and CanonicalModel (Definitions types arrive transitively through Application). Names no engine and never reaches `DbAdapter.PostgreSql`; it may consume the engine-neutral boundary types the design places in `DbAdapter.Definitions` (`IAdapterCatalog`, `IModelComparer`, `ECompareStatus` — see `refactors/09/adapterPluginDesign.md` line 72 and 178).
+- **DbClone.UI** — project-references Application and CanonicalModel (Definitions types arrive transitively through Application). Names no engine and never reaches `DbAdapter.PostgreSql`; it may consume the engine-neutral boundary types the design places in `DbAdapter.Definitions` (`IAdapterCatalog`, `IModelComparer`, `ECompareStatus`).
 
 ## Adapters Are Plugins (Composition Root)
 

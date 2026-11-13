@@ -183,7 +183,7 @@ public sealed partial class UnifiedConnectionManagerViewModel : ObservableObject
 
     // ── Static data ─────────────────────────────────────────────────────────────
 
-    /// <summary>The TLS choices the active engine offers, supplied by its adapter (refactors/09 P7).</summary>
+    /// <summary>The TLS choices the active engine offers, supplied by its adapter.</summary>
     public IReadOnlyList<string> SslModeValues { get; }
 
     public UnifiedConnectionManagerViewModel(
@@ -227,7 +227,7 @@ public sealed partial class UnifiedConnectionManagerViewModel : ObservableObject
             _selectedTabIndex = initialTab == 0 ? s_lastTabIndex : initialTab;
 
         // Set default form values from the active engine's platform defaults, never an
-        // engine value written in the UI (refactors/09 P5).
+        // engine value written in the UI.
         var connectionDefaults = _platformService.GetConnectionDefaults(defaultPlatformId);
         _formHost = "localhost";
         _formPort = connectionDefaults.Port.ToString();

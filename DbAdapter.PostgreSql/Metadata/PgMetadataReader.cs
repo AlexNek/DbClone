@@ -41,6 +41,19 @@ public sealed class PgMetadataReader : IMetadataReader
     private IReadOnlySet<string> _systemSchemas = PgSystemSchemas.AllSet;
 
     /// <summary>
+    /// The built-in role that owns the <c>public</c> schema from PostgreSQL 15 on.
+    /// </summary>
+    /// <remarks>
+    /// A schema it owns belongs to the database, never to a managed platform: the role cannot log in
+    /// and has no members a membership check can see, so the ownership heuristic read it as somebody
+    /// else's and excluded <c>public</c> — and every table in it — from each read that asks platform
+    /// schemas to be left out. A restore then reported a target holding no schema and no table over
+    /// the rows it had just written, and the emptiness check could not see what a user had put in
+    /// <c>public</c>.
+    /// </remarks>
+    private const string DatabaseOwnerRole = "pg_database_owner";
+
+    /// <summary>
     /// Initializes a new instance of the <see cref="PgMetadataReader"/> class.
     /// </summary>
     public PgMetadataReader(PgSqlExecutor executor, ILogger<PgMetadataReader> logger)
@@ -228,10 +241,32 @@ public sealed class PgMetadataReader : IMetadataReader
 
         foreach (var s in schemas)
         {
-            if (!s.HasUsage || !userOwnedOwners.Contains(s.Owner))
+            if (IsPlatformManaged(s.Owner, s.HasUsage, userOwnedOwners))
                 excluded.Add(s.Name);
         }
     }
+
+    /// <summary>
+    /// Decides whether a schema belongs to a managed platform rather than to the user reading it.
+    /// </summary>
+    /// <param name="owner">The role that owns the schema.</param>
+    /// <param name="hasUsage">Whether the reading user may use the schema at all.</param>
+    /// <param name="userOwnedOwners">
+    /// The owners the reading user owns or is a member of, resolved by the caller from the connection.
+    /// </param>
+    /// <remarks>
+    /// The database's own owner answers <see langword="false"/> whatever the resolved set holds: it is
+    /// the role PostgreSQL gave <c>public</c> to, so no platform introduced it and no membership check
+    /// can name it — asking the set alone hid <c>public</c> from every read that leaves platform
+    /// schemas out.
+    /// </remarks>
+    internal static bool IsPlatformManaged(
+        string owner,
+        bool hasUsage,
+        IReadOnlySet<string> userOwnedOwners) =>
+        !hasUsage
+        || !(userOwnedOwners.Contains(owner)
+             || string.Equals(owner, DatabaseOwnerRole, StringComparison.OrdinalIgnoreCase));
 
     private static IReadOnlyList<FunctionParameter> ParseFunctionParameters(string arguments)
     {

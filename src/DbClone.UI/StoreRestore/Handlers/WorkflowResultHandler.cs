@@ -90,15 +90,42 @@ public sealed class WorkflowResultHandler : IWorkflowResultHandler
             return;
         }
 
-        state.StatusBarSummary = result.Success ? $"Restore succeeded — {result.ObjectsApplied} objects" : "Restore FAILED";
-        var severity = result.HasIssues ? InfoBarSeverity.Warning : (result.Success ? InfoBarSeverity.Success : InfoBarSeverity.Error);
-        state.ShowBanner(result.Success ? "Restore Complete" : "Restore Failed", result.Message, severity);
+        // A run that finished is not a success when it left tables empty. A table whose rows the target
+        // refused still counts as an object the run created, so the object count alone reads exactly like
+        // a complete restore — the status bar and the banner say what the run completed with, and the
+        // banner is styled by the worst issue it reported rather than by the fact that it reached the end.
+        state.StatusBarSummary = !result.Success
+            ? "Restore FAILED"
+            : result.HasIssues ? "Restore completed with issues" : $"Restore succeeded — {result.ObjectsApplied} objects";
+
+        var title = !result.Success
+            ? "Restore Failed"
+            : result.HasIssues ? "Restore Completed with Issues" : "Restore Complete";
+
+        var severity = !result.Success
+            ? InfoBarSeverity.Error
+            : result.HasIssues ? SeverityOf(result.Issues) : InfoBarSeverity.Success;
+
+        state.ShowBanner(title, result.Message, severity);
 
         LogIssues(state, result.Issues);
 
         if (result.RowCountMismatches > 0)
-            state.LogWarning($"{result.RowCountMismatches} table(s) have a row-count mismatch.");
+        {
+            state.LogError(result.TablesChecked > 0
+                ? $"{result.RowCountMismatches} of {result.TablesChecked} table(s) do not hold the row count the catalog recorded."
+                : $"{result.RowCountMismatches} table(s) do not hold the row count the catalog recorded.");
+        }
     }
+
+    /// <summary>
+    /// The severity a banner is shown with: an error the run reported outranks a note about a part of it,
+    /// so the banner of a restore that lost rows is never the green one.
+    /// </summary>
+    private static InfoBarSeverity SeverityOf(IReadOnlyList<InterchangeIssueView>? issues) =>
+        issues is not null && issues.Any(issue => issue.Severity == EInterchangeSeverity.Error)
+            ? InfoBarSeverity.Error
+            : InfoBarSeverity.Warning;
 
     private static void LogIssues(WorkflowState state, IReadOnlyList<InterchangeIssueView>? issues)
     {

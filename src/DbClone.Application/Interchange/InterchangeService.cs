@@ -222,6 +222,35 @@ public sealed class InterchangeService : IInterchangeService
     }
 
     /// <inheritdoc />
+    public async Task<string?> DescribeRestoreRefusalAsync(
+        ConnectionInfo connection,
+        CancellationToken cancellationToken)
+    {
+        ArgumentNullException.ThrowIfNull(connection);
+
+        var target = _targetFactory.Create(connection);
+        var adapter = _targetFactory.ResolveAdapter(connection.Engine);
+
+        // The restore's own check, on the restore's own writer: asking it here is what makes the
+        // answer the one the run would give, instead of a second opinion that can disagree with it.
+        await using var writer = adapter.OpenWriter(target, new ImportOptions());
+        try
+        {
+            await writer.EnsureEmptyTargetAsync(cancellationToken);
+            _logger.LogInformation("Restore target is empty: {Database}", connection.DatabaseName);
+            return null;
+        }
+        catch (InvalidOperationException ex)
+        {
+            _logger.LogWarning(
+                "Restore target is not empty: {Database} — {Refusal}",
+                connection.DatabaseName,
+                ex.Message);
+            return ex.Message;
+        }
+    }
+
+    /// <inheritdoc />
     public async Task<InterchangeRestoreResult> RestoreAsync(
         InterchangeRestoreRequest request,
         IProgress<InterchangeProgressView>? progress,
@@ -289,6 +318,7 @@ public sealed class InterchangeService : IInterchangeService
                 ObjectsSkipped: 0,
                 RowsRestored: 0,
                 RowCountMismatches: 0,
+                TablesChecked: 0,
                 Issues: [new InterchangeIssueView(EInterchangeSeverity.Warning, "Cancelled", "The operation was cancelled.", string.Empty, string.Empty)],
                 Validation: null,
                 LastCompletedChunk: null,
@@ -304,6 +334,7 @@ public sealed class InterchangeService : IInterchangeService
                 ObjectsSkipped: 0,
                 RowsRestored: 0,
                 RowCountMismatches: 0,
+                TablesChecked: 0,
                 Issues: [new InterchangeIssueView(EInterchangeSeverity.Error, "ImportFailed", ex.Message, string.Empty, string.Empty)],
                 Validation: null,
                 LastCompletedChunk: null,
@@ -806,6 +837,10 @@ public sealed class InterchangeService : IInterchangeService
             RowCountMismatches: report is null
                 ? 0
                 : report.Issues.Count(i => i.Code == RowCountMismatchCode),
+            // The tables the check compared, which is every table it was given a count for: without it a
+            // mismatch figure reads as an absolute loss, and the reader cannot tell a restore that lost
+            // half its data from one that lost a table.
+            TablesChecked: report?.FoundRowCounts.Count ?? 0,
             Issues: issues,
             Validation: report is null
                 ? null

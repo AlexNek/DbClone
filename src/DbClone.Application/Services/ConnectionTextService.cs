@@ -8,9 +8,9 @@ namespace DbClone.Application.Services;
 
 /// <summary>
 /// Forwards the connection-text questions to the syntax role of the installed adapter, so the UI
-/// parses and writes connection strings without naming any engine or definitions type (D9, D14).
+/// parses and writes connection strings without naming any engine or definitions type.
 /// The adapter is resolved at call time, never at construction, so an empty catalog does not stop
-/// the application from starting (refactors/09 P8).
+/// the application from starting.
 /// </summary>
 public sealed class ConnectionTextService : IConnectionTextService
 {

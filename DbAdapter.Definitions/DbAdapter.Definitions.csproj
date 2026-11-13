@@ -3,9 +3,9 @@
   <!--
     The contract of the boundary: every role an engine block fills, plus the three types that
     travel through it (AdapterInfo, DatabaseTarget, CopyRequest). Also holds the shared copy
-    execution loop and the platform definition reader (refactors/09 P5): no SQL and no engine
+    execution loop and the platform definition reader: no SQL and no engine
     name in code. The logging abstraction is the only package of its own. One project reference
-    (CanonicalModel); refactors/08/adapterConceptDesign.md D10, relaxed by refactors/09.
+    (CanonicalModel).
     TargetFramework, Nullable, ImplicitUsings, GenerateDocumentationFile and the build-time
     GitVersion.MsBuild package come from the repository-root Directory.Build.props.
   -->

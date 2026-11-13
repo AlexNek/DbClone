@@ -13,7 +13,7 @@ namespace Application.Tests.Adapters;
 /// paths a catalog meets before any engine is installed: nothing to read, an unreadable folder and
 /// a folder that holds no adapter. Loading a real adapter (and so the duplicate-rejection and the
 /// cross-context type-identity guarantees) needs a compiled plugin assembly and is covered by the
-/// stub-adapter test that ships with Phase 7 (refactors/09 P9).
+/// stub-adapter test instead.
 /// </summary>
 public sealed class DatabaseAdapterCatalogTests : IDisposable
 {

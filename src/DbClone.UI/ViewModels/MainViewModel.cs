@@ -450,7 +450,7 @@ public sealed partial class MainViewModel : ObservableObject
         await ExecuteStoreWorkflowAsync("Restore", ct => RunRestoreAsync(catalogPath, ct));
     }
 
-    // ── Relationship view (feature 11, D7) ──────────────────────────────────────
+    // ── Relationship view ───────────────────────────────────────────────────────
 
     /// <summary>Opens the relationship view of the source database, read live.</summary>
     [RelayCommand(CanExecute = nameof(CanViewSourceRelationships))]

@@ -27,8 +27,8 @@
     <!-- The engine project is referenced only for build ordering, so a plain build produces a
          populated plugins folder. ReferenceOutputAssembly=false keeps the engine assembly out of
          the application output and its types out of the UI's compile surface; the PublishAdapters
-         target below publishes it into $(TargetDir)plugins\<dialect> where the catalog reads it
-         (refactors/09 P10). This is the only file under src that names an adapter project. -->
+         target below publishes it into $(TargetDir)plugins\<dialect> where the catalog reads it.
+         This is the only file under src that names an adapter project. -->
     <ProjectReference Include="..\..\DbAdapter.PostgreSql\DbAdapter.PostgreSql.csproj" ReferenceOutputAssembly="false" />
   </ItemGroup>
 
@@ -36,9 +36,9 @@
     <PackageReference Include="Autoupdater.NET.Official" Version="1.9.2" />
     <PackageReference Include="CommunityToolkit.Mvvm" Version="8.4.2" />
     <PackageReference Include="Microsoft.Extensions.Hosting" Version="10.0.9" />
-    <!-- The relationship view's in-app window (feature 11, Phase 3): Chromium shipped as a WPF
+    <!-- The relationship view's in-app window: Chromium shipped as a WPF
          control. The runtime it drives is installed by the bundle and is optional — a machine
-         without it uses the browser presenter instead (D10, D11). -->
+         without it uses the browser presenter instead. -->
     <PackageReference Include="Microsoft.Web.WebView2" Version="1.0.4314.35" />
     <PackageReference Include="Serilog" Version="4.4.0" />
     <PackageReference Include="Serilog.Enrichers.Thread" Version="4.0.0" />

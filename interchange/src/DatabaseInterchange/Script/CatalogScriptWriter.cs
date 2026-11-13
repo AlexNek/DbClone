@@ -850,12 +850,12 @@ internal sealed class CatalogScriptWriter
 
     /// <summary>
     /// Writes the <c>psql</c> driver: a relative include per file the pass wrote, in run order, the schema
-    /// first (FR10, D7).
+    /// first.
     /// </summary>
     /// <remarks>
     /// <c>\ir</c> resolves an include against the driver's own folder, so the one command works from any
     /// directory. <c>ON_ERROR_STOP</c> is deliberately not set: what a failed block does is the reader's
-    /// choice, and feature 08's cycle contract depends on the validation after it (D7).
+    /// choice, and the cycle contract depends on the validation after it.
     /// </remarks>
     private static void WriteLoadDriver(ScriptFile driver, IEnumerable<string> dataFileNames)
     {

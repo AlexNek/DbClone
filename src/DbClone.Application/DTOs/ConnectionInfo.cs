@@ -9,8 +9,8 @@ namespace DbClone.Application.DTOs;
 /// <param name="Username">Login user.</param>
 /// <param name="Password">Login password.</param>
 /// <param name="SslMode">The engine's TLS identifier (e.g. "Prefer"), not the shared enum: the
-/// product carries the adapter's own name and converts at the boundary (refactors/09 P7).</param>
-/// <param name="Engine">The dialect that selects the adapter (refactors/09 P4). Null on files
+/// product carries the adapter's own name and converts at the boundary.</param>
+/// <param name="Engine">The dialect that selects the adapter. Null on files
 /// written before the engine was recorded, which the single installed adapter serves.</param>
 public sealed record ConnectionInfo(
     string Host,

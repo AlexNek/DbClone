@@ -1,3 +1,4 @@
+using DbClone.Application.DTOs;
 using DbClone.Application.Relationship;
 
 namespace DbClone.Application.Interchange;
@@ -23,6 +24,32 @@ public interface IInterchangeService
     /// </summary>
     Task<InterchangePlanView> PlanRestoreAsync(
         string catalogPath,
+        CancellationToken cancellationToken);
+
+    /// <summary>
+    /// States what a restore would refuse this target for, without starting one.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// The answer comes from the restore's own check — the same writer, asked before the run — so a
+    /// target this method accepts is one the restore will not stop on. A check of the application's
+    /// own could pass a target the restore then refuses, which is how a user who chose to overwrite a
+    /// database was refused after the overwrite had already run.
+    /// </para>
+    /// <para>
+    /// Ask it twice: before offering to overwrite the selected database, and again after the clean.
+    /// A clean reports what it could not drop as warnings rather than failing, so the second answer is
+    /// the one that says a restore would still be refused, and for what.
+    /// </para>
+    /// </remarks>
+    /// <param name="connection">The database a restore would write to.</param>
+    /// <param name="cancellationToken">Cancellation token.</param>
+    /// <returns>
+    /// The sentence naming what the target already holds, or <see langword="null"/> when the target is
+    /// empty. A refused restore reports the same sentence.
+    /// </returns>
+    Task<string?> DescribeRestoreRefusalAsync(
+        ConnectionInfo connection,
         CancellationToken cancellationToken);
 
     /// <summary>

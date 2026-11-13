@@ -2,6 +2,7 @@ using CanonicalModel.Interchange;
 using DbAdapter.Definitions;
 using DbAdapter.Definitions.Interchange;
 using DatabaseInterchange.Format;
+using DatabaseInterchange.Script;
 
 using Microsoft.Extensions.Logging;
 
@@ -212,7 +213,9 @@ public sealed class SnapshotImporter
                 Issues = [new InterchangeIssue(
                     "RestoreRefused",
                     EIssueSeverity.Warning,
-                    ex.Message)]
+                    ex.Message,
+                    Details: "A restore applies its catalog to an empty database; "
+                             + "cleaning the target is a separate act performed beforehand.")]
             };
         }
 
@@ -344,7 +347,15 @@ public sealed class SnapshotImporter
                 + "not on the target."));
         }
 
-        foreach (var table in essentialStagesApplied ? tables : [])
+        // A foreign key is checked on every row the moment the constraint exists, and the constraints
+        // stage has already created them, so a table's rows have to follow the rows of every table they
+        // name. The catalog records its tables in alphabetical order, which is no load order at all: the
+        // first table whose parent sorts later would fail, and every table naming that one with it. The
+        // order therefore comes from the catalog's own keys, which is the order the script path writes
+        // its row blocks in.
+        var loadOrder = TableLoadOrder.Order(tables);
+
+        foreach (var table in essentialStagesApplied ? loadOrder : [])
         {
             ct.ThrowIfCancellationRequested();
 
@@ -368,18 +379,21 @@ public sealed class SnapshotImporter
             // way to the target (design §5, §6.9).
             try
             {
-                var rows = catalogReader.ReadRowsAsync(schemaName, table.Name, ct);
-                var applied = await writer.WriteTableRowsAsync(tableRef, table.Columns, rows, ct);
-                totalRows += applied;
-
                 // The count the table's own manifest states is what the target is checked against, because
                 // it was written by the capture and not by this restore. A catalog holding no data folder
                 // for a table — an export run without data — recorded no count, so nothing is expected.
+                // It is read before the rows are written, because the expectation has to outlast a write
+                // that failed: read on the way out, it would leave exactly the tables that lost their rows
+                // out of the check, and a restore that wrote nothing would be found to agree with itself.
                 var recorded = await catalogReader.ReadTableRowCountAsync(schemaName, table.Name, ct);
                 if (recorded is not null)
                 {
                     recordedRowCounts[tableRef] = recorded.Value;
                 }
+
+                var rows = catalogReader.ReadRowsAsync(schemaName, table.Name, ct);
+                var applied = await writer.WriteTableRowsAsync(tableRef, table.Columns, rows, ct);
+                totalRows += applied;
             }
             catch (OperationCanceledException)
             {

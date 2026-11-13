@@ -21,7 +21,7 @@ public class NewConnectionResetsFormTests
     /// For any form state (arbitrary values in all connection form fields), invoking
     /// NewConnectionCommand SHALL reset every field to blank, except the connection defaults
     /// (host, port, TLS, username, connection type), which come from the injected platform
-    /// service — the UI writes no engine default of its own (refactors/09 P5).
+    /// service — the UI writes no engine default of its own.
     /// </summary>
     [Property(Arbitrary = [typeof(ArbitraryConnections)], MaxTest = 100)]
     public bool NewConnection_resets_form_to_defaults(SavedConnection connection)

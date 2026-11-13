@@ -92,7 +92,7 @@ public sealed class ConnectionStore : IConnectionStore
         [JsonConverter(typeof(ConnectionTypeConverter))]
         public string? ConnectionType { get; set; }
 
-        /// <summary>Engine dialect that selects the adapter (refactors/09 P4). Absent on pre-refactor files.</summary>
+        /// <summary>Engine dialect that selects the adapter. Absent on pre-refactor files.</summary>
         public string? Engine { get; set; }
 
         public string DatabaseName { get; set; } = string.Empty;

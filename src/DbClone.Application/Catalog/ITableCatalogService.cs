@@ -15,11 +15,6 @@ public interface ITableCatalogService
     /// <summary>Human-readable engine name, e.g. "PostgreSQL".</summary>
     string ProviderName { get; }
 
-    /// <summary>Whether the database holds any user data.</summary>
-    Task<bool> CheckDestinationHasDataAsync(
-        ConnectionInfo connection,
-        CancellationToken ct);
-
     /// <summary>
     /// Checks whether the user has sufficient permissions for the requested operations.
     /// Returns a list of missing permissions/problems. Empty list means all checks passed.

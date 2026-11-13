@@ -186,6 +186,88 @@ public sealed class WorkflowResultHandlerTests
         state.LogMessages.Should().NotContain(entry => entry.Level == ELogLevel.Warning);
     }
 
+    [Fact]
+    public void HandleRestoreResult_DoesNotCallARestoreThatLeftTablesEmptyASuccess()
+    {
+        // Arrange — the shape the ordering defect leaves: the run reached its end, every object stands,
+        // and 13 of the 28 tables the catalog recorded rows for hold nothing.
+        var state = new WorkflowState();
+        var result = RestoreResult(
+            hasIssues: true,
+            message: "Restore completed with issues — 13 of 28 table(s) hold a different row count",
+            rowCountMismatches: 13,
+            tablesChecked: 28,
+            issues:
+            [
+                new InterchangeIssueView(
+                    EInterchangeSeverity.Error,
+                    "RowCountMismatch",
+                    "The catalog records 462 row(s) for public.ai_assisted_decision, but the target holds 0.",
+                    "table:public.ai_assisted_decision",
+                    string.Empty),
+            ]);
+
+        // Act
+        _sut.HandleRestoreResult(state, result);
+
+        // Assert — the status bar and the banner state what the run completed with rather than what it
+        // created, and the banner is not the green one: the object count is what a reader would otherwise
+        // take for the whole story.
+        state.StatusBarSummary.Should().Be("Restore completed with issues");
+        state.BannerTitle.Should().Be("Restore Completed with Issues");
+        state.BannerMessage.Should().Be(
+            "Restore completed with issues — 13 of 28 table(s) hold a different row count");
+        state.BannerSeverity.Should().Be(Wpf.Ui.Controls.InfoBarSeverity.Error);
+
+        // The loss is its own error line, sized by the tables the check compared, beside the per-table
+        // lines the issues produce.
+        state.LogMessages.Should().Contain(entry =>
+            entry.Level == ELogLevel.Error
+            && entry.Message == "13 of 28 table(s) do not hold the row count the catalog recorded.");
+    }
+
+    [Fact]
+    public void HandleRestoreResult_KeepsAGreenBannerForARestoreThatCarriedEverything()
+    {
+        // Arrange
+        var state = new WorkflowState();
+
+        // Act
+        _sut.HandleRestoreResult(state, RestoreResult(
+            hasIssues: false,
+            message: "Restore succeeded: 71 objects, 3,041 rows",
+            rowCountMismatches: 0,
+            tablesChecked: 28,
+            issues: []));
+
+        // Assert — the plain success is unchanged, so the stronger wording stays reserved for a run that
+        // actually lost something.
+        state.StatusBarSummary.Should().Be("Restore succeeded — 71 objects");
+        state.BannerTitle.Should().Be("Restore Complete");
+        state.BannerSeverity.Should().Be(Wpf.Ui.Controls.InfoBarSeverity.Success);
+    }
+
+    /// <summary>A finished restore, as the workflow service hands it over.</summary>
+    private static RestoreResult RestoreResult(
+        bool hasIssues,
+        string message,
+        int rowCountMismatches,
+        int tablesChecked,
+        IReadOnlyList<InterchangeIssueView> issues) =>
+        new(
+            Success: true,
+            Message: message,
+            ObjectsApplied: 71,
+            RowsRestored: 3041,
+            ElapsedSeconds: 12.5,
+            HasIssues: hasIssues,
+            WasCancelled: false,
+            WasRefused: false,
+            RowCountMismatches: rowCountMismatches,
+            TablesChecked: tablesChecked,
+            LastCompletedChunk: null,
+            Issues: issues);
+
     private static StoreResult StoreResult(
         bool withSummary,
         bool summaryRequested = true,

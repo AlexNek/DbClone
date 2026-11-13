@@ -6,8 +6,8 @@ using DbClone.UI.Services.GraphLayout;
 namespace DbClone.UI.Services.Relationship;
 
 /// <summary>
-/// Builds the document from a graph: analyze, lay out, render — the three stages feature 07 has, ordered
-/// once here so every caller produces the same document (D12).
+/// Builds the document from a graph: analyze, lay out, render — the three stages, ordered once here so
+/// every caller produces the same document.
 /// </summary>
 /// <remarks>
 /// The document is a string and nothing else: it names no path, so a live read and a stored catalog are

@@ -25,7 +25,7 @@ namespace DbAdapter.PostgreSql.Adapters;
 /// factory and the folder it was loaded from, and it builds its own executor,
 /// stage repository, platform resolver and definition loader over that folder —
 /// no container, so a block installable into <c>plugins/&lt;dialect&gt;</c> needs
-/// nothing the host must know about (refactors/09 P3/P10).
+/// nothing the host must know about.
 /// </para>
 /// </summary>
 public sealed class PostgreSqlAdapter : IDatabaseAdapter
@@ -145,7 +145,7 @@ public sealed class PostgreSqlAdapter : IDatabaseAdapter
     /// Builds the PostgreSQL object graph by hand — the equivalent of the retired
     /// <c>AddPostgreSqlProvider()</c> registrations, but container-free so a loaded plugin
     /// composes itself. The platform files are read from within <paramref name="pluginDirectory"/>
-    /// so the block resolves its own data, never the application's folder (refactors/09 P3/P5).
+    /// so the block resolves its own data, never the application's folder.
     /// </summary>
     private static EngineGraph ComposeGraph(ILoggerFactory loggerFactory, string pluginDirectory)
     {

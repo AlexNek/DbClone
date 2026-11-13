@@ -1529,6 +1529,42 @@ public class PostgreSqlWriterTests
     }
 
     [Fact]
+    public void SchemasTheReadLeftOut_NamesOnlyWhatTheModelDoesNotHold()
+    {
+        // The read answers with what its filters kept, and a schema owned by the database's own role
+        // is left out of it while the target still holds it. Naming the difference is what lets the
+        // check ask the target about it instead of reporting a restore that created nothing.
+        var model = InterchangeTestModel.Empty() with
+        {
+            Schemas = [new Models.SchemaDefinition("public", "test_user")],
+        };
+
+        PostgreSqlWriter.SchemasTheReadLeftOut(model, ["public", "sales"])
+            .Should().Equal("sales");
+
+        PostgreSqlWriter.SchemasTheReadLeftOut(model, ["public"]).Should().BeEmpty();
+    }
+
+    [Fact]
+    public void CountTargetObjects_Extensions_AreCountedLikeTheCatalogCountsThem()
+    {
+        // A restore installs every extension its catalog records, and the catalog counts each one, so
+        // the target is counted the same way — the counter's silence made every restore carrying an
+        // extension end with "the target was not checked for them".
+        var counted = PostgreSqlWriter.CountTargetObjects(
+            InterchangeTestModel.Empty() with
+            {
+                Extensions =
+                [
+                    new Models.ExtensionDefinition("pg_trgm", "public", "1.6", null),
+                    new Models.ExtensionDefinition("plpgsql", "pg_catalog", "1.0", null),
+                ],
+            });
+
+        counted[EObjectKind.Extension].Should().Be(2);
+    }
+
+    [Fact]
     public void CountTargetObjects_KindTheLiveModelHasNoCollectionFor_IsLeftOut()
     {
         var counted = PostgreSqlWriter.CountTargetObjects(InterchangeTestModel.Empty());

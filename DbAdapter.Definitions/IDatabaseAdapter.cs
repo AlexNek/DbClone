@@ -36,7 +36,7 @@ public interface IDatabaseAdapter
     /// <summary>
     /// The adapter's engine-specific model comparers, appended to the host's provider-neutral
     /// comparers when a comparison runs. Returns only what the engine owns (e.g. its DDL comparer);
-    /// the shared comparers stay registered by the host (refactors/09 P6).
+    /// the shared comparers stay registered by the host.
     /// </summary>
     IReadOnlyList<IModelComparer> CreateModelComparers();
 

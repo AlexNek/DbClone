@@ -36,15 +36,6 @@ public sealed class TableCatalogService : ITableCatalogService
     private IDatabaseAdapter AdapterFor(ConnectionInfo connection) => _catalog.Resolve(connection.Engine);
 
     /// <inheritdoc />
-    public async Task<bool> CheckDestinationHasDataAsync(
-        ConnectionInfo connection,
-        CancellationToken ct)
-    {
-        var admin = AdapterFor(connection).CreateAdmin(_targetFactory.Create(connection));
-        return await admin.HasDataAsync(ct);
-    }
-
-    /// <inheritdoc />
     public async Task<IReadOnlyList<string>> CheckPermissionsAsync(
         ConnectionInfo connection,
         EPermissionCheck checks,

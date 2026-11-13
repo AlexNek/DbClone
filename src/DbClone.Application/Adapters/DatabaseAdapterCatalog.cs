@@ -14,7 +14,7 @@ namespace DbClone.Application.Adapters;
 /// <see cref="PluginAssemblyLoadContext"/>, its entry assembly is scanned for a concrete
 /// <see cref="IDatabaseAdapter"/> with the agreed constructor, and adapters whose dialect or id
 /// collide are refused. A folder that is empty, unreadable or holds no adapter is logged and
-/// skipped, never fatal — an empty catalog is a supported state (refactors/09 P2/P8).
+/// skipped, never fatal — an empty catalog is a supported state.
 /// </summary>
 public sealed class DatabaseAdapterCatalog : IAdapterCatalog
 {
@@ -203,7 +203,7 @@ public sealed class DatabaseAdapterCatalog : IAdapterCatalog
     /// <summary>
     /// Drops every adapter that collides with another — on dialect, on internal id, or on a hosted
     /// platform id — and reports the folders behind each collision. A duplicate is an installation
-    /// mistake; silently choosing one would make behaviour depend on folder order (refactors/09 P2).
+    /// mistake; silently choosing one would make behaviour depend on folder order.
     /// </summary>
     private static IReadOnlyList<IDatabaseAdapter> AcceptNonDuplicates(
         IReadOnlyList<(IDatabaseAdapter Adapter, string Folder)> loaded,

@@ -9,7 +9,7 @@ namespace DbClone.Application.Relationship;
 /// <remarks>
 /// This service reads; it never writes a document, a file or a cache entry. Where the picture is shown
 /// is the presentation layer's decision, and the catalog's own store-time picture stays the store's
-/// artefact (feature 11, D1).
+/// artefact.
 /// </remarks>
 public interface IRelationshipGraphService
 {
