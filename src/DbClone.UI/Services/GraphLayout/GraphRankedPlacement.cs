@@ -91,6 +91,14 @@ internal static class GraphRankedPlacement
     /// </summary>
     private const int RepairTries = 96;
 
+    /// <summary>
+    /// How many places a picture may be measured at while a table joined by one relation is looked for
+    /// on the free side of the table it joins. A place costs a measurement, so the count is bounded and
+    /// the bound is the same on every run — a catalog with more wide fans than this keeps the free side
+    /// it was drawn with for the fans its first tables name (T5).
+    /// </summary>
+    private const int SpreadTries = 96;
+
     /// <summary>Places every card in its band and orders each band.</summary>
     /// <param name="model">The analyzed graph.</param>
     /// <param name="widths">The measured width of every card, in node order.</param>
@@ -111,6 +119,7 @@ internal static class GraphRankedPlacement
 
         var best = Search(model, units, neighbours, bands, widths, ColumnCount(count, widths), count);
         best = Settled(model, units, neighbours, bands, best);
+        best = Spread(model, units, neighbours, best);
         var (columnsOfNode, rowsOfNode, usedColumns, usedRows) = Cells(best, count);
 
         // The cards are placed twice: once to learn which side of every card its arrows meet, and once
@@ -370,6 +379,157 @@ internal static class GraphRankedPlacement
         }
 
         return best;
+    }
+
+    /// <summary>
+    /// Draws a table joined by a single relation on the free side of the table it joins, when that table
+    /// is reached by more arrows on one side than a corridor beside it can give a line each.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// A card's border is dealt out to the ends that meet it and the card is widened until they all fit,
+    /// but the corridor beside it is not widened with it. A run is given a line of its own by climbing the
+    /// ladder beside the card, and the ladder is only so tall: a side carrying more runs than the ladder
+    /// has steps is a side the routing can no longer line up one by one, and the picture then prints two
+    /// arrows as one stroke. That is the count this pass is asked to stay under, and it is read from
+    /// <see cref="GraphEdgeRouter.Ladder"/> rather than guessed, because that is the number of lines the
+    /// routing really has to give.
+    /// </para>
+    /// <para>
+    /// A table joined to one other table is the only card that can answer this. It asks for nothing but
+    /// its own arrow, so it is drawn on the other side of the table it joins — above it rather than under
+    /// it, or under it rather than above — and the rest of the fan keeps a line each. Nothing else moves
+    /// and no arrow is turned around: the card stays beside the table it joins, so the spread costs one
+    /// row of height instead of a band deeper than the picture can use.
+    /// </para>
+    /// <para>
+    /// A move is kept only when it leaves the picture no worse by its own measure, so a card that would
+    /// have to cross the page to reach the free side is left where it stands.
+    /// </para>
+    /// </remarks>
+    /// <param name="model">The analyzed graph.</param>
+    /// <param name="units">The members of every unit.</param>
+    /// <param name="neighbours">The units each unit is joined to.</param>
+    /// <param name="arrangement">The settled arrangement.</param>
+    /// <returns>The arrangement with a fan too wide for one side spread over two.</returns>
+    private static GraphArrangement Spread(
+        CatalogGraphModel model,
+        IReadOnlyList<List<int>> units,
+        IReadOnlyList<List<int>> neighbours,
+        GraphArrangement arrangement)
+    {
+        var next = arrangement;
+        var cost = arrangement.Cost();
+        var counts = new Dictionary<int, (int Above, int Below)>();
+        var tries = 0;
+
+        for (var unit = 0; unit < units.Count && tries < SpreadTries; unit++)
+        {
+            if (units[unit].Count != 1 || neighbours[unit].Count != 1)
+            {
+                continue;
+            }
+
+            var neighbour = neighbours[unit][0];
+            if (neighbour == unit)
+            {
+                continue;
+            }
+
+            if (!counts.TryGetValue(neighbour, out var ends))
+            {
+                ends = Ends(model, next, neighbour);
+                counts[neighbour] = ends;
+            }
+
+            var (_, height) = next.ShapeOf(unit);
+            var (_, neighbourHeight) = next.ShapeOf(neighbour);
+
+            // The card moves to the side of its table that has room for it, and only while that side can
+            // still give every run a line of its own. A side that is full keeps the runs it has: the
+            // overflow is the router's to answer, and moving a card into a full side only moves the
+            // merge with it.
+            var below = next.RowOfUnit[unit] > next.RowOfUnit[neighbour];
+            if (next.RowOfUnit[unit] == next.RowOfUnit[neighbour])
+            {
+                continue;
+            }
+
+            var over = below ? ends.Below : ends.Above;
+            var room = below ? ends.Above : ends.Below;
+
+            if (over <= GraphEdgeRouter.Ladder || room >= GraphEdgeRouter.Ladder)
+            {
+                continue;
+            }
+
+            var row = below
+                ? next.RowOfUnit[neighbour] - height
+                : next.RowOfUnit[neighbour] + neighbourHeight;
+
+            // The free cell is looked for beside the table joined, not beside where the card stands now:
+            // the point of the move is to keep the card next to that table, on its free side.
+            var anchored = next.Moved(unit, row, next.ColumnOfUnit[neighbour]);
+            if (!FreeColumn(anchored, unit, row, out var column))
+            {
+                continue;
+            }
+
+            var moved = anchored.Moved(unit, row, column);
+            tries++;
+            var measure = moved.Cost();
+            if (measure > cost)
+            {
+                continue;
+            }
+
+            next = moved;
+            cost = measure;
+            counts[neighbour] = Ends(model, next, neighbour);
+        }
+
+        return next;
+    }
+
+    /// <summary>How many arrows reach one unit from above it, and how many from below.</summary>
+    /// <param name="model">The analyzed graph.</param>
+    /// <param name="arrangement">The arrangement whose rows are read.</param>
+    /// <param name="unit">The unit to count for.</param>
+    /// <returns>The two counts, a self-reference being counted for neither.</returns>
+    private static (int Above, int Below) Ends(
+        CatalogGraphModel model,
+        GraphArrangement arrangement,
+        int unit)
+    {
+        var above = 0;
+        var below = 0;
+
+        foreach (var edge in model.Edges)
+        {
+            var child = arrangement.UnitOf(edge.ChildIndex);
+            var parent = arrangement.UnitOf(edge.ParentIndex);
+            if (child == parent)
+            {
+                continue;
+            }
+
+            var other = child == unit ? parent : parent == unit ? child : -1;
+            if (other < 0)
+            {
+                continue;
+            }
+
+            if (arrangement.RowOfUnit[other] < arrangement.RowOfUnit[unit])
+            {
+                above++;
+            }
+            else if (arrangement.RowOfUnit[other] > arrangement.RowOfUnit[unit])
+            {
+                below++;
+            }
+        }
+
+        return (above, below);
     }
 
     /// <summary>

@@ -14,9 +14,10 @@ namespace UI.Tests.CatalogGraph;
 
 /// <summary>
 /// The layout stage's own contract: a card stands in the band its references put it in and under the
-/// tables it is joined to, cycles are laid out rather than refused, the three route shapes never share
-/// a meaning, no arrow is drawn across a card it does not join, two routes never run along one line,
-/// and the same catalog draws the same coordinates every time.
+/// tables it is joined to — except a table joined to one table only, which is drawn on the free side
+/// of it when that table's fan is wider than one corridor can line up — cycles are laid out rather than
+/// refused, the three route shapes never share a meaning, no arrow is drawn across a card it does not
+/// join, two routes never run along one line, and the same catalog draws the same coordinates every time.
 /// </summary>
 public sealed class GraphLayoutEngineTests
 {
@@ -600,7 +601,7 @@ public sealed class GraphLayoutEngineTests
     }
 
     [Fact]
-    public void A_fan_in_of_twenty_tables_is_drawn_in_the_band_under_its_parent()
+    public void A_fan_wider_than_one_corridor_is_drawn_on_both_sides_of_its_parent()
     {
         var fixture = CatalogGraphFixture.Create().Table("fan", "parent", 7);
         for (var child = 0; child < 20; child++)
@@ -618,39 +619,112 @@ public sealed class GraphLayoutEngineTests
         var parent = model.NodeIndexesById[CatalogGraphFixture.TableId("fan", "parent")];
         var children = model.Nodes.Where(node => node.Index != parent).Select(node => node.Index).ToList();
 
-        children.Should().OnlyContain(
-            child => grid.RowOfNode[child] > grid.RowOfNode[parent],
-            "every child is drawn in a band below the parent it points at");
+        var below = children.Where(child => grid.RowOfNode[child] > grid.RowOfNode[parent]).ToList();
+        var above = children.Where(child => grid.RowOfNode[child] < grid.RowOfNode[parent]).ToList();
+
+        children.Should().OnlyContain(child => grid.RowOfNode[child] != grid.RowOfNode[parent],
+            "a child is drawn on a side of the parent it points at, never in the parent's own row");
+
+        // The corridor beside a card gives a run a line per step of its ladder, and a fan wider than that
+        // draws two arrows as one stroke if every child is stacked on one side of the parent. A table
+        // joined to nothing else asks for nothing but its own arrow, so the overflow is drawn on the
+        // parent's free side instead (see GraphRankedPlacement.Spread).
+        above.Should().NotBeEmpty("a fan wider than one corridor is spread over both sides of the parent");
+        below.Count.Should().BeLessThanOrEqualTo(
+            GraphEdgeRouter.Ladder, "one side of a card gives a run a line per step of the ladder, and no more");
+        above.Count.Should().BeLessThanOrEqualTo(GraphEdgeRouter.Ladder);
 
         grid.ColumnOfNode[parent].Should().BeInRange(
             children.Min(child => grid.ColumnOfNode[child]),
             children.Max(child => grid.ColumnOfNode[child]),
             "the parent is drawn over its children's own span, not off at one end of it");
 
-        // Twenty children do not fit one line of the page, so the band they stand in is drawn as two
-        // or more lines. A line is a run of the fan: no child stands apart from its neighbour, and no
-        // line stands apart from the line above it. A line narrower than the one above it is centred
-        // under the parent, which is what leaves the empty cells at its ends — a hole a reader reads
-        // as a gap in the fan only where it separates two children of it.
-        var lines = children
-            .GroupBy(child => grid.RowOfNode[child])
-            .OrderBy(line => line.Key)
-            .ToList();
-
-        for (var index = 0; index < lines.Count; index++)
+        // Twenty children do not fit one line of the page, so each side of the fan is drawn as one line or
+        // more. A line is a run of the fan: no child stands apart from its neighbour, and no line stands
+        // apart from the line beside it. A line narrower than the one beside it is centred under the
+        // parent, which is what leaves the empty cells at its ends — a hole a reader reads as a gap in
+        // the fan only where it separates two children of it.
+        foreach (var side in new[] { above, below })
         {
-            var packed = lines[index].Select(child => grid.ColumnOfNode[child]).Order().ToList();
-            packed[^1].Should().Be(
-                packed[0] + packed.Count - 1,
-                "the children of one line are packed one after another with no hole between them");
+            var lines = side
+                .GroupBy(child => grid.RowOfNode[child])
+                .OrderBy(line => line.Key)
+                .ToList();
 
-            if (index > 0)
+            for (var index = 0; index < lines.Count; index++)
             {
-                lines[index].Key.Should().Be(
-                    lines[index - 1].Key + 1,
-                    "the lines of one fan follow one another with no empty row between them");
+                var packed = lines[index].Select(child => grid.ColumnOfNode[child]).Order().ToList();
+                packed[^1].Should().Be(
+                    packed[0] + packed.Count - 1,
+                    "the children of one line are packed one after another with no hole between them");
+
+                if (index > 0)
+                {
+                    lines[index].Key.Should().Be(
+                        lines[index - 1].Key + 1,
+                        "the lines of one fan follow one another with no empty row between them");
+                }
             }
         }
+    }
+
+    [Fact]
+    public void A_table_joined_to_one_table_is_drawn_above_the_hub_it_points_at()
+    {
+        // The reported picture: a hub a dozen tables point at, most of them joined to it and to nothing
+        // else, every arrow stacked under it while the band over it stood empty. A table joined by one
+        // relation asks for nothing but its own arrow, so it is drawn on the hub's free side — one row
+        // over, beside the table it joins — and each arrow keeps a line of its own.
+        var tenants = CatalogGraphFixture.TableId("public", "tenants");
+        var fixture = CatalogGraphFixture.Create().Table("public", "tenants", 400, Column("plan_id"));
+
+        // Two children answer to a table of their own, so they keep the band their references put them in.
+        foreach (var kept in new[] { "drinks", "dishes" })
+        {
+            var child = CatalogGraphFixture.TableId("public", kept);
+            fixture.Table("public", kept, 60, Column("tenant_id"));
+            fixture.Table("public", $"{kept}_revisions", 20, Column("tenant_id"));
+            fixture.Edge(child, tenants, $"fk_{kept}_tenants", ["tenant_id"]);
+            fixture.Edge(
+                CatalogGraphFixture.TableId("public", $"{kept}_revisions"),
+                child,
+                $"fk_{kept}_revisions_{kept}",
+                ["tenant_id"]);
+        }
+
+        for (var leaf = 0; leaf < 14; leaf++)
+        {
+            var table = $"leaf_{leaf:00}";
+            fixture.Table("public", table, 10, Column("tenant_id"));
+            fixture.Edge(CatalogGraphFixture.TableId("public", table), tenants, $"fk_{table}_tenants", ["tenant_id"]);
+        }
+
+        var model = Analyze(fixture);
+        var grid = GridOf(model);
+        var layout = _engine.Compute(model);
+
+        var hub = model.NodeIndexesById[tenants];
+        var children = model.Nodes.Where(node => node.Index != hub).Select(node => node.Index).ToList();
+        var above = children.Where(child => grid.RowOfNode[child] < grid.RowOfNode[hub]).ToList();
+        var below = children.Where(child => grid.RowOfNode[child] > grid.RowOfNode[hub]).ToList();
+
+        above.Should().HaveCountGreaterThanOrEqualTo(2,
+            "the tables joined to the hub by one relation only are drawn on the side that has room for them");
+        above.Should().OnlyContain(child => grid.RowOfNode[child] + 1 == grid.RowOfNode[hub],
+            "a table moved to the hub's free side stays beside it, one row over");
+
+        above.Count.Should().BeLessThanOrEqualTo(
+            GraphEdgeRouter.Ladder, "one side of a card gives a run a line per step of the ladder, and no more");
+
+        foreach (var kept in new[] { "drinks", "dishes" })
+        {
+            grid.RowOfNode[model.NodeIndexesById[CatalogGraphFixture.TableId("public", kept)]]
+                .Should().BeGreaterThan(
+                    grid.RowOfNode[hub],
+                    "a table that answers to another table keeps the band its references put it in");
+        }
+
+        AssertNoTwoArrowsRunOnOneStroke(layout);
     }
 
     [Fact]

@@ -22,6 +22,14 @@ public sealed class PgDataCopier : IDataCopier
 {
     private const int MaxRetriesPerTable = 2;
 
+    /// <summary>
+    /// Minimum time between two row-progress reports. Reporting on every row would flood the
+    /// UI dispatcher; reporting once per COPY batch left every table smaller than one batch
+    /// (5000 rows) with a single report, so the progress panel's row count stood still for
+    /// the whole table. A time interval follows the copy whatever its speed.
+    /// </summary>
+    private const int ProgressIntervalMs = 100;
+
     private readonly string? _destinationConnectionString;
 
     private readonly List<string> _failedTables = [];
@@ -252,7 +260,6 @@ public sealed class PgDataCopier : IDataCopier
                        qualifiedName,
                        columnList,
                        copyCommand,
-                       options,
                        totalRows,
                        progress,
                        cancellationToken);
@@ -308,7 +315,6 @@ public sealed class PgDataCopier : IDataCopier
         string qualifiedName,
         string columnList,
         string copyCommand,
-        CopyOptions options,
         long totalRows,
         IProgress<TableCopyProgress>? progress,
         CancellationToken cancellationToken)
@@ -317,6 +323,7 @@ public sealed class PgDataCopier : IDataCopier
         long rowsCopied = 0;
         long bytesTransferred = 0;
         var sw = Stopwatch.StartNew();
+        var lastReport = Stopwatch.GetTimestamp();
 
         await using var sourceCmd = new NpgsqlCommand(selectSql, _sourceConnection);
         sourceCmd.CommandTimeout = 300;
@@ -346,17 +353,7 @@ public sealed class PgDataCopier : IDataCopier
             rowsCopied++;
             bytesTransferred += 100; // Rough estimate since binary size isn't directly available
 
-            // Report progress periodically
-            if (rowsCopied % options.BatchSize == 0)
-            {
-                progress?.Report(
-                    new TableCopyProgress(
-                        table.SchemaName,
-                        table.Name,
-                        rowsCopied,
-                        totalRows,
-                        sw.Elapsed));
-            }
+            ReportProgress(progress, ref lastReport, table, rowsCopied, totalRows, sw.Elapsed);
         }
 
         await writer.CompleteAsync(cancellationToken);
@@ -397,6 +394,7 @@ public sealed class PgDataCopier : IDataCopier
         long rowsCopied = 0;
         long bytesTransferred = 0;
         var sw = Stopwatch.StartNew();
+        var lastReport = Stopwatch.GetTimestamp();
 
         await using var sourceCmd = new NpgsqlCommand(selectSql, _sourceConnection);
         sourceCmd.CommandTimeout = 300;
@@ -420,6 +418,10 @@ public sealed class PgDataCopier : IDataCopier
             rowsCopied++;
             bytesTransferred += 100;
 
+            // Rows are reported as they are read: a table smaller than one batch is still
+            // written at the end, and waiting for the flush kept its panel figure at zero.
+            ReportProgress(progress, ref lastReport, table, rowsCopied, totalRows, sw.Elapsed);
+
             if (batch.Count >= options.BatchSize)
             {
                 await InsertBatchAsync(
@@ -429,14 +431,6 @@ public sealed class PgDataCopier : IDataCopier
                     batch,
                     cancellationToken);
                 batch.Clear();
-
-                progress?.Report(
-                    new TableCopyProgress(
-                        table.SchemaName,
-                        table.Name,
-                        rowsCopied,
-                        totalRows,
-                        sw.Elapsed));
             }
         }
 
@@ -461,6 +455,29 @@ public sealed class PgDataCopier : IDataCopier
                 sw.Elapsed));
 
         return (rowsCopied, bytesTransferred);
+    }
+
+    /// <summary>
+    /// Reports the rows copied so far, at most once per <see cref="ProgressIntervalMs"/>.
+    /// </summary>
+    private static void ReportProgress(
+        IProgress<TableCopyProgress>? progress,
+        ref long lastReportTimestamp,
+        TableDefinition table,
+        long rowsCopied,
+        long totalRows,
+        TimeSpan elapsed)
+    {
+        if (progress is null)
+            return;
+
+        var now = Stopwatch.GetTimestamp();
+        if (now - lastReportTimestamp < ProgressIntervalMs * Stopwatch.Frequency / 1000)
+            return;
+
+        lastReportTimestamp = now;
+        progress.Report(
+            new TableCopyProgress(table.SchemaName, table.Name, rowsCopied, totalRows, elapsed));
     }
 
     private async Task<NpgsqlConnection> EnsureConnectionOpenAsync(

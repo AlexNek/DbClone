@@ -176,6 +176,23 @@ internal sealed class GraphArrangement
     public GraphArrangement WithColumns(IReadOnlyList<int> columnOfUnit) =>
         new(_model, _units, _shapes, RowOfUnit, columnOfUnit);
 
+    /// <summary>
+    /// Copies the arrangement with one unit standing in another row and column, which is how a card that
+    /// is free to go elsewhere is measured where it would land.
+    /// </summary>
+    /// <param name="unit">The unit to move.</param>
+    /// <param name="row">The top row it takes.</param>
+    /// <param name="column">The left column it takes.</param>
+    /// <returns>An independent arrangement with that unit moved.</returns>
+    public GraphArrangement Moved(int unit, int row, int column)
+    {
+        var next = Copy();
+        next.RowOfUnit[unit] = row;
+        next.ColumnOfUnit[unit] = column;
+
+        return next;
+    }
+
     /// <summary>Whether a unit could stand at one cell without sharing it with another unit.</summary>
     /// <param name="unit">The unit to place.</param>
     /// <param name="row">The top row it would take.</param>

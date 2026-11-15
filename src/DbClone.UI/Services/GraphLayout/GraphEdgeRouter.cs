@@ -93,7 +93,14 @@ internal static class GraphEdgeRouter
     /// <summary>
     /// How many steps each ladder reaches, which is as far as a band is ever given room for.
     /// </summary>
-    private const int Ladder = 11;
+    /// <remarks>
+    /// The number is also the most runs one side of a card can be lined up one by one: a corridor yields a
+    /// line per step of the ladder, and a side carrying more runs than this is a side the routing can no
+    /// longer separate — two of its arrows end up drawn on one stroke however deep the band is made.
+    /// Placement reads it for that reason — a fan wider than the ladder is spread over both sides of the
+    /// table it reaches rather than stacked on one (see <c>GraphRankedPlacement</c>).
+    /// </remarks>
+    internal const int Ladder = 11;
 
     /// <summary>
     /// The least thickness a band needs to carry this many horizontal runs without two of them being
