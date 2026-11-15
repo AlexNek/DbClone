@@ -453,6 +453,30 @@ internal static class CatalogGraphScript
       "translate(" + shiftX + "," + shiftY + ") scale(" + scale + ")");
   }
 
+  // Where the picture stands, read from the address the viewer serves the document at: a filter is a
+  // different picture, never a different place, so the document a chip produces opens where the one
+  // it replaced stood (T28). A copy opened on its own states no camera and keeps opening at its size.
+  function openingCamera() {
+    var query = new URLSearchParams(window.location.search);
+    if (!query.has("s") || !query.has("x") || !query.has("y")) return null;
+    var camera = { s: Number(query.get("s")), x: Number(query.get("x")), y: Number(query.get("y")) };
+    return isFinite(camera.s) && isFinite(camera.x) && isFinite(camera.y) ? camera : null;
+  }
+
+  function applyCamera(camera) {
+    scale = Math.min(4, Math.max(0.02, camera.s));
+    shiftX = camera.x;
+    shiftY = camera.y;
+    applyTransform();
+  }
+
+  // The viewer reads the camera back before it serves the document again, so the place travels through
+  // the host instead of through the one message a document may post (D5). It states three numbers and
+  // nothing else, and a copy opened without a viewer has nobody to ask.
+  window.dbcloneCamera = function () {
+    return { s: scale, x: shiftX, y: shiftY };
+  };
+
   function zoomAround(factor, clientX, clientY) {
     var box = svg.getBoundingClientRect();
     var x = clientX - box.left;
@@ -681,7 +705,10 @@ internal static class CatalogGraphScript
   // the picture is laid out across a canvas many screens wide, so the corner it used to open on was
   // empty canvas and no table at all. Fitting on open would answer with a thumbnail of a large
   // database, which is why the opening scale is the document's own and "Fit" stays a button (T27).
-  placeContent(1);
+  // A picture the viewer serves again for another cluster selection opens where the reader left the
+  // one it replaces: switching a chip changes what is drawn, never where the reader is looking.
+  var opening = openingCamera();
+  if (opening) applyCamera(opening); else placeContent(1);
 }());
 """;
 }

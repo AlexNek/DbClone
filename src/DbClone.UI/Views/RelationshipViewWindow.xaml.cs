@@ -30,6 +30,11 @@ namespace DbClone.UI.Views;
 /// the window can draw the picture again without the tables that are not shown and the cards that
 /// remain are arranged for them (T28). The message never carries a fact from the catalog.
 /// </para>
+/// <para>
+/// The window reads one value back out of the document and writes none: where its picture stands, so a
+/// document served again for another cluster selection opens where the reader left the one it replaces
+/// — a chip changes what is drawn, never where the reader is looking (T28).
+/// </para>
 /// </remarks>
 internal sealed partial class RelationshipViewWindow : FluentWindow
 {
@@ -53,6 +58,12 @@ internal sealed partial class RelationshipViewWindow : FluentWindow
     /// so a larger payload is not a selection and is not read.
     /// </summary>
     private const int MaxMessageLength = 8 * 1024;
+
+    /// <summary>
+    /// The one expression the viewer evaluates in the document: where its picture stands. Reading it
+    /// before the document is served again is what keeps a chip from moving the view (D6, T28).
+    /// </summary>
+    private const string CameraExpression = "window.dbcloneCamera ? window.dbcloneCamera() : null";
 
     private readonly ILogger _logger;
     private readonly Func<RelationshipDocument, CancellationToken, Task> _openInBrowser;
@@ -100,10 +111,11 @@ internal sealed partial class RelationshipViewWindow : FluentWindow
         if (!IsVisible) Show();
         Activate();
 
-        // A new view of an origin starts at the whole catalog, whatever the previous one was showing.
+        // A new view of an origin starts at the whole catalog, whatever the previous one was showing,
+        // and at the picture's own place, because the previous camera is no longer meaningful here.
         _offChips = EmptyChips;
 
-        await SetDocumentAsync(document, refresh, reshape, ct).ConfigureAwait(true);
+        await SetDocumentAsync(document, refresh, reshape, camera: null, ct).ConfigureAwait(true);
     }
 
     /// <summary>
@@ -123,6 +135,7 @@ internal sealed partial class RelationshipViewWindow : FluentWindow
         RelationshipDocument document,
         Func<CancellationToken, Task<RelationshipDocument>>? refresh,
         Func<IReadOnlySet<int>, RelationshipDocument>? reshape,
+        GraphCamera? camera,
         CancellationToken ct)
     {
         _document = document;
@@ -138,9 +151,19 @@ internal sealed partial class RelationshipViewWindow : FluentWindow
 
         await EnsureRuntimeAsync(ct).ConfigureAwait(true);
 
-        // Every document is a new address, so nothing cached can answer with the previous picture.
+        Navigate(camera);
+    }
+
+    /// <summary>
+    /// Takes the viewer to the document it now holds: a new address every time, so nothing cached can
+    /// answer with the previous picture, and the reader's camera in the query when the same origin is
+    /// served again, so the picture opens where they left it instead of at its own size.
+    /// </summary>
+    /// <param name="camera">Where the picture stands, or <see langword="null"/> for its own place.</param>
+    private void Navigate(GraphCamera? camera)
+    {
         _version++;
-        _core!.Navigate($"{DocumentAddress}?v={_version}");
+        _core!.Navigate($"{DocumentAddress}?v={_version}{camera?.Query() ?? string.Empty}");
     }
 
     /// <summary>Starts the engine once, in one profile folder per install, and blocks everything it may fetch.</summary>
@@ -211,30 +234,57 @@ internal sealed partial class RelationshipViewWindow : FluentWindow
         if (_core is null || _reshape is null) return;
         if (!TryReadOffChips(e.WebMessageAsJson, out var offChips)) return;
 
-        Reshape(offChips);
+        _ = ReshapeAsync(offChips);
     }
 
     /// <summary>
     /// Draws the held document again for the clusters that are now on. Nothing is read: the origin is
-    /// the one the document already describes, and only the arrangement changes.
+    /// the one the document already describes, and only the arrangement changes. The camera is read
+    /// from the picture on screen first, so the picture that replaces it stands where it did.
     /// </summary>
-    private void Reshape(IReadOnlySet<int> offChips)
+    private async Task ReshapeAsync(IReadOnlySet<int> offChips)
     {
         if (_reshape is null || _core is null) return;
 
         try
         {
-            _document = _reshape(offChips);
+            var document = _reshape(offChips);
+            _document = document;
             _offChips = offChips;
 
-            // A new address again, so the picture that was just drawn cannot be answered from a cache.
-            _version++;
-            _core.Navigate($"{DocumentAddress}?v={_version}");
+            var camera = await ReadCameraAsync().ConfigureAwait(true);
+
+            // Another selection replaced this one while the camera was being read: the address
+            // belongs to the picture it was built for, and that picture is already on its way.
+            if (!ReferenceEquals(_document, document)) return;
+
+            Navigate(camera);
         }
         catch (Exception ex)
         {
             _logger.LogWarning(ex, "The relationship view could not be drawn again for another selection");
             Status.Text = ex.Message;
+        }
+    }
+
+    /// <summary>
+    /// Where the picture on screen stands, as the document itself answers. A camera that cannot be
+    /// read is no camera: the document opens at its own size rather than at a guess.
+    /// </summary>
+    private async Task<GraphCamera?> ReadCameraAsync()
+    {
+        if (_core is null) return null;
+
+        try
+        {
+            var statement = await _core.ExecuteScriptAsync(CameraExpression).ConfigureAwait(true);
+
+            return GraphCamera.TryRead(statement, out var camera) ? camera : null;
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "The relationship view could not read where its picture stood");
+            return null;
         }
     }
 
@@ -311,16 +361,17 @@ internal sealed partial class RelationshipViewWindow : FluentWindow
 
         try
         {
+            var camera = await ReadCameraAsync().ConfigureAwait(true);
             var document = await _refresh(CancellationToken.None).ConfigureAwait(true);
 
-            // A refresh re-reads the origin, not the reader's selection: the clusters that were on stay
-            // on, so the picture a re-read produces is arranged for the same tables as the one it replaces.
+            // A refresh re-reads the origin, not the reader: the clusters that were on stay on and the
+            // picture keeps the place it stood, so a re-read changes what it says, not where it is.
             if (_reshape is not null && _offChips.Count > 0)
             {
                 document = _reshape(_offChips);
             }
 
-            await SetDocumentAsync(document, _refresh, _reshape, CancellationToken.None).ConfigureAwait(true);
+            await SetDocumentAsync(document, _refresh, _reshape, camera, CancellationToken.None).ConfigureAwait(true);
         }
         catch (Exception ex)
         {

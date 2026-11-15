@@ -135,6 +135,21 @@ public sealed class CatalogGraphHtmlRendererTests
     }
 
     [Fact]
+    public void A_picture_drawn_again_opens_where_the_reader_left_the_one_it_replaces()
+    {
+        // The reader's report: switching a cluster off threw the picture back to its opening position,
+        // so the table being looked at was lost to a filter that says nothing about where the reader is.
+        // The camera is stated by the document, carried by the viewer into the address it serves next,
+        // and applied on open instead of placing the picture at its own size.
+        var rendered = Render(Chain(12));
+
+        // Assert
+        rendered.Document.Should().Contain("window.dbcloneCamera = function ()");
+        rendered.Document.Should().Contain("function openingCamera()");
+        rendered.Document.Should().Contain("if (opening) applyCamera(opening); else placeContent(1);");
+    }
+
+    [Fact]
     public void The_folded_group_box_answers_the_keyboard_it_offers()
     {
         // Arrange — the box carries role="button" and tabindex="0", so Tab reaches it; a control the
