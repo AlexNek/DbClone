@@ -65,6 +65,19 @@ internal static class GraphEdgeRouter
     /// </summary>
     internal const double InkGap = 6;
 
+    /// <summary>
+    /// The least angle two stretches may differ by and still be read as one line. Wider than a pixel's
+    /// worth of drift and narrower than a corner: two strokes drawn on one another follow one direction,
+    /// while a curve crossing a corridor line turns through a corner and is read apart.
+    /// </summary>
+    internal const double Parallel = 0.10;
+
+    /// <summary>
+    /// The shortest stretch two stretches can cover together and still be read as one line. Below it
+    /// the contact is a crossing or a graze, which the eye reads as two arrows meeting.
+    /// </summary>
+    internal const double InkRun = 14;
+
     /// <summary>How far a closing cycle's curve bows away from the straight line between its ends.</summary>
     internal const double Bulge = 26;
 
@@ -76,6 +89,35 @@ internal static class GraphEdgeRouter
 
     /// <summary>How finely a curve is read back when its ink is claimed or tested against another route.</summary>
     private const int TraceSamples = 16;
+
+    /// <summary>
+    /// How many steps each ladder reaches, which is as far as a band is ever given room for.
+    /// </summary>
+    private const int Ladder = 11;
+
+    /// <summary>
+    /// The least thickness a band needs to carry this many horizontal runs without two of them being
+    /// drawn on one line.
+    /// </summary>
+    /// <remarks>
+    /// A corridor is the room a route turns in, so a band carrying more runs than it has room for is a
+    /// band that prints two arrows as one stroke — the merge the picture's first rule forbids. The count
+    /// is the ends standing on the two sides that face the band: each of them has to reach its own card's
+    /// border along a line of its own, and no two of those lines may coincide. The placement asks this of
+    /// the lattice before any route is drawn, so the room is reserved rather than found wanting. A band
+    /// is never thinner than the picture's own row gap, and never thicker than the ladders reach, because
+    /// a line outside them is a line no route is ever offered.
+    /// </remarks>
+    /// <param name="runs">How many runs the band must carry.</param>
+    /// <returns>The band's thickness.</returns>
+    internal static double BandFor(int runs)
+    {
+        var lines = Math.Clamp(runs, 1, (2 * Ladder) + 1);
+
+        return Math.Max(
+            GraphRankedPlacement.RowGap,
+            (2 * Clearance) + ((lines - 1) * LaneRowStep));
+    }
 
     /// <summary>How far two coordinates may differ and still be the same line.</summary>
     private const double Tolerance = 0.01;
@@ -141,6 +183,8 @@ internal static class GraphEdgeRouter
         var start = ends.Child.Point;
         var end = ends.Parent.Point;
 
+        var reach = Reach(child, parent, grid, shift);
+
         IReadOnlyList<GraphPoint>? best = null;
         var bestClears = false;
         var bestShared = true;
@@ -149,7 +193,24 @@ internal static class GraphEdgeRouter
         void Consider(IReadOnlyList<GraphPoint> candidate)
         {
             var length = Length(candidate);
+
+            // The winner so far clears every card and every claimed stretch, so only a way shorter than it
+            // has anything left to prove: no longer candidate can take its place, whatever it clears or
+            // shares, and weighing it spends the search on a route the picture will not draw.
+            if (bestClears && !bestShared && length >= bestLength)
+            {
+                return;
+            }
+
             var clears = Clears(candidate, placement, cards, near, edge.ChildIndex, edge.ParentIndex);
+
+            // And a way that crosses a card cannot take the place of one that keeps off them all, so the
+            // ink it would cover is not worth asking about.
+            if (bestClears && !bestShared && !clears)
+            {
+                return;
+            }
+
             var shared = tracks.IsShared(candidate, EEdgeShape.Line);
 
             if (best is null || Beats(clears, shared, length, bestClears, bestShared, bestLength))
@@ -183,11 +244,33 @@ internal static class GraphEdgeRouter
         // themselves have failed to leave the cards and the claimed stretches alone.
         if (!bestClears || bestShared)
         {
-            foreach (var (laneX, laneY) in Lanes())
+            foreach (var (laneX, laneY) in Lanes(reach))
             {
                 foreach (var candidate in Ways(child, parent, ends, grid, shift, laneX, laneY))
                 {
                     Consider(candidate);
+                }
+            }
+        }
+
+        // One lane at a time is enough while the corridor beside each card still has its own line free.
+        // When both are drawn on — two cards sharing a column send their arrows down one corridor — neither
+        // a step sideways alone nor a step upright alone answers, because what is wanted is the sideways
+        // step for the vertical run and the upright step for the horizontal one at the same time. Those
+        // are the pairs offered here, and the first pair that leaves every card and every claimed stretch
+        // alone is taken: the ladder walks outwards, so the nearest clean line answers first, and the work
+        // stops as soon as the arrow has a stroke of its own.
+        if (bestShared)
+        {
+            foreach (var (laneX, laneY) in CrossingLanes(reach))
+            {
+                foreach (var candidate in Ways(child, parent, ends, grid, shift, laneX, laneY))
+                {
+                    if (Clears(candidate, placement, cards, near, edge.ChildIndex, edge.ParentIndex)
+                        && !tracks.IsShared(candidate, EEdgeShape.Line))
+                    {
+                        return Build(edge, candidate);
+                    }
                 }
             }
         }
@@ -210,14 +293,126 @@ internal static class GraphEdgeRouter
     /// shifted every coordinate at once and could therefore only ever find ways that clipped a card,
     /// which left long routes taking the picture's own edge corridor instead.
     /// </remarks>
-    private static IEnumerable<(double X, double Y)> Lanes()
+    /// <param name="reach">How many steps of each ladder still stand inside the room the lattice keeps.</param>
+    private static IEnumerable<(double X, double Y)> Lanes((int Across, int Up) reach)
     {
-        yield return (-LaneStep, 0);
-        yield return (LaneStep, 0);
-        yield return (-2 * LaneStep, 0);
-        yield return (2 * LaneStep, 0);
-        yield return (0, -LaneRowStep);
-        yield return (0, LaneRowStep);
+        for (var step = 1; step <= reach.Across; step++)
+        {
+            yield return (-step * LaneStep, 0);
+            yield return (step * LaneStep, 0);
+        }
+
+        for (var step = 1; step <= reach.Up; step++)
+        {
+            yield return (0, -step * LaneRowStep);
+            yield return (0, step * LaneRowStep);
+        }
+    }
+
+    /// <summary>
+    /// Every sideways step paired with every upright step: the lanes to try when neither ladder alone
+    /// has found a clean line, because the vertical run needs its own x and the horizontal run its own y
+    /// at the same time.
+    /// </summary>
+    /// <remarks>
+    /// The two ladders are not the same length for a reason. A column corridor is a whole column gap
+    /// wide and a row corridor is one row gap tall, so a sideways step has half a corridor to use while
+    /// an upright step has an eighth of one: the picture's own margins above its first row are the room
+    /// the upright ladder reaches into, and a run there is what a card's top side needs.
+    /// </remarks>
+    /// <param name="reach">How many steps of each ladder still stand inside the room the lattice keeps.</param>
+    /// <returns>The pairs, the two steps of one pair taken from different ladders.</returns>
+    private static IEnumerable<(double X, double Y)> CrossingLanes((int Across, int Up) reach)
+    {
+        for (var upright = 1; upright <= reach.Up; upright++)
+        {
+            var up = upright * LaneRowStep;
+
+            for (var sideways = 1; sideways <= reach.Across; sideways++)
+            {
+                var across = sideways * LaneStep;
+
+                yield return (-across, -up);
+                yield return (across, -up);
+                yield return (-across, up);
+                yield return (across, up);
+            }
+        }
+    }
+
+    /// <summary>
+    /// How many steps of each ladder still stand inside the room the lattice keeps for a run beside a
+    /// card: the corridor's own width, less the air a stroke owes the cards it runs between.
+    /// </summary>
+    /// <remarks>
+    /// A lane is a stroke drawn beside a corridor's centre line, and a corridor is only as wide as the
+    /// gap around it. Past that width the run is inside the row or column of cards the corridor
+    /// separates, and a stroke there is a stroke over a table — <see cref="Clears"/> turns every such
+    /// candidate away, so offering it only spends the search. A picture of a thousand tables spent nine
+    /// tenths of its routing time on those candidates. The room is read from the lattice rather than
+    /// fixed, because a hub's row is given a band deep enough to hold every run that reaches it, and a
+    /// wide corridor is exactly the room those steps need.
+    /// </remarks>
+    /// <param name="child">The card the arrow starts at.</param>
+    /// <param name="parent">The card the arrow ends on.</param>
+    /// <param name="grid">The lattice the corridors belong to.</param>
+    /// <param name="shift">The step a parallel set is already drawn aside by, which the lane adds to.</param>
+    /// <returns>The steps that remain inside the corridors the two cards open onto.</returns>
+    private static (int Across, int Up) Reach(
+        NodePlacement child,
+        NodePlacement parent,
+        GraphGrid grid,
+        double shift)
+    {
+        var across = 0;
+        foreach (var corridor in (int[])
+        [
+            grid.ColumnOfNode[child.NodeIndex],
+            grid.ColumnOfNode[child.NodeIndex] + 1,
+            grid.ColumnOfNode[parent.NodeIndex],
+            grid.ColumnOfNode[parent.NodeIndex] + 1,
+        ])
+        {
+            across = Math.Max(across, Steps(ColumnRoom(grid, corridor) - Math.Abs(shift), LaneStep));
+        }
+
+        var up = 0;
+        foreach (var corridor in (int[])
+        [
+            grid.RowOfNode[child.NodeIndex],
+            grid.RowOfNode[child.NodeIndex] + 1,
+            grid.RowOfNode[parent.NodeIndex],
+            grid.RowOfNode[parent.NodeIndex] + 1,
+        ])
+        {
+            up = Math.Max(up, Steps(RowRoom(grid, corridor) - Math.Abs(shift), LaneRowStep));
+        }
+
+        return (Math.Clamp(across, 0, Ladder), Math.Clamp(up, 0, Ladder));
+    }
+
+    /// <summary>How many whole lane steps fit in a stretch of room, once the strokes' own air is taken out.</summary>
+    private static int Steps(double room, double step) =>
+        (int)Math.Floor((room - Clearance) / step);
+
+    /// <summary>How far a vertical run may be drawn either side of a column corridor's centre line.</summary>
+    private static double ColumnRoom(GraphGrid grid, int corridor)
+    {
+        var centre = grid.ColumnCorridors[corridor];
+        var left = corridor > 0 ? grid.ColumnLefts[corridor - 1] + grid.ColumnWidths[corridor - 1] : 0;
+        var right = corridor < grid.ColumnLefts.Count ? grid.ColumnLefts[corridor] : grid.Width;
+
+        return Math.Min(centre - left, right - centre);
+    }
+
+    /// <summary>How far a horizontal run may be drawn either side of a row corridor's centre line.</summary>
+    private static double RowRoom(GraphGrid grid, int corridor)
+    {
+        var centre = grid.RowCorridors[corridor];
+        var top = corridor > 0 ? grid.RowTops[corridor - 1] + GraphCard.Height : 0;
+        var bottom = corridor < grid.RowTops.Count ? grid.RowTops[corridor] : grid.Height;
+
+        return Math.Min(centre - top, bottom - centre);
     }
 
     /// <summary>
@@ -462,13 +657,13 @@ internal static class GraphEdgeRouter
     {
         var lines = new List<double>(4);
 
-        foreach (var column in new[]
-        {
+        foreach (var column in (int[])
+        [
             grid.ColumnOfNode[child.NodeIndex],
             grid.ColumnOfNode[child.NodeIndex] + 1,
             grid.ColumnOfNode[parent.NodeIndex],
             grid.ColumnOfNode[parent.NodeIndex] + 1,
-        })
+        ])
         {
             var x = grid.ColumnCorridors[column] + shift + laneX;
             if (!lines.Any(value => Math.Abs(value - x) < 0.5))
@@ -490,13 +685,13 @@ internal static class GraphEdgeRouter
     {
         var lines = new List<double>(4);
 
-        foreach (var row in new[]
-        {
+        foreach (var row in (int[])
+        [
             grid.RowOfNode[child.NodeIndex],
             grid.RowOfNode[child.NodeIndex] + 1,
             grid.RowOfNode[parent.NodeIndex],
             grid.RowOfNode[parent.NodeIndex] + 1,
-        })
+        ])
         {
             var y = grid.RowCorridors[row] + shift + laneY;
             if (!lines.Any(value => Math.Abs(value - y) < 0.5))
@@ -643,8 +838,10 @@ internal static class GraphEdgeRouter
         new(port.Point.X + (port.OutwardX * distance), port.Point.Y + (port.OutwardY * distance));
 
     /// <summary>
-    /// Whether a route keeps clear of every card. The two cards the route joins are met by design, so
-    /// they are checked only along the segments between the route's own ends.
+    /// Whether a route keeps clear of every card. The card an end stands on is met by design — the end's
+    /// point is on its border — so it is passed over, but only for the segment that end owns: the other
+    /// card is tested even on the first and last segments, because a way that reached its end by crossing
+    /// the other table would be drawn as a stroke over that table.
     /// </summary>
     /// <param name="points">The candidate route.</param>
     /// <param name="placement">Where every card sits.</param>
@@ -669,20 +866,19 @@ internal static class GraphEdgeRouter
 
             foreach (var node in near)
             {
-                double clearance;
-                if (node == childIndex || node == parentIndex)
-                {
-                    if (first || last)
-                    {
-                        continue;
-                    }
+                var endpoint = node == childIndex || node == parentIndex;
 
-                    clearance = 0;
-                }
-                else
+                // A card a segment starts or ends on is met by design: the arrow's own end stands on its
+                // border. Any other contact is a stroke over a table, the two cards the route joins
+                // included — that is how a way that climbed past its own child came to be drawn on it.
+                if (endpoint
+                    && (GraphGeometry.Contains(placement[node], points[segment])
+                        || GraphGeometry.Contains(placement[node], points[segment + 1])))
                 {
-                    clearance = Clearance;
+                    continue;
                 }
+
+                var clearance = endpoint ? 0 : Clearance;
 
                 if (GraphGeometry.SegmentHitsRect(points[segment], points[segment + 1], placement[node], clearance))
                 {
@@ -964,8 +1160,12 @@ internal static class GraphEdgeRouter
 
             for (var index = 0; index + 1 < trace.Count; index++)
             {
-                if (RunsAlongALine(trace[index], trace[index + 1])
-                    || RunsAlongInk(trace[index], trace[index + 1]))
+                if (RunsAlongALine(trace[index], trace[index + 1]))
+                {
+                    return true;
+                }
+
+                if (RunsAlongInk(trace[index], trace[index + 1]))
                 {
                     return true;
                 }
@@ -1039,7 +1239,7 @@ internal static class GraphEdgeRouter
 
                 foreach (var (heldFrom, heldTo) in strokes)
                 {
-                    if (RunsAlong(from, to, heldFrom, heldTo))
+                    if (Within(from, to, heldFrom, heldTo) && RunsAlong(from, to, heldFrom, heldTo))
                     {
                         return true;
                     }
@@ -1056,7 +1256,7 @@ internal static class GraphEdgeRouter
             {
                 var stroke = (From: trace[index], To: trace[index + 1]);
 
-                foreach (var (column, row) in Cells(stroke.From, stroke.To, 0))
+                foreach (var (column, row) in Streak(stroke.From, stroke.To))
                 {
                     if (!_ink.TryGetValue((column, row), out var strokes))
                     {
@@ -1070,19 +1270,124 @@ internal static class GraphEdgeRouter
         }
 
         /// <summary>
-        /// Whether two stretches are drawn along one another rather than merely meeting: they have to
-        /// head the same way, and the shorter of the two has to lie on the longer one for a stretch worth
-        /// drawing. A crossing meets that at one point and is left alone, which is why the direction is
-        /// read first; measuring the shorter against the longer is what lets a 15 px arc be tested
-        /// against a straight arrow 200 px long, whose far ends are nowhere near it by design.
+        /// The cells a stroke is drawn through: it is walked one column at a time, the rows it reaches
+        /// inside each column, and never the cells its bounding box happens to enclose.
         /// </summary>
+        /// <remarks>
+        /// An angled stroke's bounding box is a field of cells while the stroke itself is a thread
+        /// through them, and holding the thread in the whole field is held against every later route
+        /// that passes anywhere in it. A diagonal across a wide picture filled thousands of cells, so
+        /// each candidate was weighed against hundreds of strokes drawn nowhere near it — the search
+        /// was correct and unusably slow on a large catalog. A cell holds only the ink that is on it.
+        /// </remarks>
+        /// <param name="from">Where the stroke starts.</param>
+        /// <param name="to">Where it ends.</param>
+        private static IEnumerable<(int Column, int Row)> Streak(GraphPoint from, GraphPoint to)
+        {
+            var (dx, dy) = (to.X - from.X, to.Y - from.Y);
+
+            if (Math.Abs(dx) < Tolerance)
+            {
+                var column = (int)Math.Floor(from.X / Cell);
+                foreach (var row in RowsIn(Math.Min(from.Y, to.Y), Math.Max(from.Y, to.Y)))
+                {
+                    yield return (column, row);
+                }
+
+                yield break;
+            }
+
+            if (Math.Abs(dy) < Tolerance)
+            {
+                var row = (int)Math.Floor(from.Y / Cell);
+                foreach (var column in ColumnsIn(Math.Min(from.X, to.X), Math.Max(from.X, to.X)))
+                {
+                    yield return (column, row);
+                }
+
+                yield break;
+            }
+
+            var (low, high) = (Math.Min(from.X, to.X), Math.Max(from.X, to.X));
+
+            foreach (var column in ColumnsIn(low, high))
+            {
+                var near = from.Y + (dy * (Math.Max(low, column * Cell) - from.X) / dx);
+                var far = from.Y + (dy * (Math.Min(high, (column + 1) * Cell) - from.X) / dx);
+
+                foreach (var row in RowsIn(Math.Min(near, far), Math.Max(near, far)))
+                {
+                    yield return (column, row);
+                }
+            }
+        }
+
+        /// <summary>The cell columns a span of the page touches.</summary>
+        private static IEnumerable<int> ColumnsIn(double from, double to)
+        {
+            for (var column = (int)Math.Floor(from / Cell); column <= (int)Math.Floor(to / Cell); column++)
+            {
+                yield return column;
+            }
+        }
+
+        /// <summary>The cell rows a span of the page touches.</summary>
+        private static IEnumerable<int> RowsIn(double from, double to)
+        {
+            for (var row = (int)Math.Floor(from / Cell); row <= (int)Math.Floor(to / Cell); row++)
+            {
+                yield return row;
+            }
+        }
+
+        /// <summary>
+        /// Whether two stretches are near enough to be one line at all: their boxes have to meet within
+        /// <see cref="InkGap"/>, which is the cheapest thing a pair of strokes can be asked.
+        /// </summary>
+        /// <remarks>
+        /// A cell holds every stroke drawn through it, and a busy cell holds many: the direction and
+        /// the endpoints of each were weighed against every candidate that crossed the cell, and the
+        /// picture's own cells are what the search spends most of its time on. Two stretches further
+        /// apart than the gap can never be read as one stroke, so they are turned away here, where the
+        /// cost is a handful of comparisons, before the angles are measured.
+        /// </remarks>
+        private static bool Within(GraphPoint from, GraphPoint to, GraphPoint heldFrom, GraphPoint heldTo) =>
+            Math.Max(heldFrom.Y, heldTo.Y) >= Math.Min(from.Y, to.Y) - InkGap
+            && Math.Min(heldFrom.Y, heldTo.Y) <= Math.Max(from.Y, to.Y) + InkGap
+            && Math.Max(heldFrom.X, heldTo.X) >= Math.Min(from.X, to.X) - InkGap
+            && Math.Min(heldFrom.X, heldTo.X) <= Math.Max(from.X, to.X) + InkGap;
+
+        /// <summary>
+        /// Whether two stretches are drawn along one another rather than merely meeting: they have to
+        /// head the same way, and they have to lie within a stroke's gap of one another for a stretch
+        /// worth drawing. A crossing meets that at one point and is left alone, which is why the
+        /// direction is read first.
+        /// </summary>
+        /// <remarks>
+        /// Two lines read as one stroke only when they run in the very same direction: a curve crossing a
+        /// corridor line at a corner is steep enough to be read apart, and counting it as drawn along the
+        /// line told the router that a corridor was taken when it was empty — so the routes that needed it
+        /// were laid on one another instead. The shared stretch has to be worth drawing, too: a chord of a
+        /// curve grazing a line for a few pixels is a crossing, not an overlap.
+        /// </remarks>
+        /// <remarks>
+        /// What is measured is the stretch the two actually share, not the whole of the shorter one. An
+        /// arrow crossing a horizontal run at a shallow angle is more than a stroke's gap from it at both
+        /// of its ends, yet it lies within that gap of the run for sixty pixels in the middle — and sixty
+        /// pixels drawn one on the other is one stroke however far apart the two are at their ends. That
+        /// was the last shape two arrows could still merge in: the arrow that crossed was straight, the
+        /// run it crossed was a lane, and both passed every other test.
+        /// </remarks>
         private static bool RunsAlong(GraphPoint from, GraphPoint to, GraphPoint heldFrom, GraphPoint heldTo)
         {
             var (ux, uy) = (to.X - from.X, to.Y - from.Y);
             var (vx, vy) = (heldTo.X - heldFrom.X, heldTo.Y - heldFrom.Y);
-            var reach = Math.Sqrt((ux * ux) + (uy * uy)) * Math.Sqrt((vx * vx) + (vy * vy));
+            var cross = (ux * vy) - (uy * vx);
 
-            if (reach < 0.000001 || Math.Abs((ux * vy) - (uy * vx)) / reach > 0.34)
+            // The sine of the turn between the two, compared without the square roots it is written
+            // with: both sides of the test are lengths squared, which are positive either way.
+            if (((ux * ux) + (uy * uy)) * ((vx * vx) + (vy * vy)) < 0.000001
+                || (cross * cross) > (Parallel * Parallel * ((ux * ux) + (uy * uy)) * ((vx * vx) + (vy * vy))))
             {
                 return false;
             }
@@ -1091,17 +1396,26 @@ internal static class GraphEdgeRouter
             var (lx, ly) = (longTo.X - longFrom.X, longTo.Y - longFrom.Y);
             var longLength = Math.Sqrt((lx * lx) + (ly * ly));
 
-            if (DistanceTo(longFrom, lx, ly, longLength, shortFrom) > InkGap
-                || DistanceTo(longFrom, lx, ly, longLength, shortTo) > InkGap)
+            // How far each end of the shorter stretch lies from the longer one's line, signed, so the
+            // stretch of the shorter one that is inside the gap can be read off the two of them: the
+            // distance runs straight from one end to the other, so the gap is met over one interval.
+            var near = Distance(longFrom, lx, ly, longLength, shortFrom);
+            var far = Distance(longFrom, lx, ly, longLength, shortTo);
+            var (low, high) = (Math.Min(near, far), Math.Max(near, far));
+
+            if (high < -InkGap || low > InkGap)
             {
                 return false;
             }
 
-            var (one, two) = (
-                (((shortFrom.X - longFrom.X) * lx) + ((shortFrom.Y - longFrom.Y) * ly)) / longLength,
-                (((shortTo.X - longFrom.X) * lx) + ((shortTo.Y - longFrom.Y) * ly)) / longLength);
+            var shortLength = Math.Sqrt(((shortTo.X - shortFrom.X) * (shortTo.X - shortFrom.X))
+                + ((shortTo.Y - shortFrom.Y) * (shortTo.Y - shortFrom.Y)));
 
-            return Math.Min(Math.Max(one, two), longLength) - Math.Max(Math.Min(one, two), 0) > 1;
+            var shared = high - low < 0.000001
+                ? shortLength
+                : shortLength * ((Math.Min(high, InkGap) - Math.Max(low, -InkGap)) / (high - low));
+
+            return shared >= InkRun;
         }
 
         /// <summary>The two stretches ordered so the one that has to fit inside the other comes first.</summary>
@@ -1119,9 +1433,9 @@ internal static class GraphEdgeRouter
                 : (heldFrom, heldTo, from, to);
         }
 
-        /// <summary>How far a point lies from the line a stretch is drawn along.</summary>
-        private static double DistanceTo(GraphPoint from, double ux, double uy, double length, GraphPoint point) =>
-            Math.Abs((ux * (point.Y - from.Y)) - (uy * (point.X - from.X))) / length;
+        /// <summary>How far a point lies from the line a stretch is drawn along, signed by the side it lies on.</summary>
+        private static double Distance(GraphPoint from, double ux, double uy, double length, GraphPoint point) =>
+            ((ux * (point.Y - from.Y)) - (uy * (point.X - from.X))) / length;
 
         /// <summary>
         /// The cells a stretch touches, grown by the air two strokes need. A curve's ink need not follow

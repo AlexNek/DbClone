@@ -13,7 +13,10 @@ namespace DbClone.UI.Services.GraphLayout;
 /// character widths are set slightly above what the document's own font measures at 12px and 11px
 /// (the widest glyph ratio seen on a rendered catalog was 6.36 for a name and 5.96 for a count), so a
 /// card errs a little wide rather than letting a letter lean into its border; the layout is not a text
-/// engine, and a name of unusual glyphs is answered in full by the tooltip and the panel anyway.
+/// engine, and a name of unusual glyphs is answered in full by the tooltip and the panel anyway. The
+/// one figure a card may have to answer is the number of arrows that meet it: the layout takes the
+/// larger of this measure and the width their ends need on the border (GraphEdgePorts.WidthFor), so a
+/// hub is drawn wide rather than printing two arrow heads on one place.
 /// </remarks>
 internal static class GraphCard
 {

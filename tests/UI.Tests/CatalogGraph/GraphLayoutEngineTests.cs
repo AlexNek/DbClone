@@ -1119,6 +1119,61 @@ public sealed class GraphLayoutEngineTests
         AssertNoTwoArrowsRunOnOneStroke(layout);
     }
 
+    [Fact]
+    public void A_table_that_many_constraints_reach_is_given_a_border_wide_enough_to_hold_them()
+    {
+        // The reported picture: one table is the parent of twenty others, so twenty arrows end on it.
+        // A card's border holds a point every eighteen pixels and no more, so a hub given the width of
+        // its name spread its twenty ends five pixels apart and drew them as a few thick strokes. The
+        // border is the one place a reader tells an arrow's end from its neighbour's, and it is reserved
+        // before the route is drawn: the card is widened until every end has a point of its own.
+        var ledger = CatalogGraphFixture.TableId("hub", "ledger");
+        var fixture = CatalogGraphFixture.Create()
+            .Table("hub", "ledger", 40_000, Column("batch_id"));
+
+        for (var entry = 0; entry < 20; entry++)
+        {
+            var table = CatalogGraphFixture.TableId("hub", $"entry_{entry:00}");
+            fixture.Table("hub", $"entry_{entry:00}", 1_000, Column("ledger_id"));
+            fixture.Edge(table, ledger, $"fk_entry_{entry:00}_ledger", ["ledger_id"]);
+        }
+
+        var model = Analyze(fixture);
+        var layout = _engine.Compute(model);
+
+        var hub = model.Nodes.Select((node, index) => (node, index)).Single(pair => pair.node.Table == "ledger").index;
+        var ports = GraphEdgePorts.Assign(model, [.. layout.Nodes]);
+        var ends = model.Edges
+            .SelectMany(edge => new[]
+            {
+                (Node: edge.ChildIndex, Port: ports[edge.Index].Child),
+                (Node: edge.ParentIndex, Port: ports[edge.Index].Parent),
+            })
+            .Where(pair => pair.Node == hub)
+            .Select(pair => pair.Port)
+            .ToList();
+
+        ends.Should().HaveCount(20);
+
+        foreach (var side in ends.GroupBy(port => port.Side))
+        {
+            var points = side.Select(port => port.Point).ToList();
+
+            for (var first = 0; first < points.Count; first++)
+            {
+                for (var second = first + 1; second < points.Count; second++)
+                {
+                    var (dx, dy) = (points[second].X - points[first].X, points[second].Y - points[first].Y);
+                    Math.Sqrt((dx * dx) + (dy * dy)).Should().BeGreaterThanOrEqualTo(
+                        GraphEdgePorts.MinStep,
+                        $"two of the twenty ends on the {side.Key} side stand closer together than a stroke apart");
+                }
+            }
+        }
+
+        AssertNoTwoArrowsRunOnOneStroke(layout);
+    }
+
     // ── Helpers ───────────────────────────────────────────────────────────────────
 
     /// <summary>The vertical segments of a route: the line each runs along and the stretch of it it covers.</summary>
@@ -1545,14 +1600,19 @@ public sealed class GraphLayoutEngineTests
         return best;
     }
 
-    /// <summary>Whether the two routes head the same way where they pass closest: a crossing does not.</summary>
+    /// <summary>
+    /// Whether two stretches are drawn the same way at one point. The turn allowed is the router's own:
+    /// the rule the picture is drawn by is the rule it is held to, so the test names the constant
+    /// rather than a number of its own — a stroke crossing another at a wider angle is read as a
+    /// crossing, and the eye is right to read it that way.
+    /// </summary>
     private static bool Aligned(InkTrace one, int at, InkTrace other, int nearest)
     {
         var (ux, uy) = Step(one, at);
         var (vx, vy) = Step(other, nearest);
         var lengths = Math.Sqrt((ux * ux) + (uy * uy)) * Math.Sqrt((vx * vx) + (vy * vy));
 
-        return lengths > 0 && Math.Abs((ux * vy) - (uy * vx)) / lengths < 0.25;
+        return lengths > 0 && Math.Abs((ux * vy) - (uy * vx)) / lengths < GraphEdgeRouter.Parallel;
     }
 
     /// <summary>The direction a route travels at one of its points.</summary>

@@ -42,10 +42,16 @@ internal sealed class GraphLayoutEngine
         }
 
         var words = GraphOriginWords.For(model.Origin.Kind);
+        var ends = EndsPerNode(model);
         var widths = new double[model.Nodes.Count];
         for (var node = 0; node < widths.Length; node++)
         {
-            widths[node] = GraphCard.WidthOf(model.Nodes[node], words);
+            // The text sets the width of a card; the arrows that meet it set a floor under that. A card
+            // carrying more ends than its long sides hold would have to print two arrow heads on one
+            // place, and the picture's first rule says it never does (see GraphEdgePorts.WidthFor).
+            widths[node] = Math.Max(
+                GraphCard.WidthOf(model.Nodes[node], words),
+                GraphEdgePorts.WidthFor(ends[node], GraphCard.Height));
         }
 
         var (placement, grid) = GraphRankedPlacement.Place(model, widths);
@@ -56,5 +62,21 @@ internal sealed class GraphLayoutEngine
             routes,
             grid.Width,
             grid.Height);
+    }
+
+    /// <summary>How many arrow ends meet each card, counted as the border is dealt out to them.</summary>
+    /// <param name="model">The analyzed graph.</param>
+    /// <returns>One count per node, in node-index order.</returns>
+    private static int[] EndsPerNode(CatalogGraphModel model)
+    {
+        var ends = new int[model.Nodes.Count];
+
+        foreach (var edge in model.Edges)
+        {
+            ends[edge.ChildIndex]++;
+            ends[edge.ParentIndex]++;
+        }
+
+        return ends;
     }
 }

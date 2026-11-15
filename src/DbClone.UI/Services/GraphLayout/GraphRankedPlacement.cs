@@ -113,7 +113,65 @@ internal static class GraphRankedPlacement
         best = Settled(model, units, neighbours, bands, best);
         var (columnsOfNode, rowsOfNode, usedColumns, usedRows) = Cells(best, count);
 
-        return Emit(count, widths, columnsOfNode, rowsOfNode, usedColumns, usedRows);
+        // The cards are placed twice: once to learn which side of every card its arrows meet, and once
+        // with the bands that answer them. A band as thick as the picture's own row gap holds three runs;
+        // a card whose border takes more than that puts two arrows on one stroke, so the band between it
+        // and its neighbour is made thicker until it holds them all (see GraphEdgeRouter.BandFor).
+        var first = Emit(count, widths, columnsOfNode, rowsOfNode, usedColumns, usedRows);
+        var room = Room(model, first.Placement, first.Grid);
+
+        return Emit(count, widths, columnsOfNode, rowsOfNode, usedColumns, usedRows, room);
+    }
+
+    /// <summary>
+    /// How much room each band of the picture needs, counted from the sides the arrows really meet.
+    /// </summary>
+    /// <remarks>
+    /// A band serves the runs of the cards above and below it: an end on the bottom of a card in row
+    /// <c>r</c> and an end on the top of a card in row <c>r + 1</c> both reach their own border along a
+    /// horizontal line inside the band between the two rows. The picture's own top and bottom margins
+    /// are bands too — the top of the first row has nothing above it but the margin.
+    /// </remarks>
+    /// <param name="model">The analyzed graph.</param>
+    /// <param name="placement">Where the cards stand before the bands are widened.</param>
+    /// <param name="grid">The lattice those places belong to.</param>
+    /// <returns>The thickness of every band, and of the two margins.</returns>
+    private static (double[] Bands, double Top, double Bottom) Room(
+        CatalogGraphModel model,
+        IReadOnlyList<NodePlacement> placement,
+        GraphGrid grid)
+    {
+        var ends = GraphEdgePorts.Assign(model, placement);
+        var tops = new int[grid.RowTops.Count];
+        var bottoms = new int[grid.RowTops.Count];
+
+        foreach (var edge in model.Edges)
+        {
+            Count(ends[edge.Index].Child, edge.ChildIndex);
+            Count(ends[edge.Index].Parent, edge.ParentIndex);
+        }
+
+        var bands = new double[grid.RowTops.Count];
+        for (var row = 0; row < bands.Length; row++)
+        {
+            bands[row] = GraphEdgeRouter.BandFor(bottoms[row] + (row + 1 < bands.Length ? tops[row + 1] : 0));
+        }
+
+        return (bands, Math.Max(Margin, GraphEdgeRouter.BandFor(tops[0])), Math.Max(Margin, GraphEdgeRouter.BandFor(bottoms[^1])));
+
+        void Count(GraphEdgePort port, int node)
+        {
+            var row = grid.RowOfNode[node];
+
+            if (port.Side == EEdgeSide.Top)
+            {
+                tops[row]++;
+            }
+            else if (port.Side == EEdgeSide.Bottom)
+            {
+                bottoms[row]++;
+            }
+        }
     }
 
     /// <summary>
@@ -1428,6 +1486,7 @@ internal static class GraphRankedPlacement
     /// <param name="rowOfNode">The cell row of every node.</param>
     /// <param name="columns">How many cell columns the fill used.</param>
     /// <param name="rows">How many cell rows the fill used.</param>
+    /// <param name="room">The thickness of every band, or <see langword="null"/> for the plain row gap.</param>
     /// <returns>One placement per node and the lattice the routes are turned in.</returns>
     private static (NodePlacement[] Placement, GraphGrid Grid) Emit(
         int count,
@@ -1435,7 +1494,8 @@ internal static class GraphRankedPlacement
         IReadOnlyList<int> columnOfNode,
         IReadOnlyList<int> rowOfNode,
         int columns,
-        int rows)
+        int rows,
+        (double[] Bands, double Top, double Bottom)? room = null)
     {
         var occupiedColumn = new bool[Math.Max(1, columns)];
         var occupiedRow = new bool[Math.Max(1, rows)];
@@ -1468,11 +1528,11 @@ internal static class GraphRankedPlacement
         }
 
         var rowTops = new double[rowCount];
-        var y = Margin;
+        var y = room?.Top ?? Margin;
         for (var row = 0; row < rowCount; row++)
         {
             rowTops[row] = y;
-            y += GraphCard.Height + RowGap;
+            y += GraphCard.Height + (room?.Bands[row] ?? RowGap);
         }
 
         var placement = new NodePlacement[count];
@@ -1502,12 +1562,12 @@ internal static class GraphRankedPlacement
         for (var corridor = 0; corridor < rowCorridors.Length; corridor++)
         {
             rowCorridors[corridor] = corridor == 0
-                ? rowTops[0] - (RowGap / 2)
-                : rowTops[corridor - 1] + GraphCard.Height + (RowGap / 2);
+                ? rowTops[0] - ((room?.Top ?? Margin) / 2)
+                : rowTops[corridor - 1] + GraphCard.Height + ((room?.Bands[corridor - 1] ?? RowGap) / 2);
         }
 
         var width = columnLefts[^1] + columnWidths[^1] + Margin;
-        var height = rowTops[^1] + GraphCard.Height + Margin;
+        var height = rowTops[^1] + GraphCard.Height + (room?.Bottom ?? Margin);
 
         return (placement, new GraphGrid(
             columnLefts,

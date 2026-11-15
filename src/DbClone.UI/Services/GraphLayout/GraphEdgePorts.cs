@@ -451,6 +451,38 @@ internal static class GraphEdgePorts
 
     private static double Room(double length) => Math.Max(MinStep, length - (2 * Inset));
 
+    /// <summary>
+    /// The least width a card needs so that every end that meets it keeps a mark's room on the border.
+    /// </summary>
+    /// <remarks>
+    /// The border is the only room an end has. The head's ink is a fixed width and two ends nearer than
+    /// <see cref="MinStep"/> are printed as one thick mark, which is the merge the border is dealt out
+    /// to prevent — so a card that carries more ends than its sides hold cannot be saved by dealing them
+    /// better, and it cannot be saved by drawing the arrows differently either: the points themselves
+    /// are what the reader counts. The card therefore widens until its two long sides hold the ends the
+    /// two short ones cannot, a mark apart, and the layout reserves that width like the text's own. The
+    /// short sides cannot grow — the height is what a card's two lines need and nothing more — so their
+    /// share is counted first, and the long sides take the rest. A card whose text is already wider than
+    /// this keeps its text's width; the caller takes the larger of the two.
+    /// </remarks>
+    /// <param name="ends">How many arrow ends meet the card, both directions and a self reference's two.</param>
+    /// <param name="height">The height every card is drawn at.</param>
+    /// <returns>The least width the border needs, which may be below the card's own minimum.</returns>
+    internal static double WidthFor(int ends, double height)
+    {
+        var shorts = 2 * Slots(Room(height));
+        var longs = Math.Max(1, (Math.Max(0, ends - shorts) + 1) / 2);
+        var width = (2 * Inset) + ((longs - 1) * MinStep);
+
+        // The ends are dealt side by side, but the card is first asked whether its whole border holds
+        // them: the corners take their own share off every side, so a border whose sides each have room
+        // can still fall short of one mark per end, and a card that falls short is spread evenly round
+        // its rim instead — the very crowding the width exists to prevent.
+        var shortest = (ends * MinStep) - (2 * Room(height));
+
+        return Math.Max(width, (2 * Inset) + (shortest / 2));
+    }
+
     /// <summary>The border point one end gets, rounded to the whole pixel a stroke is drawn on.</summary>
     private static GraphPoint At(NodePlacement node, EEdgeSide side, double along) => side switch
     {
