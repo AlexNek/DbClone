@@ -171,6 +171,17 @@ public partial class App : System.Windows.Application, IDisposable
                 "Production"
 #endif
             )
+.ConfigureLogging(logging =>
+    {
+        // The host's logging factory is replaced, not extended: without this the
+        // services' own ILogger lines never reached the Serilog file and existed
+        // only on the console and in the Windows event log. That event-log
+        // provider is dropped with the rest because it throws when the app may
+        // not open its source — a log call that throws aborts whatever it was
+        // reporting, which is how an update check once ended with no result.
+        logging.ClearProviders();
+        logging.AddSerilog(Log.Logger, dispose: false);
+    })
             .ConfigureServices((_, services) =>
                 {
                     // The plugin catalog is the single route from a connection to an adapter.

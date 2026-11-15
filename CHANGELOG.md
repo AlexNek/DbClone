@@ -57,13 +57,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Saved connections, groups, presets, and settings now replace JSON files atomically; corrupt persisted data is quarantined instead of silently becoming a file that a later save can overwrite
 - Encrypted connection backups now use authenticated AES-GCM version 2 with atomic replacement while retaining compatibility with version 1 backups
 - Explicit blob extraction now validates catalog folders and encoded output paths against their intended roots
+- The About window's update check now reports that the check failed instead of claiming the app is up to date when the release feed could not be reached
 
 ### Security
-- Auto-update now requires the downloaded installer to match the SHA-256 checksum published beside the release asset before it can be launched
+- Auto-update verifies the downloaded installer against the SHA-256 the release publishes for it — the asset digest GitHub records, or a `.sha256` file beside the installer — and refuses to launch a download that does not match
 
 - Table selection in Store/Restore is no longer decorative: the `Tables` and `ExcludedTables` filters from the UI reach the catalog writer through `ExportOptions`, so selecting specific tables now captures only those tables
 - Case-colliding table names (e.g. `MixedCase` and `mixedcase` in the same schema) no longer silently overwrite each other on case-insensitive filesystems: the writer resolves collisions before creating folders and refuses to continue if a collision is detected, and the folder each table was written into is recorded in the catalog so a restore reads every one of those tables' own rows instead of guessing the name again — previously the second table's data was lost on export, and its rows were read back from its sibling on restore
-- Application logs now live in `%LOCALAPPDATA%\DbClone\logs`, beside the app's other saved files and its `crash.log`, instead of the roaming profile — so a domain account no longer syncs them to the server — and the log folder is bounded: 10 MB per file with ten files kept (about 100 MB), oldest removed first, so a long copy can no longer grow it without limit
+- Application logs now live in `%LOCALAPPDATA%\DbClone\logs`, beside the app's other saved files and its `crash.log`, instead of the roaming profile — so a domain account no longer syncs them to the server — and the log folder is bounded: 10 MB per file with ten files kept (about 100 MB), oldest removed first, so a long copy can no longer grow it without limit. The application's own service logging reaches that file too (`ILogger` output now routes to the same Serilog file instead of stopping at the console and the Windows event log, whose write failure used to abort the operation that was logging)
 
 ## [1.1.1] - 2026-08-12
 
