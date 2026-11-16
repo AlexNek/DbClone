@@ -64,6 +64,24 @@ destination — keeps the usual failure warning and does not stop the copy.
 
 - CreateViews, CreateTriggers, CreateFunctions, CreateIndexes, etc.
 
+### What ends a run, what only costs an object
+
+A stage's own status and the run's verdict are two different things, because an object the server refuses
+is not the same loss as a table's rows.
+
+- **Ends the run** — a critical stage, a table that could not be created, rows that failed to copy or to
+  validate, and a non-critical stage that fails as a whole (no destination connection, a refused index,
+  sequence or composite type). The run ends **failed** and the errors panel lists them.
+- **Costs one object** — a function, a view, a materialized view or a trigger the server refused
+  (`RetryFunctions`, `CreateViews`, `CreateTriggers`). Each is named **once**, at **warning** severity,
+  with its schema-qualified name and the server's message; the stage itself still counts as done, the
+  pipeline continues, and the run ends **complete** with the number of objects that were not created.
+
+So `[OK] CreateViews: 3 objects` means the stage finished its work — not that every view exists. The views
+that were not created are named in the warnings, and the status line ends
+`Copy complete in 241.1s — 1 object not created (see the log)`. See
+[Troubleshooting](../troubleshooting.md#copy-complete-but-some-objects-were-not-created).
+
 ## Stage Lifecycle
 
 Each stage reports:

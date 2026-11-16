@@ -96,6 +96,45 @@ GRANT CREATE ON SCHEMA my_schema TO my_user;
 
 ---
 
+### Copy complete, but some objects were not created
+
+**Symptoms:** the run ends with a line like
+
+```
+Copy complete in 241.1s — 1 object not created (see the log)
+```
+
+and the log names the object at warning severity.
+
+**Meaning:** the copy finished and its data is in place, but the server refused an object while it was
+being recreated. The number counts **functions, views, materialized views and triggers only** — the objects
+whose refusal costs one object and never fails the run. A table that could not be created, rows that failed
+to copy or validate, and a refused index, sequence or composite type still end the run as failed.
+
+**Where to find the object names:** in the run's warnings. Each refused object is named once, with the
+server's message, right after the stage that tried to create it:
+
+```
+[OK] RetryFunctions: 1 objects in 0.1s
+FAIL: realtime.list_changes: permission denied for function list_changes
+```
+
+The statement the stage ran is in the log file at `Debug` level.
+
+**Solutions:**
+
+1. Fix the cause the server named and re-run the copy in **Full** mode — a re-run creates the object.
+2. `permission denied` for a function that carries a `SET` clause (Supabase's `realtime` and `auth` helpers
+do): the destination user may not set that parameter. Either copy without the platform schemas (**Platform
+Schemas** unchecked) or grant it on the destination as a superuser:
+   ```sql
+   GRANT SET ON PARAMETER log_min_messages TO your_copy_user;
+   ```
+3. A view refused because it depends on an object that is missing on the destination: create the missing
+object and re-run, or accept the loss — the rest of the copy is complete.
+
+---
+
 ### DDL differences on `realtime.*` or `auth.*` tables after a fresh copy
 
 **Symptoms:** External comparison tools (or an older DbClone version) report differences like:

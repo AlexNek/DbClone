@@ -87,18 +87,11 @@ public sealed class SyncSequencesStage : ICopyStage
                         PgIdentifierQuoter.QuoteSchemaQualified(ownerSchema, ownerTable));
                     var columnArg = EscapeSqlLiteral(seq.OwnerColumn);
 
-                    string? resolved;
-                    try
-                    {
-                        resolved = await destExec.ExecuteScalarAsync<string>(
+                    // A null answer is expected here: the column has no sequence on the
+                    // destination yet. It is a value, not a failed query.
+                    var resolved = await destExec.ExecuteScalarOrNullAsync<string>(
                                        $"SELECT pg_get_serial_sequence('{tableArg}', '{columnArg}')",
                                        cancellationToken);
-                    }
-                    catch (InvalidOperationException)
-                    {
-                        // pg_get_serial_sequence returned NULL — column has no sequence on dest
-                        resolved = null;
-                    }
 
                     if (resolved is null)
                     {

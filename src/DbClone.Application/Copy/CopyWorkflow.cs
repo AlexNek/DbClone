@@ -352,10 +352,7 @@ public sealed class CopyWorkflow : ICopyWorkflow
 
             listener.OnPhaseChanged(
                 result.Success ? ECopyOperationPhase.Completed : ECopyOperationPhase.Failed);
-            listener.OnStatusMessageChanged(
-                result.Success
-                    ? $"Copy complete in {result.TotalDuration.TotalSeconds:F1}s"
-                    : $"Copy failed: {result.Errors.Count} errors");
+            listener.OnStatusMessageChanged(CopyOutcomeSummary.Describe(result));
 
             return new CopyWorkflowResult
                        {

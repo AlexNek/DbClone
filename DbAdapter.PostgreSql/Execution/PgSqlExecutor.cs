@@ -162,10 +162,36 @@ public sealed class PgSqlExecutor : ISqlExecutor, IAsyncDisposable
                            _logger.LogDebug("ExecuteScalar: {Sql}", TruncateSql(sql));
                            var result = await cmd.ExecuteScalarAsync(cancellationToken);
                            if (result is null || result is DBNull)
-                               throw new InvalidOperationException("Scalar query returned null");
+                               throw new InvalidOperationException(
+                                   $"Scalar query returned null: {TruncateSql(sql)}");
                            return (T)Convert.ChangeType(result, typeof(T))!;
                        },
                    "ExecuteScalarAsync",
+                   cancellationToken);
+    }
+
+    /// <inheritdoc />
+    public async Task<T?> ExecuteScalarOrNullAsync<T>(
+        string sql,
+        CancellationToken cancellationToken = default)
+        where T : class
+    {
+        return await RetryAsync(
+                   async () =>
+                       {
+                           await EnsureOpenAsync(cancellationToken);
+                           await using var cmd = new NpgsqlCommand(sql, _connection)
+                                                     {
+                                                         CommandTimeout =
+                                                             (int)_commandTimeout.TotalSeconds
+                                                     };
+                           _logger.LogDebug("ExecuteScalarOrNull: {Sql}", TruncateSql(sql));
+                           var result = await cmd.ExecuteScalarAsync(cancellationToken);
+                           if (result is null || result is DBNull)
+                               return null;
+                           return (T?)Convert.ChangeType(result, typeof(T));
+                       },
+                   "ExecuteScalarOrNullAsync",
                    cancellationToken);
     }
 
@@ -249,7 +275,7 @@ public sealed class PgSqlExecutor : ISqlExecutor, IAsyncDisposable
             }
             catch (Exception ex)
             {
-                _logger.LogError(ex, "Error in {Operation}: {Message}", operationName, ex.Message);
+                _logger.LogDebug(ex, "Error in {Operation}: {Message}", operationName, ex.Message);
                 throw;
             }
         }
