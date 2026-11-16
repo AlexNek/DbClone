@@ -88,6 +88,40 @@ public class RetryFunctionsStageTests
     }
 
     [Fact]
+    public async Task ExecuteAsync_RefusedParameterWasNotGranted_StatesTheStatementInTheWarning()
+    {
+        // Arrange — the pre-flight could not win the privilege, so the loss is one this run knows
+        // the statement for; the warning the verdict counts must carry it.
+        _executor.ExecuteNonQueryAsync(Arg.Any<string>(), Arg.Any<CancellationToken>())
+            .ThrowsAsync(
+                new PostgresException(
+                    "permission denied to set parameter \"log_min_messages\"",
+                    "ERROR",
+                    "ERROR",
+                    "42501"));
+        var context = CreateContext(MakeFunction("realtime", "list_changes", "log_min_messages"));
+        MarkFunctionsFailed(context, 0);
+        context.Properties[PgSetParameterGrant.RefusedSetParametersKey] =
+            new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase)
+            {
+                ["log_min_messages"] = "GRANT SET ON PARAMETER log_min_messages TO test_user"
+            };
+
+        // Act
+        var result = await _stage.ExecuteAsync(context);
+
+        // Assert
+        var reason = result.Details.Single(d => d.Kind == EStageMessageKind.Failed)
+                           .Get<string>(PropKeys.Reason);
+        reason.Should()
+              .Be(
+                  "permission denied to set parameter \"log_min_messages\" — run on the destination: " +
+                  "GRANT SET ON PARAMETER log_min_messages TO test_user");
+        context.Warnings.Should().ContainSingle()
+               .Which.Properties![PropKeys.Reason].Should().Be(reason);
+    }
+
+    [Fact]
     public async Task ExecuteAsync_RetriedFunctionCreated_ReportsNoWarning()
     {
         // Arrange
@@ -185,7 +219,10 @@ public class RetryFunctionsStageTests
         };
     }
 
-    private static FunctionDefinition MakeFunction(string schema, string name) =>
+    private static FunctionDefinition MakeFunction(
+        string schema,
+        string name,
+        params string[] setParameters) =>
         new(schema,
             name,
             "plpgsql",
@@ -196,5 +233,8 @@ public class RetryFunctionsStageTests
             false,
             false,
             null,
-            false);
+            false)
+        {
+            SetParameters = setParameters
+        };
 }

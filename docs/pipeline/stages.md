@@ -15,7 +15,7 @@ DbClone executes a pipeline of ordered stages. Each stage is independent — a f
 | 7 | **CreateExtensions** | Installs required extensions (`uuid-ossp`, `pgcrypto`, etc.) |
 | 8 | **CreateSequences** | Creates standalone and serial sequences (identity sequences are skipped — created implicitly by table DDL) |
 | 9 | **CreateTypes** | Creates enums, domains, and composite types |
-| 10 | **CreateFunctions** | Creates functions and procedures (first pass — some may fail if they reference tables) |
+| 10 | **CreateFunctions** | Asks for the `SET` privileges the functions declare, then creates functions and procedures (first pass — some may fail if they reference tables) |
 | 11 | **CreateTables** | Creates tables without foreign keys; detects tables blocked by unavailable extensions |
 | 12 | **ReconcileColumns** | Reconciles column differences between source and destination tables |
 | 13 | **CopyData** | Binary COPY of all table data with per-table progress |
@@ -49,6 +49,36 @@ SKIPPED: auth.users: 18 foreign key(s) not created — parent table is outside t
 The stage's object count includes created, failed and skipped constraints, so the header bar matches the
 summary line. A constraint that *is* in scope and is still refused — copied rows that violate it on the
 destination — keeps the usual failure warning and does not stop the copy.
+
+## Functions That Set a Parameter
+
+A function may carry a `SET <parameter>` clause, and the server checks it when the function is created: a
+role that may not set that parameter cannot store the clause, so the function is refused with
+`42501 permission denied to set parameter`. The **CreateFunctions** stage therefore asks for the privilege
+first — once, before the first `CREATE FUNCTION` — for the parameters the copied functions declare in
+`pg_proc.proconfig`:
+
+```sql
+GRANT SET ON PARAMETER log_min_messages TO <the copy's role>
+```
+
+- **Only five logging parameters are ever asked for**: `log_min_messages`, `log_min_error_statement`,
+  `log_min_duration_statement`, `log_duration`, `log_statement`. What they change is what the server writes to
+  its log; any other parameter could change what a function is allowed to do, so a source database can never
+  make the copy grant one.
+- **The grant is not revoked.** A function re-applies its setting every time it runs, so revoking the
+  privilege afterwards would break the function rather than undo the copy. The five names are the whole
+  lasting change, and each grant is one line in the log.
+- **A refusal is not a failure.** A role that does not hold the privilege cannot confer it; the stage logs the
+  refusal and attempts every function anyway. A function that is still refused then costs that one object and
+  is named once at warning severity, together with the statement to hand an administrator.
+- **PostgreSQL 15 is the floor.** `GRANT … ON PARAMETER` does not exist before it, so on an older
+  **destination** the stage attempts nothing. A function that is then refused keeps the server's own message and
+  is given no statement, because no grant exists on such a server to name — running the copy as a superuser is
+  the only remedy there.
+
+The stage reports how many parameters it granted as `SET privileges granted` in its summary; the line appears
+only when the copied functions declare at least one of the five.
 
 ## Critical vs Non-Critical Stages
 

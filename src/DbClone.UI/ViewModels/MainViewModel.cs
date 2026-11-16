@@ -154,7 +154,7 @@ public sealed partial class MainViewModel : ObservableObject
         ITableCatalogService catalogService,
         IComparisonService comparisonService,
         ISettingsService settingsService,
-        ReportExportService reportExportService,
+        IReportExportService reportExportService,
         IConnectionTextService connectionStringService,
         IServerAdminService serverAdmin,
         IConnectionImportService importService,
@@ -181,9 +181,6 @@ public sealed partial class MainViewModel : ObservableObject
 
         // Load settings
         Settings = settingsService.Load();
-
-        // Ensure default catalog directory exists for better UX
-        Settings.StoreRestore.EnsureDefaultDirectoryExists();
 
         // Settings persistence
         var settingsPersister = new SettingsPersistenceManager(settingsService, Settings);
@@ -294,7 +291,8 @@ public sealed partial class MainViewModel : ObservableObject
                 [EWorkspaceMode.Copy] = Copy.State,
                 [EWorkspaceMode.Compare] = Compare.State
             },
-            StoreRestoreState);
+            StoreRestoreState,
+            serviceProvider.GetRequiredService<IFileService>());
 
         Connections = new ConnectionSectionViewModel(
             connectionGroupStore,

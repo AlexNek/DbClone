@@ -125,11 +125,17 @@ The statement the stage ran is in the log file at `Debug` level.
 
 1. Fix the cause the server named and re-run the copy in **Full** mode — a re-run creates the object.
 2. `permission denied` for a function that carries a `SET` clause (Supabase's `realtime` and `auth` helpers
-do): the destination user may not set that parameter. Either copy without the platform schemas (**Platform
-Schemas** unchecked) or grant it on the destination as a superuser:
+do): the destination user may not set that parameter. The copy already asks for that privilege itself —
+once, before it creates functions — for the five logging parameters a function may declare
+(`log_min_messages`, `log_min_error_statement`, `log_min_duration_statement`, `log_duration`,
+`log_statement`), and logs each grant. A warning that still names a statement means the copy's own role may
+not confer the privilege, so run it on the destination as a superuser:
    ```sql
    GRANT SET ON PARAMETER log_min_messages TO your_copy_user;
    ```
+   The copy never revokes the grant, because the function re-applies its setting every time it runs.
+`GRANT … ON PARAMETER` needs PostgreSQL 15 or later: on an older destination there is no grant to give, so
+either copy without the platform schemas (**Platform Schemas** unchecked) or run the copy as a superuser.
 3. A view refused because it depends on an object that is missing on the destination: create the missing
 object and re-run, or accept the loss — the rest of the copy is complete.
 

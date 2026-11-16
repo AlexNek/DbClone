@@ -214,6 +214,7 @@ public partial class App : System.Windows.Application, IDisposable
                     services.AddSingleton<ITableFilterApplier, TableFilterApplier>();
                     services.AddSingleton<ITableSelectionPresetNameValidator, TableSelectionPresetNameValidator>();
                     services.AddSingleton<IBackupEncryptionService, BackupEncryptionService>();
+                    services.AddSingleton<IFileService, FileService>();
                     services.AddSingleton<DatabaseTargetFactory>();
 
                     // Store/Restore workflow services
@@ -268,7 +269,7 @@ public partial class App : System.Windows.Application, IDisposable
 
                     services.AddSingleton<ISettingsService>(settingsService);
                     services.AddReportGenerators();
-                    services.AddSingleton<ReportExportService>();
+                    services.AddSingleton<IReportExportService, ReportExportService>();
                     services.AddSingleton<IUpdateService, UpdateService>();
                     services.AddTransient<UnifiedConnectionManagerViewModel>();
                     services.AddTransient<MainViewModel>();

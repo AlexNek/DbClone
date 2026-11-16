@@ -74,6 +74,20 @@ public sealed class CopyWorkflow : ICopyWorkflow
             return new CopyWorkflowResult { Success = false, ErrorMessage = "Source and destination engines must match" };
         }
 
+        if (SameDatabase(source, destination))
+        {
+            listener.OnPhaseChanged(ECopyOperationPhase.Failed);
+            listener.OnStatusMessageChanged("Source and destination are the same database");
+            listener.OnLogMessage(
+                $"Copy rejected: '{source.DatabaseName}' on {source.Host}:{source.Port} is both the source and the destination. "
+                + "Nothing was changed. Select a different destination database.");
+            return new CopyWorkflowResult
+                       {
+                           Success = false,
+                           ErrorMessage = "Source and destination are the same database"
+                       };
+        }
+
         try
         {
             _logger.LogInformation("Copy operation started");
@@ -106,6 +120,15 @@ public sealed class CopyWorkflow : ICopyWorkflow
 
             listener.OnLogMessage(
                 $"Source OK: {sourceAdmin.ProviderName} {sourceVersion}");
+
+            if (!IsEngineVersionSupported(sourceAdapter, sourceVersion))
+            {
+                return RejectVersion(
+                    "Source",
+                    sourceAdapter.Info.EngineVersionRange,
+                    sourceVersion,
+                    listener);
+            }
 
             // Log selected copy options
             listener.OnLogHint(
@@ -149,6 +172,15 @@ public sealed class CopyWorkflow : ICopyWorkflow
 
             listener.OnLogMessage(
                 $"Destination OK: {destAdmin.ProviderName} {destVersion}");
+
+            if (!IsEngineVersionSupported(destinationAdapter, destVersion))
+            {
+                return RejectVersion(
+                    "Destination",
+                    destinationAdapter.Info.EngineVersionRange,
+                    destVersion,
+                    listener);
+            }
 
             // Step 3: Check destination permissions
             listener.OnPhaseChanged(ECopyOperationPhase.CheckingPermissions);
@@ -624,4 +656,59 @@ public sealed class CopyWorkflow : ICopyWorkflow
             EStageMessageKind.Skipped,
             objectName,
             new Dictionary<string, object> { [PropKeys.Reason] = reason });
+
+    /// <summary>
+    /// True when both connections name the same server and database. A full copy cleans the
+    /// destination before it reads the source, so this is the one mistake the workflow must
+    /// refuse outright: the two connections are the same database only when host, port and
+    /// database name all match, compared without regard to case or surrounding space.
+    /// </summary>
+    private static bool SameDatabase(ConnectionInfo source, ConnectionInfo destination) =>
+        string.Equals(source.Host.Trim(), destination.Host.Trim(), StringComparison.OrdinalIgnoreCase)
+        && source.Port == destination.Port
+        && string.Equals(
+            source.DatabaseName.Trim(),
+            destination.DatabaseName.Trim(),
+            StringComparison.OrdinalIgnoreCase);
+
+    /// <summary>
+    /// True when the server version the connection reported satisfies the range the adapter
+    /// declares. A range of "*" accepts every version, and a version string this build cannot
+    /// parse is accepted too — the adapter has already connected successfully, so refusing the
+    /// copy over an unreadable version would be worse than allowing it.
+    /// </summary>
+    private static bool IsEngineVersionSupported(IDatabaseAdapter adapter, string? serverVersion)
+    {
+        var range = adapter.Info.EngineVersionRange;
+        if (string.IsNullOrWhiteSpace(range) || string.IsNullOrWhiteSpace(serverVersion))
+            return true;
+
+        try
+        {
+            return VersionRangeParser.Satisfies(
+                VersionRangeParser.ParseServerVersion(serverVersion),
+                range);
+        }
+        catch (Exception)
+        {
+            return true;
+        }
+    }
+
+    /// <summary>
+    /// Fails the operation because a server version is outside the range its adapter supports.
+    /// </summary>
+    private static CopyWorkflowResult RejectVersion(
+        string side,
+        string supportedRange,
+        string? serverVersion,
+        ICopyProgressSink listener)
+    {
+        var message =
+            $"{side} server version {serverVersion} is outside the range this adapter supports ({supportedRange})";
+        listener.OnPhaseChanged(ECopyOperationPhase.Failed);
+        listener.OnStatusMessageChanged($"{side} version is not supported");
+        listener.OnLogMessage($"Copy rejected: {message}");
+        return new CopyWorkflowResult { Success = false, ErrorMessage = message };
+    }
 }

@@ -41,7 +41,7 @@ Open the **Connection Manager** and add your source and destination databases. Y
 
 ### 3. Configure options (optional)
 
-Toggle what to include: data, indexes, constraints, functions, triggers, views, materialized views, sequences, RLS policies, comments, and platform schemas. The **Connection Type** dropdown auto-detects your platform (Supabase, Aiven, Neon, or vanilla PostgreSQL) from the hostname and pre-fills the correct port and SSL mode. Adjust batch size and parallelism for large databases.
+Toggle what to copy: **Copy Data**, **Copy Indexes**, **Copy Views**, **Copy Functions**, **Copy Triggers**, and whether platform-managed **Platform Schemas** are included. Constraints, sequences, materialized views, RLS policies, and comments are always copied — they have no toggle. The **Connection Type** dropdown auto-detects your platform (Supabase, Aiven, Neon, or vanilla PostgreSQL) from the hostname and pre-fills the correct port and SSL mode. Batch size, command timeouts, and connection keepalive are built-in behaviour rather than settings; see [Options Reference](docs/options.md) for the full list.
 
 ### 4. Run the copy
 

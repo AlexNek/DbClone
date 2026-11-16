@@ -106,7 +106,11 @@ public sealed class PgCapabilityDetector : ICapabilityDetector
         }
     }
 
-    private static int ParseMajorVersion(string versionString)
+    /// <summary>
+    /// Reads the major version out of a server version string, or 0 when it cannot be read.
+    /// Shared with the stages that have to decide what a destination accepts.
+    /// </summary>
+    internal static int ParseMajorVersion(string? versionString)
     {
         // Version strings like "16.3 (Ubuntu 16.3-1.pgdg22.04+1)" or "15.4"
         if (string.IsNullOrEmpty(versionString) || versionString == "unknown")

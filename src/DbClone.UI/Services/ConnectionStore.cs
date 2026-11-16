@@ -21,7 +21,7 @@ public sealed class ConnectionStore : IConnectionStore
 
     private static readonly JsonSerializerOptions JsonOptions = new() { WriteIndented = true };
 
-    private static readonly string StorePath = Path.Combine(
+    private static readonly string DefaultStorePath = Path.Combine(
         Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
         AppFolder.Name,
         "connections.json");
@@ -30,11 +30,23 @@ public sealed class ConnectionStore : IConnectionStore
 
     private readonly object _lock = new();
 
+    private readonly string _storePath;
+
     /// <summary>
     /// Creates the store and loads existing connections from disk.
     /// </summary>
     public ConnectionStore()
+        : this(DefaultStorePath)
     {
+    }
+
+    /// <summary>
+    /// Creates a store backed by <paramref name="storePath"/>. Tests use this to keep the store
+    /// off the user's real profile; the application always takes the path above.
+    /// </summary>
+    internal ConnectionStore(string storePath)
+    {
+        _storePath = storePath;
         Load();
     }
 
@@ -187,9 +199,9 @@ public sealed class ConnectionStore : IConnectionStore
     {
         try
         {
-            if (!File.Exists(StorePath)) return;
+            if (!File.Exists(_storePath)) return;
 
-            var json = File.ReadAllText(StorePath);
+            var json = File.ReadAllText(_storePath);
             var dtos = JsonSerializer.Deserialize<List<ConnectionDto>>(json) ?? [];
 
             lock (_lock)
@@ -203,15 +215,15 @@ public sealed class ConnectionStore : IConnectionStore
         {
             if (ex is JsonException or CryptographicException)
             {
-                try { AtomicFileWriter.Quarantine(StorePath); }
-                catch (Exception quarantineEx) { Log.Warning(quarantineEx, "[ConnectionStore.Load] Could not quarantine corrupt file {Path}", StorePath); }
-                Log.Warning("[ConnectionStore.Load] Corrupt or unavailable encrypted data was quarantined at {Path}", StorePath);
+                try { AtomicFileWriter.Quarantine(_storePath); }
+                catch (Exception quarantineEx) { Log.Warning(quarantineEx, "[ConnectionStore.Load] Could not quarantine corrupt file {Path}", _storePath); }
+                Log.Warning("[ConnectionStore.Load] Corrupt or unavailable encrypted data was quarantined at {Path}", _storePath);
             }
 
             Log.Warning(
                 ex,
                 "[ConnectionStore.Load] Failed to load connections from {Path}, starting fresh",
-                StorePath);
+                _storePath);
         }
     }
 
@@ -219,7 +231,7 @@ public sealed class ConnectionStore : IConnectionStore
     {
         try
         {
-            var directory = Path.GetDirectoryName(StorePath);
+            var directory = Path.GetDirectoryName(_storePath);
             if (!string.IsNullOrEmpty(directory) && !Directory.Exists(directory))
                 Directory.CreateDirectory(directory);
 
@@ -228,14 +240,14 @@ public sealed class ConnectionStore : IConnectionStore
                 dtos = _connections.Select(ConnectionDto.FromModel).ToList();
 
             var json = JsonSerializer.Serialize(dtos, JsonOptions);
-            AtomicFileWriter.WriteAllText(StorePath, json);
+            AtomicFileWriter.WriteAllText(_storePath, json);
         }
         catch (Exception ex)
         {
             Log.Warning(
                 ex,
                 "[ConnectionStore.Persist] Failed to save connections to {Path}",
-                StorePath);
+                _storePath);
         }
     }
 }

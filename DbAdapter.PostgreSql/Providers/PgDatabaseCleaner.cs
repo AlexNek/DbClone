@@ -4,6 +4,7 @@ using Microsoft.Extensions.Logging;
 
 using Npgsql;
 using NpgsqlTypes;
+using DbAdapter.PostgreSql.Execution;
 using CanonicalModel.Enums;
 using CanonicalModel.Models;
 
@@ -198,16 +199,20 @@ public sealed class PgDatabaseCleaner : IDatabaseCleaner
 
         foreach (var schema in schemas.Where(s => s != "public"))
         {
+            // Quoted through the shared quoter: a schema name the server accepted may hold a
+            // double quote, and interpolating it raw would produce a statement naming another
+            // schema — in the one loop that destroys data.
+            var quotedSchema = PgIdentifierQuoter.QuoteIdentifier(schema);
             try
             {
                 await using var dropCmd = new NpgsqlCommand(
-                    $"DROP SCHEMA IF EXISTS \"{schema}\" CASCADE",
+                    $"DROP SCHEMA IF EXISTS {quotedSchema} CASCADE",
                     conn);
                 await dropCmd.ExecuteNonQueryAsync(ct);
             }
             catch (PostgresException ex) when (IsLockOrStatementTimeout(ex))
             {
-                LogLockTimeoutError(logMessage, dbName, $"DROP SCHEMA \"{schema}\"", ex);
+                LogLockTimeoutError(logMessage, dbName, $"DROP SCHEMA {quotedSchema}", ex);
                 return false;
             }
             catch (Exception ex)

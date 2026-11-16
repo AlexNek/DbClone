@@ -1,5 +1,4 @@
 using System.ComponentModel;
-using System.Diagnostics;
 using System.Windows;
 using System.Windows.Controls;
 using System.Windows.Input;
@@ -112,23 +111,17 @@ public partial class ToolbarView : UserControl
     {
         CopyOptionsPopup.DataContext = DataContext;
         CopyOptionsPopup.IsOpen = !CopyOptionsPopup.IsOpen;
-        Debug.WriteLine(
-            $"[CopyOptions] Popup DataContext = {CopyOptionsPopup.DataContext?.GetType().Name ?? "null"}");
     }
 
     private void CompareOptionsButton_Click(object sender, RoutedEventArgs e)
     {
         CompareOptionsPopup.DataContext = DataContext;
         CompareOptionsPopup.IsOpen = !CompareOptionsPopup.IsOpen;
-        Debug.WriteLine(
-            $"[CompareOptions] Popup DataContext = {CompareOptionsPopup.DataContext?.GetType().Name ?? "null"}");
     }
 
     private void StoreOptionsButton_Click(object sender, RoutedEventArgs e)
     {
         StoreOptionsPopup.DataContext = DataContext;
         StoreOptionsPopup.IsOpen = !StoreOptionsPopup.IsOpen;
-        Debug.WriteLine(
-            $"[StoreOptions] Popup DataContext = {StoreOptionsPopup.DataContext?.GetType().Name ?? "null"}");
     }
 }

@@ -181,7 +181,7 @@
                                     Margin="0,0,0,4"
                                     Content="Platform Schemas"
                                     IsChecked="{Binding Settings.CopyPlatformSchemas}"
-                                    ToolTip="Include platform-managed schemas (e.g. Supabase auth, storage, realtime) in copy and comparison. Uncheck to exclude schemas owned by non-login service roles. System schemas (pg_catalog, information_schema) are always excluded." />
+                                    ToolTip="Include schemas owned by platform service roles in copy and comparison. Uncheck to exclude every schema owned by a non-login service role. The server's own system schemas are always excluded." />
                                 <TextBlock
                                     Margin="0,12,0,8"
                                     FontWeight="SemiBold"

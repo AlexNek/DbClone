@@ -1,3 +1,5 @@
+using System.IO;
+
 using DbClone.UI.Models;
 
 namespace DbClone.UI.Services;
@@ -6,13 +8,15 @@ namespace DbClone.UI.Services;
 /// Orchestrator that routes export requests to the appropriate report generator
 /// using the Self-Identifying Strategy pattern.
 /// </summary>
-public sealed class ReportExportService
+public sealed class ReportExportService : IReportExportService
 {
     private readonly IEnumerable<IReportGenerationService> _generators;
+    private readonly IFileService _files;
 
-    public ReportExportService(IEnumerable<IReportGenerationService> generators)
+    public ReportExportService(IEnumerable<IReportGenerationService> generators, IFileService files)
     {
         _generators = generators;
+        _files = files;
     }
 
     /// <summary>
@@ -29,5 +33,14 @@ public sealed class ReportExportService
                             $"Report format '{formatIdentifier}' is not supported.");
 
         return generator.Generate(data);
+    }
+
+    /// <inheritdoc />
+    public void ExportToFile(string path, ComparisonReportData data)
+    {
+        // The extension the user's dialog produced is the one format hint: it names the file they
+        // will open, so it decides the format whether or not it matches the dialog's filter.
+        var content = Export(Path.GetExtension(path), data);
+        _files.WriteAllText(path, content);
     }
 }

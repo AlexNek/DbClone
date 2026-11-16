@@ -20,6 +20,8 @@ public sealed class DatabaseAdapterCatalog : IAdapterCatalog
 {
     private readonly ILogger _logger;
 
+    private readonly IReadOnlyDictionary<string, IDatabaseAdapter> _byDialect;
+
     /// <param name="pluginDirectory">The folder holding one subfolder per engine (typically <c>AppContext.BaseDirectory/plugins</c>).</param>
     /// <param name="loggerFactory">Logger factory the catalog warns through, and that is handed to every adapter.</param>
     public DatabaseAdapterCatalog(string pluginDirectory, ILoggerFactory loggerFactory)
@@ -28,21 +30,28 @@ public sealed class DatabaseAdapterCatalog : IAdapterCatalog
         _logger = loggerFactory.CreateLogger<DatabaseAdapterCatalog>();
 
         var loaded = Discover(pluginDirectory, loggerFactory, _logger);
-        All = AcceptNonDuplicates(loaded, _logger);
+        var described = DescribeAdapters(loaded, _logger);
+        var accepted = AcceptNonDuplicates(described, _logger);
+
+        All = accepted.Select(entry => entry.Adapter).ToList();
+        _byDialect = accepted.ToDictionary(
+            entry => entry.Dialect,
+            entry => entry.Adapter,
+            StringComparer.OrdinalIgnoreCase);
+
         if (All.Count == 0)
             _logger.LogError("No database adapters were loaded from '{Directory}'. Database operations are unavailable until a plugin is installed.", pluginDirectory);
 
-        Formats = All
-            .SelectMany(adapter => adapter.Syntax.Formats)
+        Formats = accepted
+            .SelectMany(entry => entry.Formats)
             .OrderBy(format => format.DetectionPriority)
             .ThenBy(format => format.Id, StringComparer.OrdinalIgnoreCase)
             .ToList();
 
-        Platforms = All
-            .OrderBy(adapter => adapter.Info.Dialect, StringComparer.OrdinalIgnoreCase)
-            .SelectMany(adapter =>
-                adapter.Platform.GetAllPlatforms(adapter.Info.Dialect)
-                    .OrderBy(entry => entry.Id, StringComparer.OrdinalIgnoreCase))
+        Platforms = accepted
+            .OrderBy(entry => entry.Dialect, StringComparer.OrdinalIgnoreCase)
+            .SelectMany(entry =>
+                entry.Platforms.OrderBy(p => p.Id, StringComparer.OrdinalIgnoreCase))
             .ToList();
     }
 
@@ -57,8 +66,7 @@ public sealed class DatabaseAdapterCatalog : IAdapterCatalog
 
     /// <inheritdoc />
     public IDatabaseAdapter? Find(string dialect) =>
-        All.FirstOrDefault(adapter =>
-            string.Equals(adapter.Info.Dialect, dialect, StringComparison.OrdinalIgnoreCase));
+        dialect is not null && _byDialect.TryGetValue(dialect, out var adapter) ? adapter : null;
 
     /// <summary>
     /// Scans <paramref name="pluginDirectory"/> and returns one entry per folder that produced an
@@ -201,29 +209,66 @@ public sealed class DatabaseAdapterCatalog : IAdapterCatalog
     }
 
     /// <summary>
+    /// Reads every contract value the catalog needs from each loaded adapter. A plugin that
+    /// throws while answering one of them is dropped here — logged with its folder — so a
+    /// malformed plugin can never take the catalog, and with it the application, down.
+    /// </summary>
+    internal static IReadOnlyList<DescribedAdapter> DescribeAdapters(
+        IReadOnlyList<(IDatabaseAdapter Adapter, string Folder)> loaded,
+        ILogger logger)
+    {
+        var described = new List<DescribedAdapter>(loaded.Count);
+
+        foreach (var (adapter, folder) in loaded)
+        {
+            try
+            {
+                var info = adapter.Info;
+                described.Add(
+                    new DescribedAdapter(
+                        adapter,
+                        folder,
+                        info.Id,
+                        info.Dialect,
+                        adapter.Syntax.Formats.ToList(),
+                        adapter.Platform.GetAllPlatforms(info.Dialect).ToList()));
+            }
+            catch (Exception ex)
+            {
+                logger.LogWarning(
+                    ex,
+                    "Adapter in '{Folder}' could not report its contract values; skipping.",
+                    folder);
+            }
+        }
+
+        return described;
+    }
+
+    /// <summary>
     /// Drops every adapter that collides with another — on dialect, on internal id, or on a hosted
     /// platform id — and reports the folders behind each collision. A duplicate is an installation
     /// mistake; silently choosing one would make behaviour depend on folder order.
     /// </summary>
-    private static IReadOnlyList<IDatabaseAdapter> AcceptNonDuplicates(
-        IReadOnlyList<(IDatabaseAdapter Adapter, string Folder)> loaded,
+    private static IReadOnlyList<DescribedAdapter> AcceptNonDuplicates(
+        IReadOnlyList<DescribedAdapter> loaded,
         ILogger logger)
     {
         var rejectedFolders = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
 
         // Adapters may not share a dialect (the value a connection selects on) or an internal id
         // (the value logs and diagnostics reference); either collision names two equal-looking engines.
-        RejectCollisions(loaded, rejectedFolders, logger, entry => entry.Adapter.Info.Dialect, "dialect");
-        RejectCollisions(loaded, rejectedFolders, logger, entry => entry.Adapter.Info.Id, "adapter id");
+        RejectCollisions(loaded, rejectedFolders, logger, entry => entry.Dialect, "dialect");
+        RejectCollisions(loaded, rejectedFolders, logger, entry => entry.Id, "adapter id");
 
         // A hosted platform id must belong to exactly one adapter, or the dropdown shows two entries
         // that resolve to different engines by load order.
         var platformOwners = new List<(string PlatformId, string Folder)>();
-        foreach (var (adapter, folder) in loaded)
+        foreach (var entry in loaded)
         {
-            foreach (var platform in adapter.Platform.GetAllPlatforms(adapter.Info.Dialect))
+            foreach (var platform in entry.Platforms)
             {
-                platformOwners.Add((platform.Id, folder));
+                platformOwners.Add((platform.Id, entry.Folder));
             }
         }
 
@@ -242,8 +287,7 @@ public sealed class DatabaseAdapterCatalog : IAdapterCatalog
 
         return loaded
             .Where(entry => !rejectedFolders.Contains(entry.Folder))
-            .Select(entry => entry.Adapter)
-            .OrderBy(adapter => adapter.Info.Dialect, StringComparer.OrdinalIgnoreCase)
+            .OrderBy(entry => entry.Dialect, StringComparer.OrdinalIgnoreCase)
             .ToList();
     }
 
@@ -252,10 +296,10 @@ public sealed class DatabaseAdapterCatalog : IAdapterCatalog
     /// group claimed by more than one folder, logging the collision under <paramref name="noun"/>.
     /// </summary>
     private static void RejectCollisions(
-        IReadOnlyList<(IDatabaseAdapter Adapter, string Folder)> loaded,
+        IReadOnlyList<DescribedAdapter> loaded,
         HashSet<string> rejectedFolders,
         ILogger logger,
-        Func<(IDatabaseAdapter Adapter, string Folder), string> keySelector,
+        Func<DescribedAdapter, string> keySelector,
         string noun)
     {
         foreach (var group in loaded.GroupBy(keySelector, StringComparer.OrdinalIgnoreCase).Where(g => g.Count() > 1))

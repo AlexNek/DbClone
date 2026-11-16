@@ -54,6 +54,24 @@ public sealed partial class ImportConnectionViewModel : ObservableObject
 
     public ObservableCollection<string> ImportAsOptions { get; } = [NewConnectionOption];
 
+    /// <summary>
+    /// Engine-neutral prompt for the paste box. The formats themselves are listed below the
+    /// box from the installed adapters, so no example here names a dialect, a port or a scheme.
+    /// </summary>
+    public string InputPlaceholder =>
+        "Paste a connection string — a URL, key=value pairs, or a JDBC string";
+
+    /// <summary>
+    /// The formats the installed adapters understand, read from the catalog rather than
+    /// repeated here: a hard-coded list would drift the moment a format is added.
+    /// </summary>
+    public string SupportedFormatsDisplay =>
+        "Supported: " + string.Join(
+            " • ",
+            _importService.GetAllFormats()
+                          .Select(f => f.DisplayName)
+                          .Distinct(StringComparer.OrdinalIgnoreCase));
+
     public ImportConnectionViewModel(IConnectionImportService importService)
     {
         _importService = importService;

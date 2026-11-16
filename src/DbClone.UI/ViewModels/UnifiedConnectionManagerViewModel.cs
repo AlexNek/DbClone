@@ -1,5 +1,4 @@
 using System.Collections.ObjectModel;
-using System.IO;
 using System.Text.Json;
 
 using CommunityToolkit.Mvvm.ComponentModel;
@@ -33,6 +32,13 @@ public sealed partial class UnifiedConnectionManagerViewModel : ObservableObject
     private static int s_lastTabIndex;
 
     private readonly IBackupEncryptionService _backupEncryptionService;
+
+    /// <summary>
+    /// The only thing this view model writes through. The last parameter of the constructor with a
+    /// fallback to the stateless instance, so the hand-built graphs in tests stay one line: a
+    /// credential export the tests never run does not need a fake.
+    /// </summary>
+    private readonly IFileService _files;
 
     private readonly IConnectionStore _connectionStore;
 
@@ -198,7 +204,8 @@ public sealed partial class UnifiedConnectionManagerViewModel : ObservableObject
         int initialTab = 0,
         string? selectGroupId = null,
         string? selectConnectionId = null,
-        ISettingsService? settingsService = null)
+        ISettingsService? settingsService = null,
+        IFileService? files = null)
     {
         _connectionStore = connectionStore;
         _groupStore = groupStore;
@@ -209,6 +216,7 @@ public sealed partial class UnifiedConnectionManagerViewModel : ObservableObject
         _settingsService = settingsService;
         _backupEncryptionService = backupEncryptionService;
         _platformService = platformService;
+        _files = files ?? FileService.Instance;
 
         SslModeValues = connectionStringService.SecurityOptions;
 
@@ -309,10 +317,13 @@ public sealed partial class UnifiedConnectionManagerViewModel : ObservableObject
 
     /// <summary>
     /// Exports all connections and groups to a JSON backup file.
-    /// If a password is provided, the file is AES-256 encrypted.
+    /// If a password is provided, the file is AES-256 encrypted. Without one the file is
+    /// plain JSON, so passwords are left out of it: a backup that anyone can open must not
+    /// carry every credential in clear text.
     /// </summary>
     public void ExportAllToPath(string filePath, string? password = null)
     {
+        var encrypted = !string.IsNullOrEmpty(password);
         var connections = _connectionStore.GetAll();
         var groups = _groupStore.GetAll();
 
@@ -329,7 +340,10 @@ public sealed partial class UnifiedConnectionManagerViewModel : ObservableObject
                                                                  Port = c.Port,
                                                                  DatabaseName = c.DatabaseName,
                                                                  Username = c.Username,
-                                                                 Password = c.Password,
+                                                                 Password =
+                                                                     encrypted
+                                                                         ? c.Password
+                                                                         : string.Empty,
                                                                  SslMode = c.SslMode,
                                                                  ConnectionType = c.ConnectionType,
                                                                  Notes = c.Notes,
@@ -352,10 +366,10 @@ public sealed partial class UnifiedConnectionManagerViewModel : ObservableObject
 
         var json = JsonSerializer.Serialize(backup, BackupJsonOptions);
 
-        if (!string.IsNullOrEmpty(password))
-            _backupEncryptionService.WriteEncrypted(filePath, json, password);
+        if (encrypted)
+            _backupEncryptionService.WriteEncrypted(filePath, json, password!);
         else
-            File.WriteAllText(filePath, json);
+            _files.WriteAllText(filePath, json);
     }
 
     /// <summary>Exports the selected connection to a file chosen via SaveFileDialog.</summary>
@@ -373,7 +387,7 @@ public sealed partial class UnifiedConnectionManagerViewModel : ObservableObject
                          };
 
         if (dialog.ShowDialog() == true)
-            File.WriteAllText(dialog.FileName, exported);
+            _files.WriteAllText(dialog.FileName, exported);
     }
 
     /// <summary>
@@ -401,7 +415,12 @@ public sealed partial class UnifiedConnectionManagerViewModel : ObservableObject
                                Port = item.Port,
                                DatabaseName = item.DatabaseName,
                                Username = item.Username,
-                               Password = item.Password ?? string.Empty,
+                               // An unencrypted backup carries no passwords. Keeping the one already
+                               // stored under this Id stops a re-import from wiping credentials the
+                               // file never had a chance to restore.
+                               Password = string.IsNullOrEmpty(item.Password)
+                                              ? _connectionStore.GetById(item.Id)?.Password ?? string.Empty
+                                              : item.Password,
                                SslMode = item.SslMode,
                                ConnectionType = item.ConnectionType,
                                Notes = item.Notes,
@@ -906,7 +925,7 @@ public sealed partial class UnifiedConnectionManagerViewModel : ObservableObject
             if (vm.OutputMode == EExportOutputMode.Clipboard)
                 System.Windows.Clipboard.SetText(vm.ExportedString);
             else if (!string.IsNullOrEmpty(vm.FilePath))
-                File.WriteAllText(vm.FilePath, vm.ExportedString);
+                _files.WriteAllText(vm.FilePath, vm.ExportedString);
         }
     }
 

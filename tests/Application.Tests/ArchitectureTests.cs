@@ -26,6 +26,18 @@ public class ArchitectureTests
     /// <summary>Gets the directory of the boundary contract, relative to the repository root.</summary>
     private const string DefinitionsDirName = "DbAdapter.Definitions";
 
+    /// <summary>Gets the directory of the application shell, relative to the repository root.</summary>
+    private const string UiDirName = "src/DbClone.UI";
+
+    /// <summary>
+    /// Gets the regular expression matching a word only one engine knows: a driver name, a catalog
+    /// name, a port, a dialect name or a clipboard format id. The UI names none of them — every
+    /// value it shows is resolved from the installed adapter's own platform data.
+    /// </summary>
+    private static readonly Regex EngineVocabulary = new(
+        @"\bpostgres(?:ql)?\b|\bNpgsql\b|\bpg_\w+|\binformation_schema\b|\b5432\b|\bsupabase\b|pg-npgsql",
+        RegexOptions.Compiled | RegexOptions.IgnoreCase);
+
     /// <summary>Gets the source roots the layer rules are measured over.</summary>
     private static readonly string[] SourceRoots = [ModelDirName, DefinitionsDirName, "src", BlockDirName];
 
@@ -230,7 +242,7 @@ public class ArchitectureTests
     [Fact]
     public void UiDefinitionsImportsStayWithinTheCompositionAndReportAllowList()
     {
-        var uiRoot = Path.Combine(RepoRoot, "src", "DbClone.UI");
+        var uiRoot = Path.Combine(RepoRoot, UiDirName);
         var allowed = new HashSet<string>(StringComparer.OrdinalIgnoreCase)
         {
             "App.xaml.cs",
@@ -246,6 +258,46 @@ public class ArchitectureTests
 
         offenders.Should().BeEmpty(
             "the UI may import Definitions only in the composition root and the two documented report/compare files");
+    }
+
+    [Fact]
+    public void UiMarkupNamesNoEngineVocabulary()
+    {
+        // A tooltip or a placeholder is copy the user reads, so an engine name there is as much a
+        // leak as a type: it hard-codes the one engine that ships today into a view that has to
+        // work when a second one is installed. The formats and platform names a view needs come
+        // from the adapter catalog.
+        var offenders = UiFiles("*.xaml")
+            .Where(file => EngineVocabulary.IsMatch(StripXmlComments(File.ReadAllText(file))))
+            .Select(file => Path.GetRelativePath(RepoRoot, file))
+            .ToList();
+
+        offenders.Should().BeEmpty("a view may name no engine, catalog, port or format id");
+    }
+
+    [Fact]
+    public void UiCodeNamesNoEngineVocabulary()
+    {
+        // Comments are stripped: prose may explain PostgreSQL, a code path may not depend on it.
+        var offenders = UiFiles("*.cs")
+            .Where(file => EngineVocabulary.IsMatch(StripComments(File.ReadAllText(file))))
+            .Select(file => Path.GetRelativePath(RepoRoot, file))
+            .ToList();
+
+        offenders.Should().BeEmpty("the UI reaches the engine only through the adapter catalog");
+    }
+
+    /// <summary>Strips XML comments, so a markup comment may still explain a decision.</summary>
+    private static string StripXmlComments(string markup) =>
+        Regex.Replace(markup, "<!--.*?-->", string.Empty, RegexOptions.Singleline);
+
+    private static IEnumerable<string> UiFiles(string pattern)
+    {
+        var uiRoot = Path.Combine(RepoRoot, UiDirName.Replace('/', Path.DirectorySeparatorChar));
+
+        return Directory.EnumerateFiles(uiRoot, pattern, SearchOption.AllDirectories)
+            .Where(file => !file.Contains($"{Path.DirectorySeparatorChar}bin{Path.DirectorySeparatorChar}")
+                           && !file.Contains($"{Path.DirectorySeparatorChar}obj{Path.DirectorySeparatorChar}"));
     }
 
     [Fact]

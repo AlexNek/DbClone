@@ -1,6 +1,4 @@
 
-using Microsoft.Extensions.Logging;
-
 using CanonicalModel.Enums;
 using CanonicalModel.DTOs;
 using DbAdapter.Definitions;
@@ -20,14 +18,8 @@ public sealed class ReadMetadataStage : ICopyStage
     /// <inheritdoc />
     public int Order => 30;
 
+    /// <inheritdoc />
     public bool IsCritical => true;
-
-    /// <summary>Initializes a new instance.</summary>
-    /// <remarks>
-    /// The logger factory is kept as a dependency although this stage no longer reads
-    /// the catalog, so the stage list and its registrations stay unchanged.
-    /// </remarks>
-    public ReadMetadataStage(ILoggerFactory loggerFactory) => _ = loggerFactory;
 
     /// <inheritdoc />
     public Task<StageResult> ExecuteAsync(

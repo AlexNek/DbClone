@@ -1,11 +1,12 @@
-using System.IO;
-
 namespace DbClone.UI.Settings;
 
 /// <summary>
 /// Store / Restore workspace options.
 /// Plain POCO — assigned as a whole object on <see cref="UserSettings.StoreRestore"/>
-/// so the existing top-level PropertyChanged persistence picks it up.
+/// so the existing top-level PropertyChanged persistence picks it up. It holds no I/O: the
+/// catalog folder is created by the workflow that writes into it
+/// (<c>IWorkflowValidator.EnsureDirectoryExists</c>), which owns the failure path for a
+/// directory the user cannot write.
 /// </summary>
 public sealed class StoreRestoreOptions
 {
@@ -14,26 +15,6 @@ public sealed class StoreRestoreOptions
         System.IO.Path.Combine(
             Environment.GetFolderPath(Environment.SpecialFolder.MyDocuments),
             "DbClone Catalogs");
-
-    /// <summary>
-    /// Ensures the default catalog directory exists on disk.
-    /// Called during startup to provide a better user experience.
-    /// </summary>
-    public void EnsureDefaultDirectoryExists()
-    {
-        if (!string.IsNullOrWhiteSpace(DefaultCatalogDirectory) && !Directory.Exists(DefaultCatalogDirectory))
-        {
-            try
-            {
-                Directory.CreateDirectory(DefaultCatalogDirectory);
-            }
-            catch (Exception ex)
-            {
-                // Log but don't fail - directory will be created on first use if needed
-                System.Diagnostics.Debug.WriteLine($"Failed to create default catalog directory: {ex.Message}");
-            }
-        }
-    }
 
     /// <summary>
     /// Subfolder naming pattern under <see cref="DefaultCatalogDirectory"/>.

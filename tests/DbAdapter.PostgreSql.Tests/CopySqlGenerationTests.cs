@@ -32,6 +32,17 @@ public class CopySqlGenerationTests
     }
 
     [Fact]
+    public void DataCopier_ClearSql_EmptiesOnlyOwnRows()
+    {
+        // A retry follows an attempt that may have committed part of the table, so the
+        // destination is emptied with DELETE (not TRUNCATE, which a resume run's foreign
+        // keys would refuse) and with ONLY, matching what the copy wrote.
+        var sql = PgDataCopier.BuildClearTableSql("public.parent_t");
+
+        sql.Should().Be("DELETE FROM ONLY public.parent_t");
+    }
+
+    [Fact]
     public void TableComparer_CountSql_DeliberatelyOmitsOnly()
     {
         // Comparison must see the same inheritance-visible row set on both sides:

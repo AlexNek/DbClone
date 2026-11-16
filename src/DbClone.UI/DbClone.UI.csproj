@@ -60,11 +60,14 @@
   <!-- Publish each engine project into the application output's plugins\<dialect> folder so the
        catalog can discover and load it at runtime. Runs after a plain Build (dev runs find the
        engine) and after Publish (the installer harvests the same folder). The engine is published
-       from its own project, never copied from the UI's compile output. -->
+       from its own project, never copied from the UI's compile output. The folder is emptied first:
+       dotnet publish never deletes, so without this a file the engine dropped — an old stage, an
+       assembly renamed between versions — stayed in the plugin folder the catalog scans. -->
   <Target Name="PublishAdapters" AfterTargets="Build;Publish">
     <PropertyGroup>
       <_PluginsOut>$(TargetDir)plugins\postgresql</_PluginsOut>
     </PropertyGroup>
+    <RemoveDir Directories="$(_PluginsOut)" Condition="'$(DesignTimeBuild)' != 'true'" />
     <Exec Command="dotnet publish &quot;$(MSBuildThisFileDirectory)..\..\DbAdapter.PostgreSql\DbAdapter.PostgreSql.csproj&quot; -c $(Configuration) -o &quot;$(_PluginsOut)&quot; --nologo -v q"
           Condition="'$(DesignTimeBuild)' != 'true'" />
   </Target>

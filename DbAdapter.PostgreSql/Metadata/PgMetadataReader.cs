@@ -1,6 +1,8 @@
 using DbAdapter.Definitions;
 using DbAdapter.PostgreSql.Execution;
 
+using System.Data.Common;
+
 using Microsoft.Extensions.Logging;
 using CanonicalModel.Models;
 using CanonicalModel.Enums;
@@ -738,7 +740,8 @@ public sealed class PgMetadataReader : IMetadataReader
                 p.prosecdef,
                 obj_description(p.oid) AS comment,
                 CASE p.prokind WHEN 'p' THEN true ELSE false END AS is_procedure,
-                pg_get_function_arguments(p.oid) AS arguments
+                pg_get_function_arguments(p.oid) AS arguments,
+                p.proconfig AS set_parameters
             FROM pg_proc p
             JOIN pg_namespace n ON n.oid = p.pronamespace
             JOIN pg_language l ON l.oid = p.prolang
@@ -748,33 +751,41 @@ public sealed class PgMetadataReader : IMetadataReader
               AND NOT EXISTS (SELECT 1 FROM pg_depend d WHERE d.objid = p.oid AND d.deptype = 'e')
             ORDER BY n.nspname, p.proname";
 
-        return await _executor.QueryAsync(
-                   sql,
-                   r =>
-                       {
-                           var volatility = r.GetString(5) switch
-                               {
-                                   "i" => EFunctionVolatility.Immutable,
-                                   "s" => EFunctionVolatility.Stable,
-                                   _ => EFunctionVolatility.Volatile
-                               };
+        return await _executor.QueryAsync(sql, MapFunction, ct);
+    }
 
-                           var parameters = ParseFunctionParameters(r.GetString(10));
+    /// <summary>
+    /// Maps one row of the function query into the model. Kept as its own method so the column
+    /// order — including <c>proconfig</c>, whose names the copy asks privileges for — is covered by
+    /// a test that needs no server.
+    /// </summary>
+    internal static FunctionDefinition MapFunction(DbDataReader reader)
+    {
+        var volatility = reader.GetString(5) switch
+            {
+                "i" => EFunctionVolatility.Immutable,
+                "s" => EFunctionVolatility.Stable,
+                _ => EFunctionVolatility.Volatile
+            };
 
-                           return new FunctionDefinition(
-                               SchemaName: r.GetString(0),
-                               Name: r.GetString(1),
-                               Language: r.GetString(2),
-                               ReturnType: r.GetString(3),
-                               Definition: r.GetString(4),
-                               Parameters: parameters,
-                               Volatility: volatility,
-                               IsStrict: r.GetBoolean(6),
-                               SecurityDefiner: r.GetBoolean(7),
-                               Comment: r.IsDBNull(8) ? null : r.GetString(8),
-                               IsProcedure: r.GetBoolean(9));
-                       },
-                   ct);
+        return new FunctionDefinition(
+            SchemaName: reader.GetString(0),
+            Name: reader.GetString(1),
+            Language: reader.GetString(2),
+            ReturnType: reader.GetString(3),
+            Definition: reader.GetString(4),
+            Parameters: ParseFunctionParameters(reader.GetString(10)),
+            Volatility: volatility,
+            IsStrict: reader.GetBoolean(6),
+            SecurityDefiner: reader.GetBoolean(7),
+            Comment: reader.IsDBNull(8) ? null : reader.GetString(8),
+            IsProcedure: reader.GetBoolean(9))
+        {
+            // The parameters a SET clause names are what a role that may not set
+            // them is refused over, so they travel with the definition.
+            SetParameters = PgFunctionSettings.Parse(
+                reader.IsDBNull(11) ? null : reader.GetFieldValue<string[]>(11))
+        };
     }
 
     private async Task<Dictionary<string, IReadOnlyList<IndexDefinition>>> ReadIndexesAsync(

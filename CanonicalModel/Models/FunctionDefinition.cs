@@ -16,4 +16,11 @@ public sealed record FunctionDefinition(
     bool IsStrict,
     bool SecurityDefiner,
     string? Comment,
-    bool IsProcedure);
+    bool IsProcedure)
+{
+    /// <summary>
+    /// Names of the server settings the definition declares in its <c>SET</c> clauses,
+    /// one per clause and never their values. Empty when the function declares none.
+    /// </summary>
+    public IReadOnlyList<string> SetParameters { get; init; } = [];
+}

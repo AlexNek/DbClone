@@ -1,6 +1,5 @@
 using System.Collections.ObjectModel;
 using System.ComponentModel;
-using System.IO;
 using System.Windows;
 using System.Windows.Data;
 
@@ -9,6 +8,7 @@ using CommunityToolkit.Mvvm.Input;
 
 using DbClone.UI.Logging;
 using DbClone.UI.Models;
+using DbClone.UI.Services;
 using CanonicalModel.Enums;
 
 namespace DbClone.UI.ViewModels;
@@ -26,6 +26,8 @@ public sealed partial class LogPaneViewModel : ObservableObject
     private readonly IReadOnlyDictionary<EWorkspaceMode, WorkflowState> _states;
 
     private readonly WorkflowState? _storeRestoreState;
+
+    private readonly IFileService _files;
 
     private EWorkspaceMode _selectedMode = EWorkspaceMode.Copy;
 
@@ -69,11 +71,13 @@ public sealed partial class LogPaneViewModel : ObservableObject
 
     public LogPaneViewModel(
         IReadOnlyDictionary<EWorkspaceMode, WorkflowState> states,
-        WorkflowState? storeRestoreState = null)
+        WorkflowState? storeRestoreState = null,
+        IFileService? files = null)
     {
         ArgumentNullException.ThrowIfNull(states);
         _states = states;
         _storeRestoreState = storeRestoreState;
+        _files = files ?? FileService.Instance;
         _activeState = states[EWorkspaceMode.Copy];
         FilteredLogMessages = BuildFilteredView();
 
@@ -171,7 +175,7 @@ public sealed partial class LogPaneViewModel : ObservableObject
     private void OpenLogFolder()
     {
         var logDir = LoggingConfiguration.GetLogDirectory();
-        if (logDir is not null && Directory.Exists(logDir))
+        if (logDir is not null && _files.DirectoryExists(logDir))
             System.Diagnostics.Process.Start("explorer.exe", logDir);
     }
 

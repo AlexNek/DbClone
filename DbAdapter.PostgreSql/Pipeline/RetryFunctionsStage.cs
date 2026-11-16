@@ -112,7 +112,10 @@ public sealed class RetryFunctionsStage : ICopyStage
             }
             catch (Exception ex)
             {
-                var userMessage = PgExceptionHelper.GetUserMessage(ex);
+                var userMessage = PgSetParameterGrant.DescribeFailure(
+                                      ex,
+                                      model.Functions[idx].SetParameters,
+                                      RefusedStatements(context));
                 logger.LogWarning(
                     ex,
                     "Retry failed for function {Function}: {Error}",
@@ -150,4 +153,13 @@ public sealed class RetryFunctionsStage : ICopyStage
             created,
             details);
     }
+
+    /// <summary>
+    /// The statements the creating stage kept when it could not win a parameter's privilege, or null
+    /// when it won them all — the retry stage adds the sentence those statements make possible.
+    /// </summary>
+    private static IReadOnlyDictionary<string, string>? RefusedStatements(CopyContext context) =>
+        context.Properties.TryGetValue(PgSetParameterGrant.RefusedSetParametersKey, out var refused)
+            ? refused as IReadOnlyDictionary<string, string>
+            : null;
 }
