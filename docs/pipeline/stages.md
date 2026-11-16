@@ -20,13 +20,35 @@ DbClone executes a pipeline of ordered stages. Each stage is independent — a f
 | 12 | **ReconcileColumns** | Reconciles column differences between source and destination tables |
 | 13 | **CopyData** | Binary COPY of all table data with per-table progress |
 | 14 | **CreateIndexes** | Creates secondary (non-primary-key) indexes after data copy for optimal performance |
-| 15 | **CreateConstraints** | Adds foreign keys, unique constraints, and check constraints |
+| 15 | **CreateConstraints** | Adds unique constraints and check constraints, and the foreign keys whose parent table is inside the copied scope |
 | 16 | **SyncSequences** | Sets sequence values to match source (after data is copied); resolves owned sequences via `pg_get_serial_sequence()` |
 | 17 | **RetryFunctions** | Retries functions that failed in first pass (now that tables exist) |
 | 18 | **CreateViews** | Creates views (dependency-ordered with retry) and materialized views |
 | 19 | **CreateTriggers** | Creates triggers |
 | 20 | **Validate** | Two-level verification: data validation (row counts, checksums, or full content) plus object count validation (tables, indexes, views, sequences, functions, triggers) |
 | 21 | **ReCopyMismatched** | Re-copies any tables that failed validation |
+
+## Foreign Keys and Scope
+
+A foreign key is stored with its child table, but the engine refuses to create it unless the table it
+references exists at that moment. The **CreateConstraints** stage therefore creates a constraint only
+when its parent table is inside the copied scope — present in the copied model and successfully created:
+
+- **In scope** — the parent is copied too, so the constraint is created as before.
+- **Out of scope** — the parent lives in a schema left out of the copy (e.g. a platform schema with
+  **Platform Schemas** unchecked), or the parent table failed to be created. The constraint is **never
+  sent to the server**: it is not attempted, so it cannot fail, and the copy still ends "complete".
+
+Out-of-scope constraints are reported **once per parent table**, not once per constraint:
+
+```
+[OK] CreateConstraints: 53 total: 50 succeeded, 3 skipped
+SKIPPED: auth.users: 18 foreign key(s) not created — parent table is outside the copied scope
+```
+
+The stage's object count includes created, failed and skipped constraints, so the header bar matches the
+summary line. A constraint that *is* in scope and is still refused — copied rows that violate it on the
+destination — keeps the usual failure warning and does not stop the copy.
 
 ## Critical vs Non-Critical Stages
 

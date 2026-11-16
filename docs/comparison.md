@@ -61,9 +61,18 @@ The **Notice** status is one level below **Different**. It indicates a cosmetic 
 
 - A CHECK constraint expression that PostgreSQL decompiles differently across versions (normalized automatically)
 - A CHECK constraint difference on a partition child (inherited from parent — the parent is the source of truth)
+- A foreign key whose parent table is outside the compared scope — reported as
+  `FK not compared: <name> (parent <schema>.<table> is outside the compared scope)`
 - Schema owner differences
 
-Notices are shown in the results but do not count toward the "differences" total.
+A foreign key can only be compared while the table it references is read on both sides. When the parent is
+outside the compared scope — for example a platform schema that **Platform Schemas** left out of the read —
+the constraint is stated as a notice instead of `FK removed` / `FK added`, because the difference is a
+consequence of the chosen scope, not of the databases.
+
+Notices are shown in the results but do not count toward the "differences" total. A table whose only
+finding is a notice is reported as **Notice**; a table with real differences stays **Different** and lists
+the notice alongside them.
 
 ## Comparison Modes
 

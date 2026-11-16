@@ -181,7 +181,7 @@ public sealed class PostgreSqlAdapter : IDatabaseAdapter
             new ReconcileColumnsStage(executorFactory, loggerFactory),
             new CopyDataStage(executorFactory, loggerFactory),
             new CreateIndexesStage(ddl, executorFactory, connectionProvider, loggerFactory),
-            new CreateConstraintsStage(ddl, loggerFactory),
+            new CreateConstraintsStage(ddl, executorFactory, connectionProvider, loggerFactory),
             new SyncSequencesStage(ddl, executorFactory, loggerFactory),
             new RetryFunctionsStage(ddl, loggerFactory),
             new CreateViewsStage(ddl, loggerFactory),
