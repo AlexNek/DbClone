@@ -51,7 +51,7 @@ main{flex:1 1 auto;min-width:0;min-height:0;display:flex;flex-direction:column}
 .hit{display:flex;gap:10px;align-items:baseline;width:100%;text-align:left;font:inherit;padding:3px 6px;border:0;border-radius:5px;background:none;cursor:pointer}
 .hit:hover,.hit:focus-visible{background:#eef4fc;outline:none}
 .hit span{color:var(--muted)}
-#pic{position:absolute;top:0;left:0;cursor:grab;touch-action:none}
+#pic{position:absolute;top:0;left:0;width:100%;height:100%;cursor:grab;touch-action:none}
 #pic.dragging{cursor:grabbing}
 .stage{position:relative;flex:1 1 auto;overflow:hidden;min-height:240px;background:#fff}
 #viewport text{font:12px/1 "Segoe UI",system-ui,sans-serif;fill:var(--ink)}

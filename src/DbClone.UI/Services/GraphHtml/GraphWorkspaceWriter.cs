@@ -1,7 +1,6 @@
 using System.Text;
 using DbClone.UI.Models.CatalogGraph;
 using DbClone.UI.Services.GraphAnalysis;
-using DbClone.UI.Services.GraphLayout;
 
 namespace DbClone.UI.Services.GraphHtml;
 
@@ -17,25 +16,20 @@ namespace DbClone.UI.Services.GraphHtml;
 internal sealed class GraphWorkspaceWriter
 {
     private readonly CatalogGraphModel _model;
-    private readonly CatalogGraphLayout _layout;
     private readonly GraphPictureWriter _picture;
     private readonly GraphOriginWords _words;
 
     /// <summary>Creates the writer for one document.</summary>
     /// <param name="model">The analyzed graph.</param>
-    /// <param name="layout">The computed picture.</param>
     /// <param name="picture">The writer of what goes inside the viewport.</param>
     public GraphWorkspaceWriter(
         CatalogGraphModel model,
-        CatalogGraphLayout layout,
         GraphPictureWriter picture)
     {
         ArgumentNullException.ThrowIfNull(model);
-        ArgumentNullException.ThrowIfNull(layout);
         ArgumentNullException.ThrowIfNull(picture);
 
         _model = model;
-        _layout = layout;
         _picture = picture;
         _words = GraphOriginWords.For(model.Origin.Kind);
     }
@@ -96,9 +90,10 @@ internal sealed class GraphWorkspaceWriter
 
     private void WriteStage(StringBuilder html)
     {
-        html.Append("<div class=\"stage\">\n<svg id=\"pic\" width=\"").Append(GraphHtmlText.Num(_layout.Width))
-            .Append("\" height=\"").Append(GraphHtmlText.Num(_layout.Height))
-            .Append("\" role=\"img\" aria-label=\"")
+        // The picture is sized by the stage, never by the canvas: the svg is the one box the browser
+        // clips to, so a canvas narrower or shorter than the stage would slice the drawing the camera
+        // centres in it.
+        html.Append("<div class=\"stage\">\n<svg id=\"pic\" role=\"img\" aria-label=\"")
             .Append(GraphHtmlText.Escape($"{_model.TableCount} tables and {_model.RelationCount} constraints"))
             .Append("\">\n");
 

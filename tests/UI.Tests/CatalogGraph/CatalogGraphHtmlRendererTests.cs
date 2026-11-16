@@ -124,14 +124,37 @@ public sealed class CatalogGraphHtmlRendererTests
         // the opening view and "100%" centre the visible cards in it rather than moving the canvas
         // origin into the stage's corner.
         rendered.Document.Should().Contain("function placeContent(wanted)")
-            .And.Contain("if (action === \"reset\") placeContent(1);")
-            .And.MatchRegex("placeContent\\(1\\);\\s*\\}\\(\\)\\);");
+            .And.Contain("if (action === \"reset\") placeContent(1);");
         rendered.Document.Should().NotContain("calc(100vh");
+
+        // The place is taken again once the document has been laid out and on every resize, and a stage
+        // that measured nothing refuses the placement: a camera read before the layout landed made every
+        // axis look too wide for the stage and parked a picture that fits in its corner, beside blank
+        // stage. No caller can reach that state now, because the refusal is inside placeContent itself.
+        rendered.Document.Should().Contain("if (stage.width <= 0 || stage.height <= 0) return false;")
+            .And.Contain("window.addEventListener(\"load\", keepCentred, { once: true });")
+            .And.Contain("window.addEventListener(\"resize\", keepCentred);")
+            .And.Contain("new ResizeObserver(keepCentred)");
 
         // A picture larger than the stage is aligned to its own top-left corner instead of centred, so
         // "100%" lands on the first tables rather than on the middle of the canvas.
         rendered.Document.Should().Contain("width <= stage.width")
             .And.Contain("height <= stage.height");
+    }
+
+    [Fact]
+    public void The_picture_fills_the_stage_rather_than_the_canvas()
+    {
+        // The reader's report: four table cards sliced at a straight vertical line with untouched white
+        // beyond it. The svg is the one box the browser clips to, so sizing it to the layout canvas made
+        // its own edge a cut — the camera centres and pans in the stage, and a picture moved past the
+        // canvas width painted nothing at all.
+        var rendered = Render(Chain(12));
+
+        // Assert — the element fills the stage and names no size of its own.
+        rendered.Document.Should().Contain("#pic{position:absolute;top:0;left:0;width:100%;height:100%;");
+        rendered.Document.Should().Contain("<svg id=\"pic\" role=\"img\"")
+            .And.NotContain("<svg id=\"pic\" width=");
     }
 
     [Fact]
@@ -146,7 +169,8 @@ public sealed class CatalogGraphHtmlRendererTests
         // Assert
         rendered.Document.Should().Contain("window.dbcloneCamera = function ()");
         rendered.Document.Should().Contain("function openingCamera()");
-        rendered.Document.Should().Contain("if (opening) applyCamera(opening); else placeContent(1);");
+        rendered.Document.Should().Contain("if (opening) {").And.Contain("applyCamera(opening);");
+        rendered.Document.Should().NotContain("else placeContent(1);");
     }
 
     [Fact]

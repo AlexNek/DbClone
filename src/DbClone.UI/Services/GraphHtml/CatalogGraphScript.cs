@@ -529,6 +529,11 @@ internal static class CatalogGraphScript
   // 100% wants the first table, not the middle of nothing.
   function placeContent(wanted) {
     var stage = svg.parentNode.getBoundingClientRect();
+    // A stage the document has not laid out yet measures nothing, and a camera taken against nothing is
+    // wider than nothing on every axis: the picture then lands in the corner with the stage's own blank
+    // white beside it. So a placement is refused until there is a stage to place into, whatever asked for
+    // it — the load and the resize observer take it again once the real size is there.
+    if (stage.width <= 0 || stage.height <= 0) return false;
     // The wheel's floor is where a card stops being readable; a fit is allowed below it, because a
     // picture that does not fit its stage is not a fit and a reader who asked for one gets all of it.
     scale = Math.min(4, Math.max(0.02, wanted));
@@ -537,7 +542,7 @@ internal static class CatalogGraphScript
       shiftX = 0;
       shiftY = 0;
       applyTransform();
-      return;
+      return true;
     }
     var margin = 16;
     var width = (box.right - box.left) * scale;
@@ -549,6 +554,7 @@ internal static class CatalogGraphScript
       ? (stage.height - height) / 2 - box.top * scale
       : margin - box.top * scale;
     applyTransform();
+    return true;
   }
 
   svg.addEventListener("wheel", function (event) {
@@ -707,8 +713,29 @@ internal static class CatalogGraphScript
   // database, which is why the opening scale is the document's own and "Fit" stays a button (T27).
   // A picture the viewer serves again for another cluster selection opens where the reader left the
   // one it replaces: switching a chip changes what is drawn, never where the reader is looking.
+  //
+  // The stage has no size until the document is laid out, so a camera read before then is refused by
+  // placeContent itself rather than written: the place is taken again as soon as the load event has
+  // passed and kept right on every resize — but only while the picture fits, because one larger than the
+  // stage keeps the direction the reader panned it to.
+  function keepCentred() {
+    var stage = svg.parentNode.getBoundingClientRect();
+    var box = pictureBox();
+    if (!box || stage.width <= 0 || stage.height <= 0) return;
+    if ((box.right - box.left) * scale > stage.width) return;
+    if ((box.bottom - box.top) * scale > stage.height) return;
+    placeContent(scale);
+  }
+
   var opening = openingCamera();
-  if (opening) applyCamera(opening); else placeContent(1);
+  if (opening) {
+    applyCamera(opening);
+  } else {
+    placeContent(1);
+    window.addEventListener("load", keepCentred, { once: true });
+    window.addEventListener("resize", keepCentred);
+    if (typeof ResizeObserver === "function") new ResizeObserver(keepCentred).observe(svg.parentNode);
+  }
 }());
 """;
 }

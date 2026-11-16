@@ -69,7 +69,7 @@ internal sealed class CatalogGraphHtmlRenderer
 
         new GraphPageHeaderWriter(view, model, generatedAt).WriteTo(html);
         new GraphClusterBarWriter(bar, off).WriteTo(html);
-        new GraphWorkspaceWriter(model, layout, new GraphPictureWriter(model, layout, Claims(model, off))).WriteTo(html);
+        new GraphWorkspaceWriter(model, new GraphPictureWriter(model, layout, Claims(model, off))).WriteTo(html);
         new GraphRegisterWriter(model).WriteTo(html);
         new GraphIslandWriter(view, model, bar, off).WriteTo(html);
         WriteScript(html);
