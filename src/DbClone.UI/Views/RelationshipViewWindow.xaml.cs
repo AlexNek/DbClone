@@ -244,11 +244,17 @@ internal sealed partial class RelationshipViewWindow : FluentWindow
     /// </summary>
     private async Task ReshapeAsync(IReadOnlySet<int> offChips)
     {
-        if (_reshape is null || _core is null) return;
+        var reshape = _reshape;
+        if (reshape is null || _core is null) return;
 
+        // Choosing a cluster arranges the picture again, which is the slowest thing a click here can ask
+        // for. The arrangement holds nothing of the window's, so it is worked out on another thread while
+        // the window wears its waiting pointer — and the pointer is what tells the reader that the click
+        // was heard and the picture on screen is still the one being replaced.
+        Cursor = System.Windows.Input.Cursors.Wait;
         try
         {
-            var document = _reshape(offChips);
+            var document = await Task.Run(() => reshape(offChips)).ConfigureAwait(true);
             _document = document;
             _offChips = offChips;
 
@@ -264,6 +270,10 @@ internal sealed partial class RelationshipViewWindow : FluentWindow
         {
             _logger.LogWarning(ex, "The relationship view could not be drawn again for another selection");
             Status.Text = ex.Message;
+        }
+        finally
+        {
+            Cursor = null;
         }
     }
 

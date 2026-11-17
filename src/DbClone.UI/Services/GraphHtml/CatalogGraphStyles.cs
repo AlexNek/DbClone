@@ -60,6 +60,8 @@ main{flex:1 1 auto;min-width:0;min-height:0;display:flex;flex-direction:column}
 .node.hot rect{stroke:var(--hot);stroke-width:2.4;fill:#eaf3ff}
 .node .name{font-weight:600}
 .node .count{fill:var(--muted);font-size:11px}
+.node{cursor:move}
+.node.moving{opacity:.85}
 .edge{fill:none;stroke:#8b949e;stroke-width:1.3}
 .edge.out{stroke-dasharray:5 4;stroke:#b08850}
 .edge.hot{stroke:var(--hot);stroke-width:2.6}

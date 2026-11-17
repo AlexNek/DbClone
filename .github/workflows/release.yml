@@ -39,7 +39,7 @@ jobs:
           dotnet test tests/DbAdapter.PostgreSql.Tests --no-restore -c Release --verbosity normal
 
       - name: Test interchange suite
-        run: dotnet test interchange/tests/DatabaseInterchange.Tests --no-restore -c Release --verbosity normal
+        run: dotnet test tests/DatabaseInterchange.Tests --no-restore -c Release --verbosity normal
 
       - name: Test UI suite
         run: dotnet test tests/UI.Tests --no-restore -c Release --verbosity normal

@@ -14,10 +14,10 @@ namespace UI.Tests.CatalogGraph;
 
 /// <summary>
 /// The layout stage's own contract: a card stands in the band its references put it in and under the
-/// tables it is joined to — except a table joined to one table only, which is drawn on the free side
-/// of it when that table's fan is wider than one corridor can line up — cycles are laid out rather than
-/// refused, the three route shapes never share a meaning, no arrow is drawn across a card it does not
-/// join, two routes never run along one line, and the same catalog draws the same coordinates every time.
+/// tables it is joined to — a table joined to one table only keeps that side however wide the fan of the
+/// table it names — cycles are laid out rather than refused, the three route shapes never share a meaning,
+/// no arrow is drawn across a card it does not join, two routes never run along one line, and the same
+/// catalog draws the same coordinates every time.
 /// </summary>
 public sealed class GraphLayoutEngineTests
 {
@@ -601,8 +601,10 @@ public sealed class GraphLayoutEngineTests
     }
 
     [Fact]
-    public void A_fan_wider_than_one_corridor_is_drawn_on_both_sides_of_its_parent()
+    public void A_fan_wider_than_one_corridor_keeps_every_child_below_the_table_it_reaches()
     {
+        // The rule the picture is read by: a table that names the table it joins stands below it, and a
+        // child carried over its parent to free a corridor draws an arrow the catalog does not have.
         var fixture = CatalogGraphFixture.Create().Table("fan", "parent", 7);
         for (var child = 0; child < 20; child++)
         {
@@ -625,25 +627,25 @@ public sealed class GraphLayoutEngineTests
         children.Should().OnlyContain(child => grid.RowOfNode[child] != grid.RowOfNode[parent],
             "a child is drawn on a side of the parent it points at, never in the parent's own row");
 
-        // The corridor beside a card gives a run a line per step of its ladder, and a fan wider than that
-        // draws two arrows as one stroke if every child is stacked on one side of the parent. A table
-        // joined to nothing else asks for nothing but its own arrow, so the overflow is drawn on the
-        // parent's free side instead (see GraphRankedPlacement.Spread).
-        above.Should().NotBeEmpty("a fan wider than one corridor is spread over both sides of the parent");
-        below.Count.Should().BeLessThanOrEqualTo(
-            GraphEdgeRouter.Ladder, "one side of a card gives a run a line per step of the ladder, and no more");
-        above.Count.Should().BeLessThanOrEqualTo(GraphEdgeRouter.Ladder);
+        // The corridor beside a card gives a run a line per step of its ladder, which is why a fan this
+        // wide was once split over both sides of its parent. It is not: a border is widened until every
+        // end it holds stands a mark apart (see the hub's own test below), and the ink is the measure of
+        // whether that is enough — so the fan stays whole on the side its relations ask for.
+        below.Should().HaveCount(children.Count,
+            "every child of a fan is drawn below the table it points at, however wide the fan");
+        above.Should().BeEmpty(
+            "no child is carried above its parent to answer a fan: that turns its own arrow around");
 
         grid.ColumnOfNode[parent].Should().BeInRange(
             children.Min(child => grid.ColumnOfNode[child]),
             children.Max(child => grid.ColumnOfNode[child]),
             "the parent is drawn over its children's own span, not off at one end of it");
 
-        // Twenty children do not fit one line of the page, so each side of the fan is drawn as one line or
-        // more. A line is a run of the fan: no child stands apart from its neighbour, and no line stands
-        // apart from the line beside it. A line narrower than the one beside it is centred under the
-        // parent, which is what leaves the empty cells at its ends — a hole a reader reads as a gap in
-        // the fan only where it separates two children of it.
+        // A fan too wide for one line of the page wraps onto a line below. A line is a run of the fan: no
+        // child stands apart from its neighbour, and no line stands apart from the line beside it. A line
+        // narrower than the one beside it is centred under the parent, which is what leaves the empty
+        // cells at its ends — a hole a reader reads as a gap in the fan only where it separates two
+        // children of it.
         foreach (var side in new[] { above, below })
         {
             var lines = side
@@ -666,15 +668,18 @@ public sealed class GraphLayoutEngineTests
                 }
             }
         }
+
+        AssertNoTwoArrowsRunOnOneStroke(_engine.Compute(model));
     }
 
     [Fact]
-    public void A_table_joined_to_one_table_is_drawn_above_the_hub_it_points_at()
+    public void A_table_joined_to_one_table_keeps_the_side_its_relation_asks_for()
     {
         // The reported picture: a hub a dozen tables point at, most of them joined to it and to nothing
-        // else, every arrow stacked under it while the band over it stood empty. A table joined by one
-        // relation asks for nothing but its own arrow, so it is drawn on the hub's free side — one row
-        // over, beside the table it joins — and each arrow keeps a line of its own.
+        // else. The overflow was once carried to the hub's free side — one row over, but above it — which
+        // drew those arrows running up into the child and down into the parent, the opposite of what the
+        // catalog says. A table joined by one relation keeps the side its relation asks for, so the whole
+        // fan stands under the hub and every arrow climbs the one way a reader follows.
         var tenants = CatalogGraphFixture.TableId("public", "tenants");
         var fixture = CatalogGraphFixture.Create().Table("public", "tenants", 400, Column("plan_id"));
 
@@ -708,13 +713,10 @@ public sealed class GraphLayoutEngineTests
         var above = children.Where(child => grid.RowOfNode[child] < grid.RowOfNode[hub]).ToList();
         var below = children.Where(child => grid.RowOfNode[child] > grid.RowOfNode[hub]).ToList();
 
-        above.Should().HaveCountGreaterThanOrEqualTo(2,
-            "the tables joined to the hub by one relation only are drawn on the side that has room for them");
-        above.Should().OnlyContain(child => grid.RowOfNode[child] + 1 == grid.RowOfNode[hub],
-            "a table moved to the hub's free side stays beside it, one row over");
-
-        above.Count.Should().BeLessThanOrEqualTo(
-            GraphEdgeRouter.Ladder, "one side of a card gives a run a line per step of the ladder, and no more");
+        above.Should().BeEmpty(
+            "a table joined to the hub by one relation is not carried over it: the arrow it draws would "
+            + "point the wrong way for the relation the catalog states");
+        below.Should().HaveCount(children.Count, "the whole fan stands on the side its relations ask for");
 
         foreach (var kept in new[] { "drinks", "dishes" })
         {
@@ -723,6 +725,100 @@ public sealed class GraphLayoutEngineTests
                     grid.RowOfNode[hub],
                     "a table that answers to another table keeps the band its references put it in");
         }
+
+        AssertNoTwoArrowsRunOnOneStroke(layout);
+    }
+
+    [Fact]
+    public void No_relation_of_a_two_hub_catalog_is_drawn_up_the_page()
+    {
+        // The reported picture in its shape: one table a dozen others name, a second hub the first's
+        // children name in their turn, and chains hanging under both. A reader follows a relation from
+        // the table that names another down into the table it names, so an arrow climbing the page states
+        // a relation the catalog does not have — which is what the band over a hub held while its fan
+        // was answered by carrying the overflow to the hub's free side.
+        var users = CatalogGraphFixture.TableId("auth", "users");
+        var publicUsers = CatalogGraphFixture.TableId("public", "users");
+        var projects = CatalogGraphFixture.TableId("public", "projects");
+        var schemas = CatalogGraphFixture.TableId("public", "data_schemas");
+        var requirements = CatalogGraphFixture.TableId("public", "requirements");
+
+        var fixture = CatalogGraphFixture.Create()
+            .Table("auth", "users", 1_200, Column("id"))
+            .Table("public", "users", 1_200, Column("id"))
+            .Table("public", "projects", 340, Column("owner_id"))
+            .Table("public", "data_schemas", 90, Column("project_id"))
+            .Table("public", "schema_versions", 220, Column("schema_id"))
+            .Table("public", "requirements", 839, Column("project_id"), Column("parent_id"))
+            .Table("public", "requirement_versions", 12, Column("requirement_id"))
+            .Table("public", "requirement_links", 40, Column("requirement_id"))
+            .Table("public", "comments", 60, Column("requirement_id"), Column("author_id"))
+            .Table("public", "signatures", 3, Column("requirement_id"));
+
+        // One relation each, straight to the root: thirteen of them, which is more than one side of a
+        // card can line up, and the case the free-side answer used to be reached for.
+        foreach (var name in new[]
+        {
+            "identities", "sessions", "oauth_authorizations", "oauth_consents", "mfa_factors",
+            "mfa_recovery_codes", "scm_users", "webauthn_credentials", "webauthn_challenges",
+            "one_time_tokens", "invitations", "verifications", "receipts",
+        })
+        {
+            var leaf = CatalogGraphFixture.TableId("auth", name);
+            fixture.Table("auth", name, 30, Column("user_id"));
+            fixture.Edge(leaf, users, $"fk_{name}_users", ["user_id"]);
+        }
+
+        fixture.Edge(publicUsers, users, "fk_public_users_users", ["id"]);
+        fixture.Edge(projects, users, "fk_projects_users", ["owner_id"]);
+        fixture.Edge(CatalogGraphFixture.TableId("public", "schema_versions"), schemas, "fk_versions_schemas", ["schema_id"]);
+        fixture.Edge(schemas, projects, "fk_schemas_projects", ["project_id"]);
+        fixture.Edge(requirements, projects, "fk_requirements_projects", ["project_id"]);
+        fixture.Edge(requirements, requirements, "fk_requirements_parent", ["parent_id"]);
+        fixture.Edge(
+            CatalogGraphFixture.TableId("public", "requirement_versions"),
+            requirements,
+            "fk_versions_requirements",
+            ["requirement_id"]);
+        fixture.Edge(
+            CatalogGraphFixture.TableId("public", "requirement_links"),
+            requirements,
+            "fk_links_requirement",
+            ["requirement_id"]);
+        fixture.Edge(requirements, publicUsers, "fk_requirements_author", ["parent_id"]);
+        fixture.Edge(
+            CatalogGraphFixture.TableId("public", "comments"),
+            requirements,
+            "fk_comments_requirement",
+            ["requirement_id"]);
+        fixture.Edge(
+            CatalogGraphFixture.TableId("public", "comments"),
+            publicUsers,
+            "fk_comments_author",
+            ["author_id"]);
+        fixture.Edge(
+            CatalogGraphFixture.TableId("public", "signatures"),
+            requirements,
+            "fk_signatures_requirement",
+            ["requirement_id"]);
+
+        var model = Analyze(fixture);
+        var grid = GridOf(model);
+        var layout = _engine.Compute(model);
+
+        var upward = model.Edges
+            .Where(edge => edge.ChildIndex != edge.ParentIndex)
+            .Where(edge => grid.RowOfNode[edge.ChildIndex] <= grid.RowOfNode[edge.ParentIndex])
+            .Select(edge =>
+                $"{model.Nodes[edge.ChildIndex].Schema}.{model.Nodes[edge.ChildIndex].Table} "
+                + $"(row {grid.RowOfNode[edge.ChildIndex]}) names "
+                + $"{model.Nodes[edge.ParentIndex].Schema}.{model.Nodes[edge.ParentIndex].Table} "
+                + $"(row {grid.RowOfNode[edge.ParentIndex]})")
+            .ToList();
+
+        upward.Should().BeEmpty(
+            "every relation is drawn from a table down into the table it names, so the picture can be "
+            + "read top to bottom: \n" + string.Join("\n", upward));
 
         AssertNoTwoArrowsRunOnOneStroke(layout);
     }
@@ -1056,7 +1152,7 @@ public sealed class GraphLayoutEngineTests
         foreach (var edge in model.Edges)
         {
             var route = layout.Edges[edge.Index];
-            if (route.Shape != EEdgeShape.Line)
+            if (route.Geometry != EEdgeGeometry.Polyline)
             {
                 continue;
             }
@@ -1192,6 +1288,209 @@ public sealed class GraphLayoutEngineTests
 
         AssertNoTwoArrowsRunOnOneStroke(layout);
     }
+
+    [Fact]
+    public void A_catalog_that_meets_one_table_is_arranged_in_rings_and_keeps_every_arrow_apart()
+    {
+        // The reported picture: most of the catalog names one table, so there is no top to read down
+        // from and the arrangement the engine serves is rings around that middle. The air between the
+        // rings is what lets an arrow be drawn the shortest way, and the shortest way still has to obey
+        // the two rules the bands were held to: no arrow across a card it does not join, and no two
+        // arrows drawn on one stroke.
+        var hub = CatalogGraphFixture.TableId("hub", "ledger");
+        var fixture = CatalogGraphFixture.Create()
+            .Table("hub", "ledger", 800, Column("id"));
+
+        for (var entry = 0; entry < 8; entry++)
+        {
+            fixture.Table("hub", $"entry{entry:D2}", 10, Column("ledger_id"));
+            fixture.Edge(CatalogGraphFixture.TableId("hub", $"entry{entry:D2}"), hub, $"fk_entry_{entry}", ["ledger_id"]);
+        }
+
+        for (var slice = 0; slice < 4; slice++)
+        {
+            fixture.Table("hub", $"slice{slice:D2}", 10, Column("entry_id"));
+            fixture.Edge(
+                CatalogGraphFixture.TableId("hub", $"slice{slice:D2}"),
+                CatalogGraphFixture.TableId("hub", $"entry{slice:D2}"),
+                $"fk_slice_{slice}",
+                ["entry_id"]);
+        }
+
+        fixture.Table("hub", "note00", 10, Column("slice_id"));
+        fixture.Edge(CatalogGraphFixture.TableId("hub", "note00"), CatalogGraphFixture.TableId("hub", "slice00"),
+            "fk_note_0", ["slice_id"]);
+
+        var model = Analyze(fixture);
+        var layout = _engine.Compute(model);
+
+        // Assert
+        layout.InRings.Should().BeTrue("one table holds most of the catalog's relations");
+        AssertNoCardsOverlap(layout);
+        AssertNoRouteCrossesACard(layout, model);
+        AssertNoTwoArrowsRunOnOneStroke(layout);
+    }
+
+    [Fact]
+    public void A_cycle_stands_round_its_own_ring_in_the_order_its_tables_point()
+    {
+        // The picture a reader assembles by hand: the members of the cycle stand in a ring of their own,
+        // each beside the one it points at, and the tables outside the cycle stand clear of it. Reached by
+        // the shortest step from the middle instead, two members of one cycle would stand on different
+        // rings and the arrow that closes the cycle would be drawn over every table between them.
+        var fixture = Cycle("ring", 5);
+        var tree = CatalogGraphFixture.TableId("ring", "tree");
+        var leaf = CatalogGraphFixture.TableId("ring", "leaf");
+        fixture.Table("ring", "tree", 220, Column("parent_id"));
+        fixture.Edge(tree, tree, "fk_tree_parent", ["parent_id"]);
+        fixture.Table("ring", "leaf", 40, Column("tree_id"));
+        fixture.Edge(leaf, tree, "fk_leaf_tree", ["tree_id"]);
+        fixture.Outside("dt:reports.missing", "reports", "missing");
+        fixture.Edge(leaf, "dt:reports.missing", "fk_leaf_missing", ["other_id"]);
+
+        var model = Analyze(fixture);
+        var layout = _engine.Compute(model);
+
+        layout.InRings.Should().BeTrue("a cycle has no top for the picture to read down from");
+        AssertStoodInPointingOrder(model, layout,
+            [.. Enumerable.Range(0, 5).Select(step => CatalogGraphFixture.TableId("ring", $"t{step}"))]);
+
+        AssertNoCardsOverlap(layout);
+        AssertNoRouteCrossesACard(layout, model);
+        AssertNoTwoArrowsRunOnOneStroke(layout);
+        ArrowPairsDrawnAcrossOneAnother(layout, model).Should().BeEmpty(
+            "every arrow of a cycle is the short chord between neighbours, so none of them is drawn across another");
+    }
+
+    [Fact]
+    public void A_catalog_of_two_hubs_keeps_its_families_inside_their_own_part_of_the_circle()
+    {
+        // The reported picture: every satellite names the hub and some of them name one another table as
+        // well, so there are two tables the catalog points at. Each of those tables' own family is stood
+        // behind it, in the part of the circle the family was handed, rather than on the hub's ring beside
+        // the rest — and that is what turns a relation between two of them from a chord drawn across the
+        // arrows of the tables standing between them into a short step inside one wedge.
+        var hub = CatalogGraphFixture.TableId("two", "hub");
+        var first = CatalogGraphFixture.TableId("two", "s00");
+        var fixture = CatalogGraphFixture.Create().Table("two", "hub", 1_000, Column("id"));
+
+        for (var satellite = 0; satellite < 24; satellite++)
+        {
+            fixture.Table("two", $"s{satellite:00}", 100 + satellite, Column("hub_id"));
+        }
+
+        for (var satellite = 0; satellite < 24; satellite++)
+        {
+            var table = CatalogGraphFixture.TableId("two", $"s{satellite:00}");
+            fixture.Edge(table, hub, $"fk_s{satellite:00}", ["hub_id"]);
+
+            if (satellite % 4 == 1)
+            {
+                fixture.Edge(table, first, $"fk_s{satellite:00}_first", ["first_id"]);
+            }
+        }
+
+        var model = Analyze(fixture);
+        var layout = _engine.Compute(model);
+
+        layout.InRings.Should().BeTrue("two tables hold the catalog's relations between them");
+        AssertNoRouteCrossesACard(layout, model);
+        AssertNoTwoArrowsRunOnOneStroke(layout);
+
+        // Not yet zero: the tables that name both hubs stand in the first one's wedge, and their arrows to
+        // the hub cross an arrow of a sibling that leans the other way. Eight pairs of them were measured
+        // before the families were nested at all, and a picture is held to not growing worse.
+        ArrowPairsDrawnAcrossOneAnother(layout, model).Should().HaveCountLessThanOrEqualTo(8,
+            "a family drawn inside its own wedge crosses no arrow outside it; the pairs left cross only an "
+            + "arrow of their own siblings");
+    }
+
+    /// <summary>
+    /// Whether the named tables stand round the middle of their own ring in the order they point at one
+    /// another — walked either way, because the ring may be handed out clockwise or against it.
+    /// </summary>
+    private static void AssertStoodInPointingOrder(CatalogGraphModel model, CatalogGraphLayout layout, string[] tableIds)
+    {
+        var nodes = tableIds.Select(id => model.NodeIndexesById[id]).ToList();
+        var middle = new GraphPoint(
+            nodes.Average(node => layout.Nodes[node].Centre.X),
+            nodes.Average(node => layout.Nodes[node].Centre.Y));
+
+        var round = nodes
+            .OrderBy(node => Math.Atan2(layout.Nodes[node].Centre.Y - middle.Y, layout.Nodes[node].Centre.X - middle.X))
+            .Select(node => nodes.IndexOf(node))
+            .ToList();
+
+        var from = round.IndexOf(0);
+        var clockwise = Enumerable.Range(0, round.Count).Select(step => round[(from + step) % round.Count]).ToList();
+        var against = Enumerable.Range(0, round.Count).Select(step => round[(from - step + round.Count) % round.Count]).ToList();
+        var pointing = Enumerable.Range(0, round.Count).ToList();
+
+        (clockwise.SequenceEqual(pointing) || against.SequenceEqual(pointing)).Should().BeTrue(
+            "the tables of the cycle stand beside the ones they point at, round in one direction or the other");
+    }
+
+    [Fact]
+    public void A_catalog_that_is_several_pictures_is_drawn_on_more_than_one_middle()
+    {
+        // A database is rarely one picture: a family gathered around one table and a chain that joins
+        // nothing of it are two pictures, and rings hand one circle out around one middle. Stood inside
+        // that circle, the second family took the place of somebody's own relatives, and the chord that
+        // closed the ring had to bow around a card with no part in it. The grouping is read off the
+        // constraints, so each picture is drawn on its own middle and the two are stood apart.
+        var assembly = CatalogGraphFixture.TableId("parts", "assembly");
+        var fixture = CatalogGraphFixture.Create().Table("parts", "assembly", 1_000, Column("id"));
+
+        for (var step = 0; step < 5; step++)
+        {
+            fixture.Table("parts", $"part{step}", 100 + step, Column("assembly_id"));
+            fixture.Edge(CatalogGraphFixture.TableId("parts", $"part{step}"), assembly,
+                $"fk_part_{step}", ["assembly_id"]);
+        }
+
+        fixture.Table("notes", "top", 40, Column("id"));
+        for (var step = 0; step < 4; step++)
+        {
+            fixture.Table("notes", $"under{step}", 60 + step, Column("prev_id"));
+            fixture.Edge(
+                CatalogGraphFixture.TableId("notes", $"under{step}"),
+                CatalogGraphFixture.TableId("notes", step == 0 ? "top" : $"under{step - 1}"),
+                $"fk_under_{step}",
+                ["prev_id"]);
+        }
+
+        var model = Analyze(fixture);
+        var rings = RingsOf(model);
+        var family = model.Nodes.Where(node => node.Schema == "parts").Select(node => rings[node.Index]);
+        var other = model.Nodes.Where(node => node.Schema == "notes").Select(node => rings[node.Index]);
+        var (one, two) = (Box(family), Box(other));
+
+        (one.Right <= two.Left || two.Right <= one.Left || one.Bottom <= two.Top || two.Bottom <= one.Top)
+            .Should().BeTrue("two pictures that share no constraint are stood apart instead of one inside the other's ring");
+
+        var layout = _engine.Compute(model);
+        ArrowPairsDrawnAcrossOneAnother(layout, model).Should().BeEmpty(
+            "no arrow is drawn across another, whatever the arrangement the engine kept");
+    }
+
+    /// <summary>The ringed arrangement on its own, so the pieces it forms can be asserted directly.</summary>
+    private static NodePlacement[] RingsOf(CatalogGraphModel model)
+    {
+        var widths = new double[model.Nodes.Count];
+        for (var node = 0; node < widths.Length; node++)
+        {
+            var ends = model.Edges.Count(edge => edge.ChildIndex == node || edge.ParentIndex == node);
+            widths[node] = Math.Max(
+                GraphCard.WidthOf(model.Nodes[node], Words),
+                GraphEdgePorts.WidthFor(ends, GraphCard.Height));
+        }
+
+        return GraphWedgePlacement.Place(model, widths).Placement;
+    }
+
+    private static (double Left, double Top, double Right, double Bottom) Box(IEnumerable<NodePlacement> cards) =>
+        (cards.Min(card => card.TopLeft.X), cards.Min(card => card.TopLeft.Y),
+            cards.Max(card => card.Right), cards.Max(card => card.Bottom));
 
     [Fact]
     public void A_table_that_many_constraints_reach_is_given_a_border_wide_enough_to_hold_them()
@@ -1389,10 +1688,36 @@ public sealed class GraphLayoutEngineTests
             Math.Abs(grid.RowOfNode[first] - grid.RowOfNode[second]));
 
     /// <summary>
-    /// Walks every route and asserts it never passes through a card it does not join: a line and a
-    /// dog-leg are sampled along each segment, a curve across the middle of the cubic where its ends
-    /// meet their own cards by design. Violations are collected, so one run names every offending
-    /// route instead of only the first.
+    /// Asserts no card of the picture is drawn on another. Rings size a ring for the cards and the air it
+    /// holds, so a stack of two cards is an arrangement bug and not a routing one: the two names stand in
+    /// one place and the reader cannot say which card an arrow ends on.
+    /// </summary>
+    private static void AssertNoCardsOverlap(CatalogGraphLayout layout)
+    {
+        var stacked = new List<string>();
+
+        for (var first = 0; first < layout.Nodes.Count; first++)
+        {
+            for (var second = first + 1; second < layout.Nodes.Count; second++)
+            {
+                var one = layout.Nodes[first];
+                var two = layout.Nodes[second];
+                if (one.TopLeft.X < two.Right && two.TopLeft.X < one.Right
+                    && one.TopLeft.Y < two.Bottom && two.TopLeft.Y < one.Bottom)
+                {
+                    stacked.Add($"cards {one.NodeIndex} and {two.NodeIndex}");
+                }
+            }
+        }
+
+        stacked.Should().BeEmpty("no card may be drawn on another card");
+    }
+
+    /// <summary>
+    /// Walks every route and asserts it never passes through a card it does not join: a polyline is
+    /// sampled along each of its stretches, a cubic across the middle of the curve where its ends meet
+    /// their own cards by design. Violations are collected, so one run names every offending route
+    /// instead of only the first.
     /// </summary>
     private static void AssertNoRouteCrossesACard(CatalogGraphLayout layout, CatalogGraphModel model)
     {
@@ -1405,7 +1730,7 @@ public sealed class GraphLayoutEngineTests
                 .Where(node => node.NodeIndex != edge.ChildIndex && node.NodeIndex != edge.ParentIndex)
                 .ToList();
 
-            if (route.Shape == EEdgeShape.Line)
+            if (route.Geometry == EEdgeGeometry.Polyline)
             {
                 for (var index = 0; index + 1 < route.Points.Count; index++)
                 {
@@ -1570,6 +1895,53 @@ public sealed class GraphLayoutEngineTests
     private static string Show(EdgeRoute route) =>
         route.Shape + " " + string.Join(' ', route.Points.Select(point => $"({Round(point.X)},{Round(point.Y)})"));
 
+    /// <summary>
+    /// The pairs of arrows drawn across one another. Every pair that joins no table in common is compared
+    /// stretch against stretch by the one rule the chord router bows a way to avoid, so what is counted here
+    /// and what the router avoids cannot drift apart. Two arrows that meet on a card's border are left out:
+    /// those belong to the same table by the picture's own design.
+    /// </summary>
+    private static List<(int First, int Second)> ArrowPairsDrawnAcrossOneAnother(
+        CatalogGraphLayout layout,
+        CatalogGraphModel model)
+    {
+        var traces = layout.Edges.Select(route => Trace(route).Points).ToList();
+        var crossed = new List<(int, int)>();
+
+        for (var first = 0; first < traces.Count; first++)
+        {
+            for (var second = first + 1; second < traces.Count; second++)
+            {
+                if (!SharesATable(model.Edges[first], model.Edges[second]) && MeetsInTheOpen(traces[first], traces[second]))
+                {
+                    crossed.Add((first, second));
+                }
+            }
+        }
+
+        return crossed;
+    }
+
+    private static bool SharesATable(CatalogGraphEdge a, CatalogGraphEdge b) =>
+        a.ChildIndex == b.ChildIndex || a.ChildIndex == b.ParentIndex
+        || a.ParentIndex == b.ChildIndex || a.ParentIndex == b.ParentIndex;
+
+    private static bool MeetsInTheOpen(IReadOnlyList<GraphPoint> one, IReadOnlyList<GraphPoint> other)
+    {
+        for (var first = 0; first + 1 < one.Count; first++)
+        {
+            for (var second = 0; second + 1 < other.Count; second++)
+            {
+                if (GraphGeometry.SegmentsCross(one[first], one[first + 1], other[second], other[second + 1]))
+                {
+                    return true;
+                }
+            }
+        }
+
+        return false;
+    }
+
     /// <summary>A route as the paper shows it: points along the stroke, and how far along the stroke each sits.</summary>
     private sealed record InkTrace(IReadOnlyList<GraphPoint> Points, IReadOnlyList<double> Along);
 
@@ -1577,7 +1949,7 @@ public sealed class GraphLayoutEngineTests
     private static InkTrace Trace(EdgeRoute route)
     {
         var shape = new List<GraphPoint>();
-        if (route.Shape == EEdgeShape.Line)
+        if (route.Geometry == EEdgeGeometry.Polyline)
         {
             shape.AddRange(route.Points);
         }

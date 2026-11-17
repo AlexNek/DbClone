@@ -243,6 +243,7 @@ public partial class App : System.Windows.Application, IDisposable
                     services.AddSingleton<IInAppRelationshipPresenter>(
                         sp => sp.GetRequiredService<WebViewRelationshipPresenter>());
                     services.AddSingleton<IWebViewRuntimeProbe, WebViewRuntimeProbe>();
+                    services.AddSingleton<Services.Relationship.IWaitCursor, Services.Relationship.WaitCursorService>();
                     services.AddSingleton<IRelationshipViewPresenter>(sp => new RelationshipViewPresenterResolver(
                         sp.GetRequiredService<IWebViewRuntimeProbe>(),
                         sp.GetRequiredService<IInAppRelationshipPresenter>(),

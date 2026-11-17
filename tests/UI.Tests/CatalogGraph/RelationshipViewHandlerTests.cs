@@ -39,6 +39,8 @@ public sealed class RelationshipViewHandlerTests : IDisposable
 
     private readonly RecordingPresenter _presenter = new();
 
+    private readonly RecordingCursor _cursor = new();
+
     private readonly IRelationshipGraphService _graph = Substitute.For<IRelationshipGraphService>();
 
     public RelationshipViewHandlerTests() => Directory.CreateDirectory(_root);
@@ -161,6 +163,32 @@ public sealed class RelationshipViewHandlerTests : IDisposable
     }
 
     [Fact]
+    public async Task ShowCatalogAsync_HoldsTheWaitingPointer_AndPutsItBackWhenTheRunEnds()
+    {
+        // Arrange — reading an origin and arranging its picture take seconds, so the pointer is what tells
+        // the reader the request was heard rather than lost (D7).
+        var catalog = CreateCatalog();
+        Reading(View());
+        var sut = CreateHandler();
+
+        // Act
+        await sut.ShowCatalogAsync(catalog, new WorkflowState());
+
+        // Assert — shown for the whole run, and put back once the document is on screen.
+        _cursor.Calls.Should().Equal(nameof(IWaitCursor.Show), nameof(IWaitCursor.Hide));
+
+        // Act — a run that cannot read its origin ends no differently for the pointer.
+        _graph.ReadCatalogAsync(Arg.Any<string>(), Arg.Any<CancellationToken>())
+            .Returns(Task.FromException<RelationshipGraphView>(new DirectoryNotFoundException("no catalog")));
+        await sut.ShowCatalogAsync(Path.Combine(_root, CatalogFolderName), new WorkflowState());
+
+        // Assert
+        _cursor.Calls.Should().Equal(
+            nameof(IWaitCursor.Show), nameof(IWaitCursor.Hide),
+            nameof(IWaitCursor.Show), nameof(IWaitCursor.Hide));
+    }
+
+    [Fact]
     public async Task The_refresh_a_presenter_is_given_ReadsTheOriginAgain()
     {
         // Arrange — a window offers Refresh; it re-runs the delegate the handler supplied (D6).
@@ -280,6 +308,7 @@ public sealed class RelationshipViewHandlerTests : IDisposable
                 new CatalogGraphHtmlRenderer()),
             presenter ?? _presenter,
             new RelationshipPictureWriter(),
+            _cursor,
             NullLogger<RelationshipViewHandler>.Instance);
 
     private void Reading(RelationshipGraphView view) =>
@@ -363,6 +392,16 @@ public sealed class RelationshipViewHandlerTests : IDisposable
 
     private IEnumerable<string> TempFiles() =>
         Directory.EnumerateFiles(_root, "*.tmp", SearchOption.AllDirectories);
+
+    /// <summary>Records the order the pointer was asked in, so a run's promise can be asserted without a window.</summary>
+    private sealed class RecordingCursor : IWaitCursor
+    {
+        internal List<string> Calls { get; } = [];
+
+        public void Show() => Calls.Add(nameof(Show));
+
+        public void Hide() => Calls.Add(nameof(Hide));
+    }
 
     /// <summary>Records what it was asked to show, so the test can assert on the document and the delegates.</summary>
     private sealed class RecordingPresenter : IRelationshipViewPresenter

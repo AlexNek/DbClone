@@ -121,7 +121,10 @@ internal sealed class GraphPictureWriter
             // Every label is written and hidden: text on the line is unreadable wherever the corridor
             // also carries the stroke, and a label that appears only where it fits teaches the reader
             // to distrust the picture's silence. The stylesheet reveals this one on hover or selection.
-            html.Append("<text class=\"elabel quiet\" x=\"").Append(GraphHtmlText.Num(route.LabelPoint.X))
+            // It carries the arrow's own index so a card the reader moves by hand takes the label of
+            // the arrows it joins with it.
+            html.Append("<text class=\"elabel quiet\" data-e=\"").Append(edge.Index).Append("\" x=\"")
+                .Append(GraphHtmlText.Num(route.LabelPoint.X))
                 .Append("\" y=\"").Append(GraphHtmlText.Num(route.LabelPoint.Y))
                 .Append("\">").Append(GraphHtmlText.Escape(edge.PictureLabel)).Append("</text>\n");
         }
@@ -130,14 +133,14 @@ internal sealed class GraphPictureWriter
     }
 
     /// <summary>
-    /// One path per constraint: a straight segment, the dog-leg the layout turned in a corridor, or
-    /// the cubic that carries a cycle or a loop. A three-constraint pair stays three paths with three
-    /// ids (FR13).
+    /// One path per constraint, painted the way the route says its points are read: the stretches joined
+    /// end to end, or the cubic its two middle points steer. A three-constraint pair stays three paths
+    /// with three ids (FR13).
     /// </summary>
     private static string EdgePath(EdgeRoute route)
     {
         var points = route.Points;
-        if (route.Shape == EEdgeShape.Line || points.Count < 4)
+        if (route.Geometry == EEdgeGeometry.Polyline || points.Count < 4)
         {
             var path = new StringBuilder();
             path.Append("M ").Append(GraphHtmlText.Num(points[0].X)).Append(' ').Append(GraphHtmlText.Num(points[0].Y));

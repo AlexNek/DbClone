@@ -85,7 +85,7 @@ internal sealed class GraphWorkspaceWriter
         html.Append("<button type=\"button\" data-zoom=\"in\" aria-label=\"Zoom in\">+</button>\n");
         html.Append("<button type=\"button\" data-zoom=\"fit\">Fit</button>\n");
         html.Append("<button type=\"button\" data-zoom=\"reset\">100%</button>\n");
-        html.Append("<span class=\"meta\">drag to pan \u00b7 wheel to zoom</span>\n");
+        html.Append("<span class=\"meta\">drag a table to move it \u00b7 drag the background to pan \u00b7 wheel to zoom</span>\n");
     }
 
     private void WriteStage(StringBuilder html)

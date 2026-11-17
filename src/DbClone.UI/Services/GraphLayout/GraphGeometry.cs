@@ -87,6 +87,42 @@ internal static class GraphGeometry
             && point.Y >= card.TopLeft.Y && point.Y <= card.Bottom;
     }
 
+    /// <summary>
+    /// How near a stretch's own end a meeting may be and still belong to the two arrows rather than to a
+    /// port they were dealt beside one another.
+    /// </summary>
+    private const double EndShare = 0.02;
+
+    /// <summary>
+    /// Whether two stretches cross in their interiors. The ends are left out: two arrows that meet on a
+    /// card's border are two constraints sharing a table, which the picture states and does not count.
+    /// Both shares are read forward along their own stretch, so a pair that meets between its ends counts
+    /// and a pair whose lines would meet behind both ends — two arrows running away from one another —
+    /// does not.
+    /// </summary>
+    /// <param name="a">Where the first stretch starts.</param>
+    /// <param name="b">Where the first stretch ends.</param>
+    /// <param name="c">Where the second stretch starts.</param>
+    /// <param name="d">Where the second stretch ends.</param>
+    /// <returns>Whether the two are drawn across one another.</returns>
+    public static bool SegmentsCross(GraphPoint a, GraphPoint b, GraphPoint c, GraphPoint d)
+    {
+        var (abx, aby) = (b.X - a.X, b.Y - a.Y);
+        var (cdx, cdy) = (d.X - c.X, d.Y - c.Y);
+        var denominator = (abx * cdy) - (aby * cdx);
+
+        if (Math.Abs(denominator) < 1e-9)
+        {
+            return false;
+        }
+
+        var (acx, acy) = (c.X - a.X, c.Y - a.Y);
+        var first = ((acx * cdy) - (acy * cdx)) / denominator;
+        var second = ((acx * aby) - (acy * abx)) / denominator;
+
+        return first > EndShare && first < 1 - EndShare && second > EndShare && second < 1 - EndShare;
+    }
+
     /// <summary>The Liang–Barsky clip of one boundary on the segment, expressed as a parameter range.</summary>
     private static bool Clip(double direction, double distance, ref double entering, ref double leaving)
     {

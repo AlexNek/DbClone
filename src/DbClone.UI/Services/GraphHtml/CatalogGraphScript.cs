@@ -2,8 +2,11 @@ namespace DbClone.UI.Services.GraphHtml;
 
 /// <summary>
 /// The document's only executable script: pan and zoom, selection, the cluster fold, search and the
-/// direction switch. It reads the data island and moves classes; it never computes a coordinate, a
-/// count or a rank, and it never converts a string into markup.
+/// direction switch, and a card the reader carries by hand. It reads the data island and moves classes;
+/// it never computes a count or a rank, and it never converts a string into markup. The coordinates it
+/// writes are the ones a reader states with the pointer — a card they move, and the arrows that join it,
+/// drawn again from box to box. Every other coordinate is the layout's, in whichever arrangement the
+/// engine kept the picture.
 /// </summary>
 internal static class CatalogGraphScript
 {
@@ -336,6 +339,211 @@ internal static class CatalogGraphScript
     return found;
   }
 
+  // Where a card stands now, in canvas coordinates: the rectangle the layout drew, carried by however
+  // far the reader has moved it. A card that is not drawn at all has no box, and an arrow to it is
+  // left exactly as the layout routed it.
+  function cardBox(index) {
+    var card = cardElement(index);
+    if (!card) return null;
+    var rect = card.querySelector("rect");
+    if (!rect) return null;
+    var far = carried.get(index) || { x: 0, y: 0 };
+    var left = Number(rect.getAttribute("x")) + far.x;
+    var top = Number(rect.getAttribute("y")) + far.y;
+    var width = Number(rect.getAttribute("width"));
+    var height = Number(rect.getAttribute("height"));
+    return {
+      left: left, top: top, right: left + width, bottom: top + height,
+      cx: left + width / 2, cy: top + height / 2,
+    };
+  }
+
+  // The point on a card's border where a straight line to another card leaves it.
+  function borderPoint(box, towards) {
+    var dx = towards.cx - box.cx;
+    var dy = towards.cy - box.cy;
+    if (dx === 0 && dy === 0) return { x: box.cx, y: box.cy };
+    var halfWidth = (box.right - box.left) / 2;
+    var halfHeight = (box.bottom - box.top) / 2;
+    var reach = Math.min(
+      dx === 0 ? Infinity : halfWidth / Math.abs(dx),
+      dy === 0 ? Infinity : halfHeight / Math.abs(dy));
+    return { x: box.cx + dx * reach, y: box.cy + dy * reach };
+  }
+
+  // A number written into the document: one decimal is finer than the picture is drawn at and keeps
+  // the markup short, and it is the same rounding the writers use.
+  function drawable(value) {
+    return Math.round(value * 10) / 10;
+  }
+
+  // A card the reader carries is drawn where they put it, and the arrows that join it are drawn again
+  // from box to box: a route that was turned in a corridor of the layout means nothing once the card
+  // it was turned for has moved, so the arrow states the same fact the shortest way — this table, that
+  // table — and the panel and the register keep saying everything else. No other card, arrow or line
+  // of the picture is touched.
+  function reflow(index) {
+    // A ringed picture re-deals every arrow instead of drawing only the carried card's: the point an end
+    // holds on a border belongs to the whole fan that faces along that side, so moving one table changes
+    // where its neighbours' heads sit as well, and redrawing one arrow box-to-box would fuse its head
+    // with the heads the dealing spread it clear of in the first place.
+    if (inRings) { drawStraight(); return; }
+    (edgesOfNode.get(index) || []).forEach(function (edgeIndex) {
+      var edge = data.edges[edgeIndex];
+      var from = cardBox(edge.c);
+      var to = cardBox(edge.p);
+      if (!from || !to) return;
+      var start = borderPoint(from, to);
+      var end = borderPoint(to, from);
+      setEdge(edgeIndex,
+        "M " + drawable(start.x) + " " + drawable(start.y) + " L " + drawable(end.x) + " " + drawable(end.y),
+        (start.x + end.x) / 2, (start.y + end.y) / 2);
+    });
+  }
+
+  // The route an arrow was served with, and where its label stood, so a card the reader puts back is
+  // served the line it was drawn along — the script has already overwritten it.
+  var routed = new Map();
+  var labelAt = new Map();
+  Array.prototype.forEach.call(document.querySelectorAll("#viewport path[data-e]"), function (element2) {
+    if (element2.classList.contains("pick")) return;
+    routed.set(Number(element2.getAttribute("data-e")), element2.getAttribute("d"));
+  });
+  Array.prototype.forEach.call(document.querySelectorAll("#viewport text.elabel[data-e]"), function (element2) {
+    labelAt.set(Number(element2.getAttribute("data-e")),
+      { x: element2.getAttribute("x"), y: element2.getAttribute("y") });
+  });
+
+  // One arrow, drawn as the path it now is: both the stroke and the wide band that takes the pointer
+  // carry the same geometry, and the label follows the middle of it.
+  function setEdge(edgeIndex, path, middleX, middleY) {
+    Array.prototype.forEach.call(
+      document.querySelectorAll("#viewport path[data-e=\"" + edgeIndex + "\"]"),
+      function (element2) { element2.setAttribute("d", path); });
+    var label = document.querySelector("#viewport text.elabel[data-e=\"" + edgeIndex + "\"]");
+    if (!label) return;
+    label.setAttribute("x", String(drawable(middleX)));
+    label.setAttribute("y", String(drawable(middleY)));
+  }
+
+  // Putting a card back is the reader's other gesture: it takes the place the layout gave it, and the
+  // arrows drawn for it are served again exactly as the routing wrote them — or, when the card at the
+  // other end is still where the reader carried it, drawn again from box to box.
+  function release(index) {
+    carried.delete(index);
+    var card = cardElement(index);
+    if (card) card.removeAttribute("transform");
+    shiftLoops(index, { x: 0, y: 0 });
+    // A ringed picture is dealt over the boxes the cards stand in now, so putting one card back touches
+    // every arrow: while another card is still held out of its place the whole picture is dealt again,
+    // and once the last card is home the arrows take back the routes the engine served them — the bows
+    // included, which a gesture on the page cannot work out again.
+    if (inRings) {
+      if (carried.size > 0) { drawStraight(); return; }
+      routed.forEach(function (path, edgeIndex) {
+        var at = labelAt.get(edgeIndex);
+        if (at) setEdge(edgeIndex, path, Number(at.x), Number(at.y));
+      });
+      return;
+    }
+    (edgesOfNode.get(index) || []).forEach(function (edgeIndex) {
+      var edge = data.edges[edgeIndex];
+      var other = edge.c === index ? edge.p : edge.c;
+      if (carried.has(other)) { reflow(index); return; }
+      var path = routed.get(edgeIndex);
+      var at = labelAt.get(edgeIndex);
+      if (path !== undefined && at) setEdge(edgeIndex, path, Number(at.x), Number(at.y));
+    });
+  }
+
+  // Which arrangement the engine served. Rings around one middle table leave the space between the cards
+  // empty on purpose, and an arrow of such a picture is drawn the shortest way across it; bands pack the
+  // same cards in a lattice and route their arrows in the corridors between them. The reader's own gesture
+  // has to answer for whichever it was given, so a card carried by hand is drawn again in the arrangement
+  // the document arrived in and not in the other one.
+  var inRings = data.rings === true;
+
+  // The least air two ends need on one side of a card, and the border's own inset: the layout keeps the
+  // same distance between the points it deals, and the inset keeps a head off the card's corner.
+  var PortStep = 14;
+  var PortInset = 8;
+
+  // The side of a card an arrow leaves from: the side that faces the table it goes to. A line drawn to
+  // the border the centre-to-centre line happens to cross can leave through a side that looks the other
+  // way from its own target, which reads as an arrow pointing at the wrong table.
+  function sideToward(box, towards) {
+    var dx = towards.cx - box.cx;
+    var dy = towards.cy - box.cy;
+    if (Math.abs(dx) >= Math.abs(dy)) return dx >= 0 ? "right" : "left";
+    return dy >= 0 ? "bottom" : "top";
+  }
+
+  function addEnd(ends, edge, node, box, other) {
+    var side = sideToward(box, other);
+    var crossed = borderPoint(box, other);
+    if (!ends.has(node)) ends.set(node, []);
+    ends.get(node).push({
+      i: edge.i, node: node, side: side,
+      natural: side === "left" || side === "right" ? crossed.y - box.top : crossed.x - box.left,
+    });
+  }
+
+  // Every arrow of a ringed picture, drawn the shortest way between the points of the border its ends were
+  // dealt. Dealing is what keeps a fan apart: thirteen arrows let go at the one place a centre line
+  // crosses a border are drawn as one thick stroke, and no reader can say which head belongs to which
+  // constraint — so each side is given to the ends that face along it, spread the width of a mark apart
+  // and centred on the middle of the side, and the card's own border was drawn wide enough to hold them.
+  // It is the layout's own rule (GraphEdgePorts) read back onto the page, which is why the whole picture
+  // is dealt at once: an end cannot be placed until the neighbours it shares a side with are known.
+  function drawStraight() {
+    var ends = new Map();
+    data.edges.forEach(function (edge) {
+      if (edge.c === edge.p) return;
+      var from = cardBox(edge.c);
+      var to = cardBox(edge.p);
+      if (!from || !to) return;
+      addEnd(ends, edge, edge.c, from, to);
+      addEnd(ends, edge, edge.p, to, from);
+    });
+
+    var pointOf = new Map();
+    ends.forEach(function (list, index) {
+      var box = cardBox(index);
+      if (!box) return;
+      var sides = new Map();
+      list.forEach(function (end) {
+        var on = sides.get(end.side) || [];
+        on.push(end);
+        sides.set(end.side, on);
+      });
+
+      sides.forEach(function (on, side) {
+        on.sort(function (first, second) { return first.natural - second.natural || first.i - second.i; });
+        var across = side === "top" || side === "bottom";
+        var length = across ? box.right - box.left : box.bottom - box.top;
+        var span = Math.max(0, length - PortInset * 2);
+        var step = on.length > 1 ? Math.min(PortStep, span / (on.length - 1)) : 0;
+        var first = Math.max(PortInset, (length - step * (on.length - 1)) / 2);
+        on.forEach(function (end, position) {
+          var along = first + step * position;
+          pointOf.set(end.i + ":" + end.node, {
+            x: across ? box.left + along : (side === "left" ? box.left : box.right),
+            y: across ? (side === "top" ? box.top : box.bottom) : box.top + along,
+          });
+        });
+      });
+    });
+
+    data.edges.forEach(function (edge) {
+      var from = pointOf.get(edge.i + ":" + edge.c);
+      var to = pointOf.get(edge.i + ":" + edge.p);
+      if (!from || !to) return;
+      setEdge(edge.i,
+        "M " + drawable(from.x) + " " + drawable(from.y) + " L " + drawable(to.x) + " " + drawable(to.y),
+        (from.x + to.x) / 2, (from.y + to.y) / 2);
+    });
+  }
+
   // A hit may name a table the picture is not showing: outside the neighbourhood it opened on,
   // switched off by a chip, or folded into a collapsed cyclic group. Selecting the hit has to show
   // that table — a search whose result selects a card nobody can see reads as a search that does
@@ -404,6 +612,7 @@ internal static class CatalogGraphScript
     var bottom = Math.min(stage.bottom, canvas.bottom);
     var box = card.getBoundingClientRect();
     if (box.left >= left && box.top >= top && box.right <= right && box.bottom <= bottom) return;
+    taken = true;
     scale = Math.max(scale, 1);
     applyTransform();
 
@@ -447,6 +656,59 @@ internal static class CatalogGraphScript
   var dragging = false;
   var travelled = 0;
   var pressed = null;
+  // The camera belongs to the reader from the moment they take it: a drag, a wheel or a zoom button
+  // ends the document's own placing, so the picture never re-arranges itself under a reader who has
+  // already chosen where to look.
+  var taken = false;
+  // Where the reader has carried a card, by node index. The layout stays the picture's own; this is
+  // the one coordinate a reader may state, and it never travels back into the arrangement.
+  var carried = new Map();
+  var moving = null;
+  // The constraints that meet each table, so a card the reader carries takes its own arrows with it
+  // and leaves every other arrow where the layout drew it.
+  var edgesOfNode = new Map();
+  // A table that names itself is drawn as a ring around its own card, and a ring has no second box to be
+  // routed between: it is carried with the card it belongs to, by the distance the card went.
+  var loopsOfNode = new Map();
+  data.edges.forEach(function (edge) {
+    if (edge.c === edge.p) { addLoopOf(edge.c, edge.i); return; }
+    addEdgeOf(edge.c, edge.i);
+    addEdgeOf(edge.p, edge.i);
+  });
+
+  function addEdgeOf(node, edge) {
+    if (!edgesOfNode.has(node)) edgesOfNode.set(node, []);
+    edgesOfNode.get(node).push(edge);
+  }
+
+  function addLoopOf(node, edge) {
+    if (!loopsOfNode.has(node)) loopsOfNode.set(node, []);
+    loopsOfNode.get(node).push(edge);
+  }
+
+  // The ring keeps the shape the routing drew for it and is carried by the same distance as the card: a
+  // loop left behind would stand around blank canvas the moment the table it names was moved, and the
+  // text it carries is moved with it rather than staying where the routing put it.
+  function shiftLoops(index, far) {
+    (loopsOfNode.get(index) || []).forEach(function (edgeIndex) {
+      var at = labelAt.get(edgeIndex);
+      var label = document.querySelector("#viewport text.elabel[data-e=\"" + edgeIndex + "\"]");
+      if (label && at) {
+        label.setAttribute("x", String(drawable(Number(at.x) + far.x)));
+        label.setAttribute("y", String(drawable(Number(at.y) + far.y)));
+      }
+      Array.prototype.forEach.call(
+        document.querySelectorAll("#viewport path[data-e=\"" + edgeIndex + "\"]"),
+        function (element2) {
+          if (far.x === 0 && far.y === 0) {
+            element2.removeAttribute("transform");
+          } else {
+            element2.setAttribute("transform",
+              "translate(" + drawable(far.x) + "," + drawable(far.y) + ")");
+          }
+        });
+    });
+  }
 
   function applyTransform() {
     view.setAttribute("transform",
@@ -478,6 +740,7 @@ internal static class CatalogGraphScript
   };
 
   function zoomAround(factor, clientX, clientY) {
+    taken = true;
     var box = svg.getBoundingClientRect();
     var x = clientX - box.left;
     var y = clientY - box.top;
@@ -499,18 +762,22 @@ internal static class CatalogGraphScript
   }
 
   // The part of the canvas the reader can actually look at: the cards and the collapsed group boxes on
-  // screen, read from the coordinates the layout wrote rather than from the current screen box, so the
-  // answer does not depend on the zoom. A blank corner of the canvas is not part of it.
+  // screen, read off the page and carried back into canvas coordinates with the camera, so the answer
+  // is the same at every zoom and follows a card the reader has carried to another place. A blank
+  // corner of the canvas is not part of it.
   function pictureBox() {
+    var stage = svg.getBoundingClientRect();
     var box = null;
     Array.prototype.forEach.call(document.querySelectorAll("#viewport .node, #viewport .super"), function (element2) {
       if (!shown(element2) || element2.classList.contains("hidden")) return;
       var rect = element2.querySelector("rect");
       if (!rect) return;
-      var left = Number(rect.getAttribute("x"));
-      var top = Number(rect.getAttribute("y"));
-      var right = left + Number(rect.getAttribute("width"));
-      var bottom = top + Number(rect.getAttribute("height"));
+      var painted = rect.getBoundingClientRect();
+      if (painted.width <= 0 || painted.height <= 0) return;
+      var left = (painted.left - stage.left - shiftX) / scale;
+      var top = (painted.top - stage.top - shiftY) / scale;
+      var right = (painted.right - stage.left - shiftX) / scale;
+      var bottom = (painted.bottom - stage.top - shiftY) / scale;
       box = box === null
         ? { left: left, top: top, right: right, bottom: bottom }
         : {
@@ -527,6 +794,9 @@ internal static class CatalogGraphScript
   // that empty corner (T27). Centring is the answer only while the picture fits: the middle of a
   // picture taller than the stage is a corridor as often as it is a table, and a reader who asks for
   // 100% wants the first table, not the middle of nothing.
+  // A ringed picture is the one drawing whose middle is a table by construction: the cards stand on
+  // circles around the middle table, so the corner of its bounding box is empty canvas at any scale and
+  // the picture's own centre is where the reading begins.
   function placeContent(wanted) {
     var stage = svg.parentNode.getBoundingClientRect();
     // A stage the document has not laid out yet measures nothing, and a camera taken against nothing is
@@ -534,10 +804,14 @@ internal static class CatalogGraphScript
     // white beside it. So a placement is refused until there is a stage to place into, whatever asked for
     // it — the load and the resize observer take it again once the real size is there.
     if (stage.width <= 0 || stage.height <= 0) return false;
+    // The picture's box is taken before the scale is: pictureBox reads the page, and the page still shows
+    // the camera the document is leaving, so measuring after the change answers with the picture's size at
+    // the old zoom and places the new one by that stale measure — which puts a fitted picture outside the
+    // stage, blank.
+    var box = pictureBox();
     // The wheel's floor is where a card stops being readable; a fit is allowed below it, because a
     // picture that does not fit its stage is not a fit and a reader who asked for one gets all of it.
     scale = Math.min(4, Math.max(0.02, wanted));
-    var box = pictureBox();
     if (box === null) {
       shiftX = 0;
       shiftY = 0;
@@ -547,10 +821,10 @@ internal static class CatalogGraphScript
     var margin = 16;
     var width = (box.right - box.left) * scale;
     var height = (box.bottom - box.top) * scale;
-    shiftX = width <= stage.width
+    shiftX = inRings || width <= stage.width
       ? (stage.width - width) / 2 - box.left * scale
       : margin - box.left * scale;
-    shiftY = height <= stage.height
+    shiftY = inRings || height <= stage.height
       ? (stage.height - height) / 2 - box.top * scale
       : margin - box.top * scale;
     applyTransform();
@@ -568,22 +842,45 @@ internal static class CatalogGraphScript
     pressed = event.target;
     pointerX = event.clientX;
     pointerY = event.clientY;
+    // A press on a card carries that card; a press anywhere else carries the picture. Where a table
+    // stands is the reader's judgement before it is the layout's, so a card moves by hand and the
+    // arrows that join it follow.
+    moving = event.target.closest ? event.target.closest("#viewport .node") : null;
+    if (moving && (!shown(moving) || moving.classList.contains("hidden"))) moving = null;
+    if (moving) moving.classList.add("moving");
     svg.classList.add("dragging");
     svg.setPointerCapture(event.pointerId);
   });
 
   svg.addEventListener("pointermove", function (event) {
     if (!dragging) return;
+    taken = true;
     travelled += Math.abs(event.clientX - pointerX) + Math.abs(event.clientY - pointerY);
-    shiftX += event.clientX - pointerX;
-    shiftY += event.clientY - pointerY;
+    var stepX = event.clientX - pointerX;
+    var stepY = event.clientY - pointerY;
     pointerX = event.clientX;
     pointerY = event.clientY;
+
+    if (moving) {
+      var index = Number(moving.getAttribute("data-n"));
+      var far = carried.get(index) || { x: 0, y: 0 };
+      far = { x: far.x + stepX / scale, y: far.y + stepY / scale };
+      carried.set(index, far);
+      moving.setAttribute("transform", "translate(" + drawable(far.x) + "," + drawable(far.y) + ")");
+      reflow(index);
+      shiftLoops(index, far);
+      return;
+    }
+
+    shiftX += stepX;
+    shiftY += stepY;
     applyTransform();
   });
 
   function stopDrag(event) {
     dragging = false;
+    if (moving) moving.classList.remove("moving");
+    moving = null;
     svg.classList.remove("dragging");
     if (event && event.pointerId !== undefined) {
       try { svg.releasePointerCapture(event.pointerId); } catch (ignored) { }
@@ -592,6 +889,17 @@ internal static class CatalogGraphScript
 
   svg.addEventListener("pointerup", stopDrag);
   svg.addEventListener("pointercancel", stopDrag);
+
+  // A card carried by hand is put back the same way it was moved: pointing at it twice. A picture a
+  // reader has arranged is theirs to undo card by card, without closing the view.
+  svg.addEventListener("dblclick", function (event) {
+    var card = event.target.closest ? event.target.closest("#viewport .node") : null;
+    if (!card) return;
+    var index = Number(card.getAttribute("data-n"));
+    if (!carried.has(index)) return;
+    event.preventDefault();
+    release(index);
+  });
 
   svg.addEventListener("click", function (event) {
     // Capturing the pointer hands the pointerup to the svg, and the click that follows is built from
@@ -677,8 +985,8 @@ internal static class CatalogGraphScript
     var stage = svg.parentNode.getBoundingClientRect();
     if (action === "in") zoomAround(1.25, stage.left + stage.width / 2, stage.top + stage.height / 2);
     if (action === "out") zoomAround(1 / 1.25, stage.left + stage.width / 2, stage.top + stage.height / 2);
-    if (action === "fit") fit();
-    if (action === "reset") placeContent(1);
+    if (action === "fit") { taken = true; fit(); }
+    if (action === "reset") { taken = true; placeContent(1); }
   });
 
   var showAll = document.getElementById("showall");
@@ -707,34 +1015,47 @@ internal static class CatalogGraphScript
   });
 
   applyChips();
-  // The document opens at its own size with the picture centred in the stage, not on the canvas origin:
+  // The document opens at its own size with the picture placed in the stage, not on the canvas origin:
   // the picture is laid out across a canvas many screens wide, so the corner it used to open on was
   // empty canvas and no table at all. Fitting on open would answer with a thumbnail of a large
   // database, which is why the opening scale is the document's own and "Fit" stays a button (T27).
   // A picture the viewer serves again for another cluster selection opens where the reader left the
   // one it replaces: switching a chip changes what is drawn, never where the reader is looking.
   //
-  // The stage has no size until the document is laid out, so a camera read before then is refused by
-  // placeContent itself rather than written: the place is taken again as soon as the load event has
-  // passed and kept right on every resize — but only while the picture fits, because one larger than the
-  // stage keeps the direction the reader panned it to.
-  function keepCentred() {
+  // The stage has no size until the document is laid out, so a place taken before then is refused by
+  // placeContent itself rather than written — and taken again as soon as the load event has passed and
+  // on every resize that follows, until the reader takes the camera. Placing means the scale and the
+  // pan both: a picture left at the canvas origin with the stage's blank white beside it is the one
+  // thing an opening view may not be, whatever its size.
+  function placeOnce() {
+    if (taken) return;
+    var stage = svg.parentNode.getBoundingClientRect();
+    if (stage.width <= 0 || stage.height <= 0) return;
+    placeContent(scale);
+  }
+
+  // A place read from the picture a chip replaces is not this picture's place: a selection is drawn
+  // from another arrangement, so the same pan can point at canvas no card stands on — the reader is
+  // then looking at an empty part of a picture that has none of the tables they asked for. A place
+  // that shows no card is refused the way an unreadable camera is, and the picture is placed at the
+  // zoom it kept.
+  function onStage() {
     var stage = svg.parentNode.getBoundingClientRect();
     var box = pictureBox();
-    if (!box || stage.width <= 0 || stage.height <= 0) return;
-    if ((box.right - box.left) * scale > stage.width) return;
-    if ((box.bottom - box.top) * scale > stage.height) return;
-    placeContent(scale);
+    if (!box || stage.width <= 0 || stage.height <= 0) return true;
+    return shiftX + box.right * scale > 0 && shiftY + box.bottom * scale > 0
+      && shiftX + box.left * scale < stage.width && shiftY + box.top * scale < stage.height;
   }
 
   var opening = openingCamera();
   if (opening) {
     applyCamera(opening);
+    if (!onStage()) placeContent(scale);
   } else {
     placeContent(1);
-    window.addEventListener("load", keepCentred, { once: true });
-    window.addEventListener("resize", keepCentred);
-    if (typeof ResizeObserver === "function") new ResizeObserver(keepCentred).observe(svg.parentNode);
+    window.addEventListener("load", placeOnce, { once: true });
+    window.addEventListener("resize", placeOnce);
+    if (typeof ResizeObserver === "function") new ResizeObserver(placeOnce).observe(svg.parentNode);
   }
 }());
 """;

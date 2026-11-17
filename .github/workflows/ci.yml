@@ -35,7 +35,7 @@ jobs:
       # Separate steps, so a failure in one suite names itself instead of hiding the suites behind it.
       - name: Test (interchange)
         run: >
-          dotnet test interchange/tests/DatabaseInterchange.Tests
+          dotnet test tests/DatabaseInterchange.Tests
           --no-restore -c Release --verbosity normal
 
       - name: Test (UI)

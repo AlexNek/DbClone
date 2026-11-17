@@ -1,0 +1,1306 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Relationships — fixture</title>
+<style>
+:root{--bg:#fbfbfd;--ink:#1b1f24;--muted:#6a737d;--line:#c9d1d9;--hot:#0b64c4;--warm:#8a5a00}
+*{box-sizing:border-box}
+html,body{height:100%}
+body{margin:0;font:13px/1.45 "Segoe UI",system-ui,-apple-system,sans-serif;color:var(--ink);background:var(--bg);display:flex;flex-direction:column}
+header{flex:0 0 auto;padding:14px 18px 8px;border-bottom:1px solid var(--line)}
+h1{margin:0;font-size:17px;font-weight:600}
+.sub{margin:4px 0 0;color:var(--muted);font-size:12px}
+.sub b{color:var(--ink);font-weight:600}
+#counts{margin:6px 0 0;font-weight:600}
+.keyed{margin:6px 0 0}
+.keyed>summary{width:max-content;padding:1px 0;cursor:pointer;color:var(--muted);font-size:12px;font-weight:600}
+.keyed>summary:hover{color:var(--ink)}
+.keyed>summary:focus-visible{outline:2px solid var(--hot);outline-offset:2px;border-radius:3px}
+.keyed .legend{margin-top:6px}
+.legend{display:flex;flex-wrap:wrap;gap:4px 20px;margin:8px 0 0;padding:0;list-style:none;color:var(--muted);font-size:12px}
+.legend b{color:var(--ink)}
+.legend li{display:flex;gap:7px;align-items:flex-start;max-width:430px}
+.marks{position:absolute}
+.legend .key{flex:0 0 auto;width:48px;height:16px;margin-top:1px;overflow:visible}
+.legend .key rect{fill:#fff;stroke:#8b949e;stroke-width:1.2}
+.legend .key rect.super{fill:#eef4fc;stroke:#5b8dd6}
+.chips{flex:0 0 auto;display:flex;flex-wrap:wrap;gap:8px 20px;align-items:center;padding:8px 18px;border-bottom:1px solid var(--line)}
+.chips .group{display:flex;flex-wrap:wrap;gap:5px;align-items:center}
+.chips .group>span{color:var(--muted);font-size:11px;text-transform:uppercase;letter-spacing:.05em;margin-right:2px}
+.chips .group>b{font-size:12px;font-weight:600}
+.chips .hint{margin-left:auto;color:var(--muted);font-size:11px}
+.chip{font:inherit;font-size:12px;padding:2px 9px;border:1px solid var(--line);border-radius:999px;background:#fff;color:var(--ink);cursor:pointer}
+.chip:not(.on){opacity:.5;text-decoration:line-through}
+.chip.on{background:#e8f0fb;border-color:#9dc0ee}
+.layout{flex:1 1 auto;min-height:0;display:flex;align-items:stretch}
+main{flex:1 1 auto;min-width:0;min-height:0;display:flex;flex-direction:column}
+.toolbar{display:flex;flex-wrap:wrap;gap:6px 12px;align-items:center;padding:8px 18px;border-bottom:1px solid var(--line);font-size:12px}
+.toolbar label{display:flex;gap:6px;align-items:center}
+.toolbar input[type=search]{font:inherit;padding:3px 8px;border:1px solid var(--line);border-radius:6px;min-width:190px}
+.toolbar fieldset{border:0;margin:0;padding:0;display:flex;gap:8px;align-items:center}
+.toolbar legend{display:none}
+.toolbar button{font:inherit;font-size:12px;padding:3px 10px;border:1px solid var(--line);border-radius:6px;background:#fff;cursor:pointer}
+#matches{border:1px solid var(--line);border-radius:8px;background:#fff;margin:0 18px;padding:6px 8px;max-height:190px;overflow:auto;font-size:12px}
+#matches[hidden]{display:none}
+#matches .hits-title{margin:0 0 4px;color:var(--muted);font-size:11px;text-transform:uppercase;letter-spacing:.05em}
+.hit{display:flex;gap:10px;align-items:baseline;width:100%;text-align:left;font:inherit;padding:3px 6px;border:0;border-radius:5px;background:none;cursor:pointer}
+.hit:hover,.hit:focus-visible{background:#eef4fc;outline:none}
+.hit span{color:var(--muted)}
+#pic{position:absolute;top:0;left:0;width:100%;height:100%;cursor:grab;touch-action:none}
+#pic.dragging{cursor:grabbing}
+.stage{position:relative;flex:1 1 auto;overflow:hidden;min-height:240px;background:#fff}
+#viewport text{font:12px/1 "Segoe UI",system-ui,sans-serif;fill:var(--ink)}
+.node rect{fill:#fff;stroke:#8b949e;stroke-width:1.2}
+.node.out rect{fill:#fffdf5;stroke-dasharray:4 3}
+.node.hot rect{stroke:var(--hot);stroke-width:2.4;fill:#eaf3ff}
+.node .name{font-weight:600}
+.node .count{fill:var(--muted);font-size:11px}
+.node{cursor:move}
+.node.moving{opacity:.85}
+.edge{fill:none;stroke:#8b949e;stroke-width:1.3}
+.edge.out{stroke-dasharray:5 4;stroke:#b08850}
+.edge.hot{stroke:var(--hot);stroke-width:2.6}
+.edge.dim{opacity:.18}
+.edge.pick{stroke:transparent;stroke-width:10px;stroke-dasharray:none;pointer-events:stroke;cursor:pointer}
+.node.dim{opacity:.4}
+.elabel{font-size:10px;fill:var(--muted);paint-order:stroke;stroke:#fff;stroke-width:3px;text-anchor:middle;dominant-baseline:central;pointer-events:none}
+.elabel.quiet{display:none}
+path.edge:not(.off).hot+text.elabel,path.edge.pick:not(.off):hover+text.elabel{display:inline;fill:var(--hot);font-weight:600}
+.super rect{fill:#eef4fc;stroke:#5b8dd6;stroke-width:1.6;rx:8}
+.super text{font-size:13px;font-weight:600;fill:#1a4f96;text-anchor:middle}
+.super{cursor:pointer}
+.node.off,.edge.off,.super.off,.away,.hidden{display:none}
+aside{flex:0 0 330px;border-left:1px solid var(--line);padding:12px 16px;overflow:auto;font-size:12px}
+aside h2{margin:0 0 2px;font-size:14px;word-break:break-word}
+aside h3{margin:14px 0 4px;font-size:12px;text-transform:uppercase;letter-spacing:.05em;color:var(--muted)}
+aside .meta{margin:2px 0;color:var(--muted)}
+aside .dirs{display:flex;gap:14px;margin:6px 0 0;font-variant-numeric:tabular-nums}
+aside table{border-collapse:collapse;width:100%;margin-top:6px}
+aside td,aside th{border-bottom:1px solid #eaeef2;padding:2px 4px 2px 0;text-align:left;vertical-align:top}
+aside th{font-size:10px;text-transform:uppercase;letter-spacing:.04em;color:var(--muted);font-weight:600}
+aside .mono{font-family:Consolas,"Cascadia Mono",monospace;font-size:11px}
+aside .note{color:var(--muted);font-size:11px}
+aside ul.rels{margin:0;padding:0;list-style:none}
+aside ul.rels li+li{margin-top:2px}
+aside ul.rels button{font:inherit;font-size:11px;text-align:left;width:100%;padding:3px 4px;border:0;border-radius:4px;background:none;cursor:pointer;color:var(--ink)}
+aside ul.rels button:hover{background:#eef4fc}
+aside ul.rels button b,aside ul.rels button span{display:block}
+aside ul.rels button b{font-weight:600}
+aside ul.defs{margin:0;padding:0;list-style:none}
+aside ul.defs li{padding:3px 0;border-bottom:1px solid #eaeef2}
+aside ul.defs li:last-child{border-bottom:0}
+aside ul.defs b{font-weight:600;margin-right:6px}
+aside ul.defs .note{margin-right:6px}
+aside ul.defs div{margin-top:2px;white-space:pre-wrap;word-break:break-word;color:var(--ink)}
+.register{flex:0 1 auto;min-height:0;max-height:24vh;overflow:auto;border-top:1px solid var(--line);padding:10px 18px 18px}
+.register h2{margin:0 0 6px;font-size:14px}
+.register .scroll{overflow:auto;border:1px solid var(--line);border-radius:8px;background:#fff}
+.register table{border-collapse:collapse;width:100%;font-size:11.5px}
+.register th,.register td{text-align:left;padding:3px 8px;border-bottom:1px solid #eaeef2;white-space:nowrap}
+.register th{position:sticky;top:0;background:#f6f8fa;font-size:10px;text-transform:uppercase;letter-spacing:.04em;color:var(--muted)}
+.register tbody tr{cursor:pointer}
+.register tbody tr:hover,.register tbody tr.hot{background:#eef4fc}
+.register .mono{font-family:Consolas,"Cascadia Mono",monospace}
+</style>
+</head>
+<body>
+<svg class="marks" width="0" height="0" aria-hidden="true" focusable="false"><defs><marker id="head" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="9" markerHeight="9" orient="auto-start-reverse"><path d="M 0 0 L 10 5 L 0 10 z" fill="#8b949e"/></marker><marker id="one" viewBox="0 0 10 10" refX="0" refY="5" markerWidth="8" markerHeight="8" orient="auto"><path d="M 7 0 L 7 10" stroke="#8b949e" stroke-width="2.5" fill="none"/></marker></defs></svg>
+<header>
+<h1>Database relationship explorer</h1>
+<p class="sub">catalog <b title="C:\catalogs\fixture">fixture</b> · 7 tables · 8 relations · format version 3 · postgresql · generated 2026-11-17 09:30</p>
+<p id="counts">Showing 7 of 7 tables · 8 of 8 relations</p>
+<details class="keyed">
+<summary>Key — how to read the picture</summary>
+<ul class="legend">
+<li><svg class="key" viewBox="0 0 48 16" aria-hidden="true"><path class="edge" d="M 4 8 L 40 8" marker-end="url(#head)"/></svg><b>many-to-one (N:1)</b> multiple records in the source table can reference the same record in the target table</li>
+<li><svg class="key" viewBox="0 0 48 16" aria-hidden="true"><path class="edge" d="M 9 8 L 40 8" marker-start="url(#one)" marker-end="url(#head)"/></svg><b>one-to-one (1:1)</b> each record in the target table can be referenced by at most one record in the source table</li>
+<li><svg class="key" viewBox="0 0 48 16" aria-hidden="true"><path class="edge out" d="M 4 8 L 40 8" marker-end="url(#head)"/></svg><b>dashed</b> the table it points at is not in this catalog</li>
+<li><svg class="key" viewBox="0 0 48 16" aria-hidden="true"><path class="edge" d="M 4 13 C 16 2, 32 2, 44 13" marker-end="url(#head)"/></svg><b>curve</b> the arrow goes around a table that stands in its way</li>
+<li><svg class="key" viewBox="0 0 48 16" aria-hidden="true"><rect x="2" y="3" width="9" height="10" rx="2"/><path class="edge" d="M 11 6 C 40 6, 40 13, 11 13" marker-end="url(#head)"/></svg><b>loop</b> the table points at itself</li>
+<li><svg class="key" viewBox="0 0 48 16" aria-hidden="true"><rect x="2" y="2" width="34" height="12" rx="3"/></svg><b>card</b> one table: its name and row count</li>
+<li><svg class="key" viewBox="0 0 48 16" aria-hidden="true"><rect class="super" x="2" y="2" width="34" height="12" rx="3"/></svg><b>collapsed</b> a cyclic group as one box; select to expand</li>
+</ul>
+</details>
+</header>
+<section id="chips" class="chips">
+<div class="group"><span>schema</span>
+<b>public</b>
+</div>
+<div class="group"><span>cyclic group</span>
+<button type="button" class="chip on" data-c="1" aria-pressed="true">↺ 5 &#183; public.node0 +4</button>
+</div>
+</section>
+<div class="layout">
+<main>
+<div id="toolbar" class="toolbar">
+<label>Search <input id="query" type="search" autocomplete="off" placeholder="table, column, constraint or comment" aria-label="Search the catalog"></label>
+<fieldset><legend>Direction</legend>
+<label><input type="radio" name="direction" value="both" checked> both ways</label>
+<label><input type="radio" name="direction" value="out"> references</label>
+<label><input type="radio" name="direction" value="in"> referenced by</label>
+</fieldset>
+<button type="button" data-zoom="out" aria-label="Zoom out">−</button>
+<button type="button" data-zoom="in" aria-label="Zoom in">+</button>
+<button type="button" data-zoom="fit">Fit</button>
+<button type="button" data-zoom="reset">100%</button>
+<span class="meta">drag a table to move it · drag the background to pan · wheel to zoom</span>
+</div>
+<div id="matches" hidden></div>
+<div class="stage">
+<svg id="pic" role="img" aria-label="7 tables and 8 constraints">
+<g id="viewport">
+<g class="edges">
+<path class="edge out" data-e="0" d="M 306.9 568 L 255.8 568" marker-end="url(#head)"><title>other_id → reports.missing.id</title></path>
+<path class="edge pick" data-e="0" d="M 306.9 568 L 255.8 568"><title>other_id → reports.missing.id</title></path>
+<text class="elabel quiet" data-e="0" x="281.35" y="568">other_id → id</text>
+<path class="edge" data-e="1" d="M 408.9 568 L 480.4 568" marker-end="url(#head)"><title>tree_id → public.tree.id</title></path>
+<path class="edge pick" data-e="1" d="M 408.9 568 L 480.4 568"><title>tree_id → public.tree.id</title></path>
+<text class="elabel quiet" data-e="1" x="444.65" y="568">tree_id → id</text>
+<path class="edge" data-e="2" d="M 439 160 L 488 310.066" marker-end="url(#head)"><title>next_id → public.node1.id</title></path>
+<path class="edge pick" data-e="2" d="M 439 160 L 488 310.066"><title>next_id → public.node1.id</title></path>
+<text class="elabel quiet" data-e="2" x="463.5" y="235.033">next_id → id</text>
+<path class="edge" data-e="3" d="M 467 350.066 L 360 427.533" marker-end="url(#head)"><title>next_id → public.node2.id</title></path>
+<path class="edge pick" data-e="3" d="M 467 350.066 L 360 427.533"><title>next_id → public.node2.id</title></path>
+<text class="elabel quiet" data-e="3" x="413.5" y="388.799">next_id → id</text>
+<path class="edge" data-e="4" d="M 305 427.533 L 199 350.066" marker-end="url(#head)"><title>next_id → public.node3.id</title></path>
+<path class="edge pick" data-e="4" d="M 305 427.533 L 199 350.066"><title>next_id → public.node3.id</title></path>
+<text class="elabel quiet" data-e="4" x="252" y="388.799">next_id → id</text>
+<path class="edge" data-e="5" d="M 177 310.066 L 226 160" marker-end="url(#head)"><title>next_id → public.node4.id</title></path>
+<path class="edge pick" data-e="5" d="M 177 310.066 L 226 160"><title>next_id → public.node4.id</title></path>
+<text class="elabel quiet" data-e="5" x="201.5" y="235.033">next_id → id</text>
+<path class="edge" data-e="6" d="M 283.756 140 L 381.603 140" marker-end="url(#head)"><title>next_id → public.node0.id</title></path>
+<path class="edge pick" data-e="6" d="M 283.756 140 L 381.603 140"><title>next_id → public.node0.id</title></path>
+<text class="elabel quiet" data-e="6" x="332.68" y="140">next_id → id</text>
+<path class="edge" data-e="7" d="M 575.4 559 C 619.4 559 619.4 577 575.4 577" marker-end="url(#head)"><title>parent_id → public.tree.id</title></path>
+<path class="edge pick" data-e="7" d="M 575.4 559 C 619.4 559 619.4 577 575.4 577"><title>parent_id → public.tree.id</title></path>
+<text class="elabel quiet" data-e="7" x="627.4" y="567.533">parent_id → id</text>
+</g>
+<g class="nodes">
+<g class="node cap" data-n="0" data-c="">
+<title>public.child — 40 rows — references 2, referenced by 0</title>
+<rect x="306.9" y="547.533" width="102" height="40" rx="7"/>
+<text class="name" x="315.9" y="564.533">public.child</text>
+<text class="count" x="315.9" y="579.533">40 rows</text>
+</g>
+<g class="node cap" data-n="1" data-c="1">
+<title>public.node0 — 10 rows — references 1, referenced by 1</title>
+<rect x="381.603" y="120" width="102" height="40" rx="7"/>
+<text class="name" x="390.603" y="137">public.node0</text>
+<text class="count" x="390.603" y="152">10 rows</text>
+</g>
+<g class="node cap" data-n="2" data-c="1">
+<title>public.node1 — 11 rows — references 1, referenced by 1</title>
+<rect x="443.359" y="310.066" width="102" height="40" rx="7"/>
+<text class="name" x="452.359" y="327.066">public.node1</text>
+<text class="count" x="452.359" y="342.066">11 rows</text>
+</g>
+<g class="node cap" data-n="3" data-c="1">
+<title>public.node2 — 12 rows — references 1, referenced by 1</title>
+<rect x="281.68" y="427.533" width="102" height="40" rx="7"/>
+<text class="name" x="290.68" y="444.533">public.node2</text>
+<text class="count" x="290.68" y="459.533">12 rows</text>
+</g>
+<g class="node cap" data-n="4" data-c="1">
+<title>public.node3 — 13 rows — references 1, referenced by 1</title>
+<rect x="120" y="310.066" width="102" height="40" rx="7"/>
+<text class="name" x="129" y="327.066">public.node3</text>
+<text class="count" x="129" y="342.066">13 rows</text>
+</g>
+<g class="node cap" data-n="5" data-c="1">
+<title>public.node4 — 14 rows — references 1, referenced by 1</title>
+<rect x="181.756" y="120" width="102" height="40" rx="7"/>
+<text class="name" x="190.756" y="137">public.node4</text>
+<text class="count" x="190.756" y="152">14 rows</text>
+</g>
+<g class="node cap" data-n="6" data-c="">
+<title>public.tree — 220 rows — references 1, referenced by 2</title>
+<rect x="480.4" y="547.533" width="95" height="40" rx="7"/>
+<text class="name" x="489.4" y="564.533">public.tree</text>
+<text class="count" x="489.4" y="579.533">220 rows</text>
+</g>
+<g class="node out" data-n="7" data-c="">
+<title>reports.missing — not in this catalog — references 0, referenced by 1</title>
+<rect x="120" y="547.533" width="135.8" height="40" rx="7"/>
+<text class="name" x="129" y="564.533">reports.missing</text>
+<text class="count" x="129" y="579.533">not in this catalog</text>
+</g>
+</g>
+</g>
+</svg>
+</div>
+</main>
+<aside>
+<div id="panel"><p class="meta">Select a table to see its columns, its key, indexes and checks, its references and the tables that point at it.</p></div>
+</aside>
+</div>
+<section class="register">
+<h2>Relationship register — 8 constraints</h2>
+<div class="scroll">
+<table>
+<thead><tr><th>#</th><th>constraint</th><th>from</th><th>to</th><th>columns</th><th>on delete</th><th>on update</th><th>rule</th></tr></thead>
+<tbody>
+<tr data-e="0"><td>1</td><td class="mono">fk_child_missing</td><td class="mono">public.child</td><td class="mono">reports.missing</td><td class="mono">other_id → id</td><td>—</td><td>—</td><td>outside the catalog</td></tr>
+<tr data-e="1"><td>2</td><td class="mono">fk_child_tree</td><td class="mono">public.child</td><td class="mono">public.tree</td><td class="mono">tree_id → id</td><td>—</td><td>—</td><td>optional</td></tr>
+<tr data-e="2"><td>3</td><td class="mono">fk_node0</td><td class="mono">public.node0</td><td class="mono">public.node1</td><td class="mono">next_id → id</td><td>—</td><td>—</td><td>optional</td></tr>
+<tr data-e="3"><td>4</td><td class="mono">fk_node1</td><td class="mono">public.node1</td><td class="mono">public.node2</td><td class="mono">next_id → id</td><td>—</td><td>—</td><td>optional</td></tr>
+<tr data-e="4"><td>5</td><td class="mono">fk_node2</td><td class="mono">public.node2</td><td class="mono">public.node3</td><td class="mono">next_id → id</td><td>—</td><td>—</td><td>optional</td></tr>
+<tr data-e="5"><td>6</td><td class="mono">fk_node3</td><td class="mono">public.node3</td><td class="mono">public.node4</td><td class="mono">next_id → id</td><td>—</td><td>—</td><td>optional</td></tr>
+<tr data-e="6"><td>7</td><td class="mono">fk_node4</td><td class="mono">public.node4</td><td class="mono">public.node0</td><td class="mono">next_id → id</td><td>—</td><td>—</td><td>optional</td></tr>
+<tr data-e="7"><td>8</td><td class="mono">fk_tree_parent</td><td class="mono">public.tree</td><td class="mono">public.tree</td><td class="mono">parent_id → id</td><td>—</td><td>—</td><td>self reference</td></tr>
+</tbody>
+</table>
+</div>
+</section>
+<script type="application/json" id="data">{"tables":7,"relations":8,"hasData":true,"source":"postgresql","rings":true,"rowsNote":"no data captured","outsideNote":"not in this catalog","off":[],"nodes":[{"i":0,"name":"public.child","schema":"public","cap":true,"rows":40},{"i":1,"name":"public.node0","schema":"public","cap":true,"rows":10,"g":1},{"i":2,"name":"public.node1","schema":"public","cap":true,"rows":11,"g":1},{"i":3,"name":"public.node2","schema":"public","cap":true,"rows":12,"g":1},{"i":4,"name":"public.node3","schema":"public","cap":true,"rows":13,"g":1},{"i":5,"name":"public.node4","schema":"public","cap":true,"rows":14,"g":1},{"i":6,"name":"public.tree","schema":"public","cap":true,"rows":220},{"i":7,"name":"reports.missing","schema":"reports","cap":false}],"edges":[{"i":0,"c":0,"p":7,"name":"fk_child_missing","label":"other_id \u2192 reports.missing.id","from":"public.child","to":"reports.missing","cols":["other_id"],"refs":["id"],"mand":false,"self":false,"one":false,"exact":false},{"i":1,"c":0,"p":6,"name":"fk_child_tree","label":"tree_id \u2192 public.tree.id","from":"public.child","to":"public.tree","cols":["tree_id"],"refs":["id"],"mand":false,"self":false,"one":false,"exact":false},{"i":2,"c":1,"p":2,"name":"fk_node0","label":"next_id \u2192 public.node1.id","from":"public.node0","to":"public.node1","cols":["next_id"],"refs":["id"],"mand":false,"self":false,"one":false,"exact":false},{"i":3,"c":2,"p":3,"name":"fk_node1","label":"next_id \u2192 public.node2.id","from":"public.node1","to":"public.node2","cols":["next_id"],"refs":["id"],"mand":false,"self":false,"one":false,"exact":false},{"i":4,"c":3,"p":4,"name":"fk_node2","label":"next_id \u2192 public.node3.id","from":"public.node2","to":"public.node3","cols":["next_id"],"refs":["id"],"mand":false,"self":false,"one":false,"exact":false},{"i":5,"c":4,"p":5,"name":"fk_node3","label":"next_id \u2192 public.node4.id","from":"public.node3","to":"public.node4","cols":["next_id"],"refs":["id"],"mand":false,"self":false,"one":false,"exact":false},{"i":6,"c":5,"p":1,"name":"fk_node4","label":"next_id \u2192 public.node0.id","from":"public.node4","to":"public.node0","cols":["next_id"],"refs":["id"],"mand":false,"self":false,"one":false,"exact":false},{"i":7,"c":6,"p":6,"name":"fk_tree_parent","label":"parent_id \u2192 public.tree.id","from":"public.tree","to":"public.tree","cols":["parent_id"],"refs":["id"],"mand":false,"self":true,"one":false,"exact":false}],"details":[{"i":0,"name":"public.child","cap":true,"rows":40,"outE":[0,1],"inE":[],"nei":[6,7],"hop2":[],"members":[],"cols":[{"name":"id","logicalType":"integer","nullable":false,"pk":true,"fk":false,"refd":false},{"name":"tree_id","logicalType":"integer","nullable":false,"pk":false,"fk":false,"refd":false}],"pk":{"name":"child_pkey","cols":["id"]},"uq":[],"idx":[],"ck":[]},{"i":1,"name":"public.node0","cap":true,"rows":10,"outE":[2],"inE":[6],"nei":[2,5],"hop2":[3,4],"g":1,"members":["public.node1","public.node2","public.node3","public.node4"],"cols":[{"name":"id","logicalType":"integer","nullable":false,"pk":true,"fk":false,"refd":false},{"name":"next_id","logicalType":"integer","nullable":false,"pk":false,"fk":false,"refd":false}],"pk":{"name":"node0_pkey","cols":["id"]},"uq":[],"idx":[],"ck":[]},{"i":2,"name":"public.node1","cap":true,"rows":11,"outE":[3],"inE":[2],"nei":[1,3],"hop2":[4,5],"g":1,"members":["public.node0","public.node2","public.node3","public.node4"],"cols":[{"name":"id","logicalType":"integer","nullable":false,"pk":true,"fk":false,"refd":false},{"name":"next_id","logicalType":"integer","nullable":false,"pk":false,"fk":false,"refd":false}],"pk":{"name":"node1_pkey","cols":["id"]},"uq":[],"idx":[],"ck":[]},{"i":3,"name":"public.node2","cap":true,"rows":12,"outE":[4],"inE":[3],"nei":[2,4],"hop2":[1,5],"g":1,"members":["public.node0","public.node1","public.node3","public.node4"],"cols":[{"name":"id","logicalType":"integer","nullable":false,"pk":true,"fk":false,"refd":false},{"name":"next_id","logicalType":"integer","nullable":false,"pk":false,"fk":false,"refd":false}],"pk":{"name":"node2_pkey","cols":["id"]},"uq":[],"idx":[],"ck":[]},{"i":4,"name":"public.node3","cap":true,"rows":13,"outE":[5],"inE":[4],"nei":[3,5],"hop2":[1,2],"g":1,"members":["public.node0","public.node1","public.node2","public.node4"],"cols":[{"name":"id","logicalType":"integer","nullable":false,"pk":true,"fk":false,"refd":false},{"name":"next_id","logicalType":"integer","nullable":false,"pk":false,"fk":false,"refd":false}],"pk":{"name":"node3_pkey","cols":["id"]},"uq":[],"idx":[],"ck":[]},{"i":5,"name":"public.node4","cap":true,"rows":14,"outE":[6],"inE":[5],"nei":[1,4],"hop2":[2,3],"g":1,"members":["public.node0","public.node1","public.node2","public.node3"],"cols":[{"name":"id","logicalType":"integer","nullable":false,"pk":true,"fk":false,"refd":false},{"name":"next_id","logicalType":"integer","nullable":false,"pk":false,"fk":false,"refd":false}],"pk":{"name":"node4_pkey","cols":["id"]},"uq":[],"idx":[],"ck":[]},{"i":6,"name":"public.tree","cap":true,"rows":220,"outE":[7],"inE":[1,7],"nei":[0],"hop2":[7],"members":[],"cols":[{"name":"id","logicalType":"integer","nullable":false,"pk":true,"fk":false,"refd":false},{"name":"parent_id","logicalType":"integer","nullable":false,"pk":false,"fk":false,"refd":false}],"pk":{"name":"tree_pkey","cols":["id"]},"uq":[],"idx":[],"ck":[]},{"i":7,"name":"reports.missing","cap":false,"outE":[],"inE":[0],"nei":[0],"hop2":[6],"members":[],"cols":[],"uq":[],"idx":[],"ck":[]}],"chips":[{"i":0,"kind":"Schema","label":"public"},{"i":1,"kind":"CyclicGroup","label":"\u21BA 5"}],"search":[{"n":0,"field":"Schema","text":"public"},{"n":0,"field":"Table","text":"child"},{"n":0,"field":"Column","text":"id"},{"n":0,"field":"Column","text":"tree_id"},{"n":1,"field":"Schema","text":"public"},{"n":1,"field":"Table","text":"node0"},{"n":1,"field":"Column","text":"id"},{"n":1,"field":"Column","text":"next_id"},{"n":2,"field":"Schema","text":"public"},{"n":2,"field":"Table","text":"node1"},{"n":2,"field":"Column","text":"id"},{"n":2,"field":"Column","text":"next_id"},{"n":3,"field":"Schema","text":"public"},{"n":3,"field":"Table","text":"node2"},{"n":3,"field":"Column","text":"id"},{"n":3,"field":"Column","text":"next_id"},{"n":4,"field":"Schema","text":"public"},{"n":4,"field":"Table","text":"node3"},{"n":4,"field":"Column","text":"id"},{"n":4,"field":"Column","text":"next_id"},{"n":5,"field":"Schema","text":"public"},{"n":5,"field":"Table","text":"node4"},{"n":5,"field":"Column","text":"id"},{"n":5,"field":"Column","text":"next_id"},{"n":6,"field":"Schema","text":"public"},{"n":6,"field":"Table","text":"tree"},{"n":6,"field":"Column","text":"id"},{"n":6,"field":"Column","text":"parent_id"},{"n":7,"field":"Schema","text":"reports"},{"n":7,"field":"Table","text":"missing"},{"n":0,"field":"Constraint","text":"fk_child_missing"},{"n":0,"field":"Constraint","text":"fk_child_tree"},{"n":1,"field":"Constraint","text":"fk_node0"},{"n":2,"field":"Constraint","text":"fk_node1"},{"n":3,"field":"Constraint","text":"fk_node2"},{"n":4,"field":"Constraint","text":"fk_node3"},{"n":5,"field":"Constraint","text":"fk_node4"},{"n":6,"field":"Constraint","text":"fk_tree_parent"}]}</script>
+<script>
+(function () {
+  "use strict";
+
+  var data = JSON.parse(document.getElementById("data").textContent);
+  var svg = document.getElementById("pic");
+  var view = document.getElementById("viewport");
+  var panel = document.getElementById("panel");
+  var hits = document.getElementById("matches");
+  var counts = document.getElementById("counts");
+  var nodes = Array.prototype.slice.call(document.querySelectorAll("#viewport .node"));
+  var edges = Array.prototype.slice.call(document.querySelectorAll("#viewport .edge"));
+  var detailOf = new Map();
+  data.details.forEach(function (detail) { detailOf.set(detail.i, detail); });
+  // The card row holds the words that name a link table; the panel prints them beside the name, so
+  // the detail rows do not repeat a fact the card row already carries (D14.3).
+  var cardOf = new Map();
+  data.nodes.forEach(function (card) { cardOf.set(card.i, card); });
+
+  // The selection the picture was drawn for: the host leaves the tables of a switched-off cluster
+  // out of the picture and out of the layout, so the cards that remain are arranged for the picture
+  // the reader is looking at (T28).
+  var offChips = new Set(data.off || []);
+  var focus = -1;
+  var direction = "both";
+
+  function element(tag, className, text) {
+    var node = document.createElement(tag);
+    if (className) node.className = className;
+    if (text !== undefined && text !== null) node.textContent = text;
+    return node;
+  }
+
+  function rowsPhrase(rows) {
+    if (rows === null || rows === undefined) return data.rowsNote;
+    return rows + (rows === 1 ? " row" : " rows");
+  }
+
+  function caption(field) {
+    if (field === "Table") return "table";
+    if (field === "Column") return "column";
+    if (field === "Constraint") return "constraint";
+    if (field === "Comment") return "comment";
+    return "schema";
+  }
+
+  // What the picture is showing: a card is shown unless a chip switched it off or the picture opened on
+  // a neighbourhood it stands outside. A collapsed group's members count as shown — the supernode over
+  // them is their card — and an arrow is shown only while both of the tables it joins are.
+  function shown(element2) {
+    return !element2.classList.contains("off") && !element2.classList.contains("away");
+  }
+
+  // The chip axes, read from the island so the script names no kind of its own. A table is claimed by
+  // one chip per axis — its schema, the cyclic group it sits in, and the unconnected set — and each
+  // axis filters on its own, so switching a schema off hides every one of its tables even when a
+  // cyclic-group chip also claims them (T27).
+  var chipKind = new Map();
+  data.chips.forEach(function (chip) { chipKind.set(chip.i, chip.kind); });
+
+  function claimsOf(element2) {
+    return (element2.getAttribute("data-c") || "").split(" ").filter(Boolean).map(Number);
+  }
+
+  function axisOn(claims, kind) {
+    var ofKind = claims.filter(function (claim) { return chipKind.get(claim) === kind; });
+    return ofKind.length === 0 || ofKind.some(function (claim) { return !offChips.has(claim); });
+  }
+
+  function updateCounts() {
+    var tables = 0;
+    var relations = 0;
+    nodes.forEach(function (element2) {
+      if (element2.classList.contains("cap") && shown(element2)) tables++;
+    });
+    // Every arrow is written twice — the stroke and the wide transparent band that takes the pointer —
+    // so only the painted path is counted; counting both would double every relation in the header.
+    edges.forEach(function (element2) {
+      if (!element2.classList.contains("pick") && shown(element2)) relations++;
+    });
+    var filtered = tables !== data.tables || relations !== data.relations;
+    counts.textContent = "Showing " + tables + " of " + data.tables + " tables \u00b7 " +
+      relations + " of " + data.relations + " relations" + (filtered ? " \u2014 filtered" : "");
+  }
+
+  function applyChips() {
+    var visible = new Set();
+    nodes.forEach(function (element2) {
+      var claims = claimsOf(element2);
+      var onScreen = axisOn(claims, "Schema")
+        && axisOn(claims, "CyclicGroup")
+        && axisOn(claims, "Unconnected");
+      element2.classList.toggle("off", !onScreen);
+      if (onScreen) visible.add(Number(element2.getAttribute("data-n")));
+    });
+    edges.forEach(function (element2) {
+      var edge = data.edges[Number(element2.getAttribute("data-e"))];
+      element2.classList.toggle("off", !visible.has(edge.c) || !visible.has(edge.p));
+    });
+    // A collapsed group is drawn as one box over its members, so the box follows them: a schema the
+    // reader switched off leaves no labelled box standing over an empty part of the picture (T27).
+    Array.prototype.forEach.call(document.querySelectorAll("#viewport .super"), function (element2) {
+      var group = element2.getAttribute("data-g");
+      var anyMember = false;
+      nodes.forEach(function (card) {
+        if (card.getAttribute("data-m") === group && !card.classList.contains("off")) anyMember = true;
+      });
+      element2.classList.toggle("off", !anyMember);
+    });
+    updateCounts();
+  }
+
+  function applyDirection() {
+    edges.forEach(function (element2) {
+      var edge = data.edges[Number(element2.getAttribute("data-e"))];
+      var shown = true;
+      if (focus >= 0 && direction === "out") shown = edge.c === focus;
+      if (focus >= 0 && direction === "in") shown = edge.p === focus;
+      element2.classList.toggle("dim", focus >= 0 && !shown);
+    });
+  }
+
+  function clearSelection() {
+    focus = -1;
+    nodes.forEach(function (element2) { element2.classList.remove("hot"); });
+    edges.forEach(function (element2) { element2.classList.remove("hot", "dim"); });
+    Array.prototype.forEach.call(document.querySelectorAll(".register tbody tr"), function (row) {
+      row.classList.remove("hot");
+    });
+  }
+
+  function highlightEdge(index) {
+    clearSelection();
+    edges.forEach(function (element2) {
+      if (Number(element2.getAttribute("data-e")) === index) element2.classList.add("hot");
+    });
+    var edge = data.edges[index];
+    panel.textContent = "";
+    panel.appendChild(element("h2", null, edge.name || "(unnamed constraint)"));
+    panel.appendChild(element("p", "meta", edge.from + " \u2192 " + edge.to));
+    panel.appendChild(element("p", null, edge.label));
+    if (edge.self) panel.appendChild(element("p", "meta", "the table points at itself"));
+    panel.appendChild(element("p", "meta", parentText(edge)));
+  }
+
+  // What the constraint says about the child end: how many child rows may name one parent row, and
+  // whether the child row may be absent at all. A key of the child that covers exactly the referencing
+  // columns is the only proof the catalog carries, so a constraint it cannot prove keeps the fork
+  // (D14.1, D14.2).
+  function parentText(edge) {
+    if (edge.one) {
+      return edge.exact
+        ? "exactly one child row names each parent"
+        : "at most one child row names each parent";
+    }
+    return edge.mand ? "the child row cannot lose its parent" : "the child row may have no parent";
+  }
+
+  // What a constraint does to the row that points through it. Two constraints can join the same
+  // columns of the same pair of tables — the catalog names them apart and nothing else does — so the
+  // name and the rule are printed on the row, not hidden behind the click that selects it.
+  function ruleText(edge) {
+    var parts = [];
+    if (edge.del) parts.push("on delete " + edge.del.toLowerCase());
+    if (edge.upd) parts.push("on update " + edge.upd.toLowerCase());
+    parts.push(parentText(edge));
+    return parts.join(" \u00b7 ");
+  }
+
+  // The label ends in the delete action when the constraint states one, and the row prints that
+  // action on its own line already: the columns text stops where the action begins, so no fact is
+  // stated twice on one row.
+  function columnText(edge) {
+    var at = edge.label.indexOf(" on delete: ");
+    return at < 0 ? edge.label : edge.label.substring(0, at);
+  }
+
+  function edgeList(title, indexes) {
+    if (indexes.length === 0) return;
+    panel.appendChild(element("h3", null, title + " (" + indexes.length + ")"));
+    var list = element("ul", "rels");
+    indexes.forEach(function (edgeIndex) {
+      var edge = data.edges[edgeIndex];
+      var item = element("li");
+      var button = element("button", "rel");
+      button.setAttribute("data-e", String(edge.i));
+      button.appendChild(element("b", "mono", edge.name || "(unnamed constraint)"));
+      button.appendChild(element("span", "mono", columnText(edge)));
+      button.appendChild(element("span", "note", ruleText(edge)));
+      item.appendChild(button);
+      list.appendChild(item);
+    });
+    panel.appendChild(list);
+  }
+
+  // The table's own definitions: its key, its unique constraints, its indexes by the columns they
+  // cover, and its check constraints by their expressions. The panel states them here so that reading a
+  // table never means leaving the document for a JSON file (D10). A table the catalog does not hold has
+  // none of this and gets no heading at all.
+  function definitionList(detail) {
+    var rows = [];
+    if (detail.pk) {
+      rows.push({ name: detail.pk.name, what: "primary key (" + detail.pk.cols.join(", ") + ")" });
+    }
+    (detail.uq || []).forEach(function (key) {
+      rows.push({ name: key.name, what: "unique (" + key.cols.join(", ") + ")" });
+    });
+    (detail.idx || []).forEach(function (index) {
+      // The columns are the fact a reader wants; the engine's own statement is printed only where the
+      // folder states no columns, so a reader who has the key is not asked to read SQL for it and one
+      // who has not still finds the only place the catalog wrote it down.
+      var known = index.cols && index.cols.length > 0;
+      rows.push({
+        name: index.name,
+        what: (known ? "index (" + index.cols.join(", ") + ")" : "index")
+          + (index.unique ? " \u00b7 unique" : ""),
+        text: known ? null : index.def,
+      });
+    });
+    (detail.ck || []).forEach(function (check) {
+      rows.push({ name: check.name, what: "check", text: check.text });
+    });
+
+    if (rows.length === 0) return;
+    panel.appendChild(element("h3", null, "Definition (" + rows.length + ")"));
+    var list = element("ul", "defs");
+    rows.forEach(function (row) {
+      var item = element("li", "def");
+      item.appendChild(element("b", "mono", row.name));
+      item.appendChild(element("span", "note", row.what));
+      if (row.text) item.appendChild(element("div", "mono", row.text));
+      list.appendChild(item);
+    });
+    panel.appendChild(list);
+  }
+
+  // The table's name, and the words that name it as a link between two others when the analysis
+  // inferred one. The words are marked as the inference they are: no engine declares many-to-many,
+  // so the picture names the table together with the fact that the name is derived (D14.3).
+  function titleOf(detail, card) {
+    return card && card.join
+      ? detail.name + " \u00b7 " + card.join + " \u2014 inferred"
+      : detail.name;
+  }
+
+  function renderPanel(index) {
+    var detail = detailOf.get(index);
+    if (!detail) return;
+    panel.textContent = "";
+    panel.appendChild(element("h2", null, titleOf(detail, cardOf.get(index))));
+    panel.appendChild(element("p", "meta", detail.cap ? rowsPhrase(detail.rows) : data.outsideNote));
+    if (detail.g !== null && detail.g !== undefined) {
+      panel.appendChild(element("p", "meta",
+        "cyclic group " + detail.g + ": " + detail.members.length + " tables, this one points back into it"));
+    }
+    var dirs = element("p", "dirs");
+    dirs.appendChild(element("b", null, "\u2192 references " + detail.outE.length));
+    dirs.appendChild(element("b", null, "\u2190 referenced by " + detail.inE.length));
+    panel.appendChild(dirs);
+
+    if (detail.cols.length > 0) {
+      var table = element("table", "columns");
+      var head = element("tr");
+      ["column", "type", "null", "pk", "fk", "ref"].forEach(function (label) {
+        head.appendChild(element("th", null, label));
+      });
+      table.appendChild(head);
+      detail.cols.forEach(function (column) {
+        var row = element("tr");
+        var name = element("td", "mono", column.name);
+        if (column.comment) name.appendChild(element("div", "note", column.comment));
+        row.appendChild(name);
+        row.appendChild(element("td", null, column.logicalType));
+        row.appendChild(element("td", null, column.nullable ? "null" : "not null"));
+        row.appendChild(element("td", null, column.pk ? "pk" : ""));
+        row.appendChild(element("td", null, column.fk ? "declares" : ""));
+        row.appendChild(element("td", null, column.refd ? "referenced" : ""));
+        table.appendChild(row);
+      });
+      panel.appendChild(table);
+    }
+
+    definitionList(detail);
+
+    edgeList("\u2192 References", detail.outE);
+    edgeList("\u2190 Referenced by", detail.inE);
+  }
+
+  function focusNode(index) {
+    clearSelection();
+    focus = index;
+    nodes.forEach(function (element2) {
+      element2.classList.toggle("hot", Number(element2.getAttribute("data-n")) === index);
+    });
+    edges.forEach(function (element2) {
+      var edge = data.edges[Number(element2.getAttribute("data-e"))];
+      element2.classList.toggle("hot", edge.c === index || edge.p === index);
+    });
+    applyDirection();
+    renderPanel(index);
+  }
+
+  function toggleGroup(number) {
+    var members = 0;
+    nodes.forEach(function (element2) {
+      if (Number(element2.getAttribute("data-m")) === number) {
+        element2.classList.toggle("hidden", !element2.classList.contains("hidden"));
+        members++;
+      }
+    });
+    if (members === 0) return;
+    document.querySelectorAll("#viewport .super").forEach(function (element2) {
+      if (Number(element2.getAttribute("data-g")) === number) element2.classList.toggle("hidden");
+    });
+  }
+
+  // The card a table is drawn with, by the index the island states. The map above is the island's own
+  // lookup and this one answers with an element, so the two cannot share a name: a function and a
+  // variable of one name leave the map where the reveal calls the function, and the call throws — a
+  // search that reports a match and then shows nothing at all.
+  function cardElement(index) {
+    var found = null;
+    nodes.forEach(function (element2) {
+      if (Number(element2.getAttribute("data-n")) === index) found = element2;
+    });
+    return found;
+  }
+
+  // Where a card stands now, in canvas coordinates: the rectangle the layout drew, carried by however
+  // far the reader has moved it. A card that is not drawn at all has no box, and an arrow to it is
+  // left exactly as the layout routed it.
+  function cardBox(index) {
+    var card = cardElement(index);
+    if (!card) return null;
+    var rect = card.querySelector("rect");
+    if (!rect) return null;
+    var far = carried.get(index) || { x: 0, y: 0 };
+    var left = Number(rect.getAttribute("x")) + far.x;
+    var top = Number(rect.getAttribute("y")) + far.y;
+    var width = Number(rect.getAttribute("width"));
+    var height = Number(rect.getAttribute("height"));
+    return {
+      left: left, top: top, right: left + width, bottom: top + height,
+      cx: left + width / 2, cy: top + height / 2,
+    };
+  }
+
+  // The point on a card's border where a straight line to another card leaves it.
+  function borderPoint(box, towards) {
+    var dx = towards.cx - box.cx;
+    var dy = towards.cy - box.cy;
+    if (dx === 0 && dy === 0) return { x: box.cx, y: box.cy };
+    var halfWidth = (box.right - box.left) / 2;
+    var halfHeight = (box.bottom - box.top) / 2;
+    var reach = Math.min(
+      dx === 0 ? Infinity : halfWidth / Math.abs(dx),
+      dy === 0 ? Infinity : halfHeight / Math.abs(dy));
+    return { x: box.cx + dx * reach, y: box.cy + dy * reach };
+  }
+
+  // A number written into the document: one decimal is finer than the picture is drawn at and keeps
+  // the markup short, and it is the same rounding the writers use.
+  function drawable(value) {
+    return Math.round(value * 10) / 10;
+  }
+
+  // A card the reader carries is drawn where they put it, and the arrows that join it are drawn again
+  // from box to box: a route that was turned in a corridor of the layout means nothing once the card
+  // it was turned for has moved, so the arrow states the same fact the shortest way — this table, that
+  // table — and the panel and the register keep saying everything else. No other card, arrow or line
+  // of the picture is touched.
+  function reflow(index) {
+    // A ringed picture re-deals every arrow instead of drawing only the carried card's: the point an end
+    // holds on a border belongs to the whole fan that faces along that side, so moving one table changes
+    // where its neighbours' heads sit as well, and redrawing one arrow box-to-box would fuse its head
+    // with the heads the dealing spread it clear of in the first place.
+    if (inRings) { drawStraight(); return; }
+    (edgesOfNode.get(index) || []).forEach(function (edgeIndex) {
+      var edge = data.edges[edgeIndex];
+      var from = cardBox(edge.c);
+      var to = cardBox(edge.p);
+      if (!from || !to) return;
+      var start = borderPoint(from, to);
+      var end = borderPoint(to, from);
+      setEdge(edgeIndex,
+        "M " + drawable(start.x) + " " + drawable(start.y) + " L " + drawable(end.x) + " " + drawable(end.y),
+        (start.x + end.x) / 2, (start.y + end.y) / 2);
+    });
+  }
+
+  // The route an arrow was served with, and where its label stood, so a card the reader puts back is
+  // served the line it was drawn along — the script has already overwritten it.
+  var routed = new Map();
+  var labelAt = new Map();
+  Array.prototype.forEach.call(document.querySelectorAll("#viewport path[data-e]"), function (element2) {
+    if (element2.classList.contains("pick")) return;
+    routed.set(Number(element2.getAttribute("data-e")), element2.getAttribute("d"));
+  });
+  Array.prototype.forEach.call(document.querySelectorAll("#viewport text.elabel[data-e]"), function (element2) {
+    labelAt.set(Number(element2.getAttribute("data-e")),
+      { x: element2.getAttribute("x"), y: element2.getAttribute("y") });
+  });
+
+  // One arrow, drawn as the path it now is: both the stroke and the wide band that takes the pointer
+  // carry the same geometry, and the label follows the middle of it.
+  function setEdge(edgeIndex, path, middleX, middleY) {
+    Array.prototype.forEach.call(
+      document.querySelectorAll("#viewport path[data-e=\"" + edgeIndex + "\"]"),
+      function (element2) { element2.setAttribute("d", path); });
+    var label = document.querySelector("#viewport text.elabel[data-e=\"" + edgeIndex + "\"]");
+    if (!label) return;
+    label.setAttribute("x", String(drawable(middleX)));
+    label.setAttribute("y", String(drawable(middleY)));
+  }
+
+  // Putting a card back is the reader's other gesture: it takes the place the layout gave it, and the
+  // arrows drawn for it are served again exactly as the routing wrote them — or, when the card at the
+  // other end is still where the reader carried it, drawn again from box to box.
+  function release(index) {
+    carried.delete(index);
+    var card = cardElement(index);
+    if (card) card.removeAttribute("transform");
+    shiftLoops(index, { x: 0, y: 0 });
+    // A ringed picture is dealt over the boxes the cards stand in now, so putting one card back touches
+    // every arrow: while another card is still held out of its place the whole picture is dealt again,
+    // and once the last card is home the arrows take back the routes the engine served them — the bows
+    // included, which a gesture on the page cannot work out again.
+    if (inRings) {
+      if (carried.size > 0) { drawStraight(); return; }
+      routed.forEach(function (path, edgeIndex) {
+        var at = labelAt.get(edgeIndex);
+        if (at) setEdge(edgeIndex, path, Number(at.x), Number(at.y));
+      });
+      return;
+    }
+    (edgesOfNode.get(index) || []).forEach(function (edgeIndex) {
+      var edge = data.edges[edgeIndex];
+      var other = edge.c === index ? edge.p : edge.c;
+      if (carried.has(other)) { reflow(index); return; }
+      var path = routed.get(edgeIndex);
+      var at = labelAt.get(edgeIndex);
+      if (path !== undefined && at) setEdge(edgeIndex, path, Number(at.x), Number(at.y));
+    });
+  }
+
+  // Which arrangement the engine served. Rings around one middle table leave the space between the cards
+  // empty on purpose, and an arrow of such a picture is drawn the shortest way across it; bands pack the
+  // same cards in a lattice and route their arrows in the corridors between them. The reader's own gesture
+  // has to answer for whichever it was given, so a card carried by hand is drawn again in the arrangement
+  // the document arrived in and not in the other one.
+  var inRings = data.rings === true;
+
+  // The least air two ends need on one side of a card, and the border's own inset: the layout keeps the
+  // same distance between the points it deals, and the inset keeps a head off the card's corner.
+  var PortStep = 14;
+  var PortInset = 8;
+
+  // The side of a card an arrow leaves from: the side that faces the table it goes to. A line drawn to
+  // the border the centre-to-centre line happens to cross can leave through a side that looks the other
+  // way from its own target, which reads as an arrow pointing at the wrong table.
+  function sideToward(box, towards) {
+    var dx = towards.cx - box.cx;
+    var dy = towards.cy - box.cy;
+    if (Math.abs(dx) >= Math.abs(dy)) return dx >= 0 ? "right" : "left";
+    return dy >= 0 ? "bottom" : "top";
+  }
+
+  function addEnd(ends, edge, node, box, other) {
+    var side = sideToward(box, other);
+    var crossed = borderPoint(box, other);
+    if (!ends.has(node)) ends.set(node, []);
+    ends.get(node).push({
+      i: edge.i, node: node, side: side,
+      natural: side === "left" || side === "right" ? crossed.y - box.top : crossed.x - box.left,
+    });
+  }
+
+  // Every arrow of a ringed picture, drawn the shortest way between the points of the border its ends were
+  // dealt. Dealing is what keeps a fan apart: thirteen arrows let go at the one place a centre line
+  // crosses a border are drawn as one thick stroke, and no reader can say which head belongs to which
+  // constraint — so each side is given to the ends that face along it, spread the width of a mark apart
+  // and centred on the middle of the side, and the card's own border was drawn wide enough to hold them.
+  // It is the layout's own rule (GraphEdgePorts) read back onto the page, which is why the whole picture
+  // is dealt at once: an end cannot be placed until the neighbours it shares a side with are known.
+  function drawStraight() {
+    var ends = new Map();
+    data.edges.forEach(function (edge) {
+      if (edge.c === edge.p) return;
+      var from = cardBox(edge.c);
+      var to = cardBox(edge.p);
+      if (!from || !to) return;
+      addEnd(ends, edge, edge.c, from, to);
+      addEnd(ends, edge, edge.p, to, from);
+    });
+
+    var pointOf = new Map();
+    ends.forEach(function (list, index) {
+      var box = cardBox(index);
+      if (!box) return;
+      var sides = new Map();
+      list.forEach(function (end) {
+        var on = sides.get(end.side) || [];
+        on.push(end);
+        sides.set(end.side, on);
+      });
+
+      sides.forEach(function (on, side) {
+        on.sort(function (first, second) { return first.natural - second.natural || first.i - second.i; });
+        var across = side === "top" || side === "bottom";
+        var length = across ? box.right - box.left : box.bottom - box.top;
+        var span = Math.max(0, length - PortInset * 2);
+        var step = on.length > 1 ? Math.min(PortStep, span / (on.length - 1)) : 0;
+        var first = Math.max(PortInset, (length - step * (on.length - 1)) / 2);
+        on.forEach(function (end, position) {
+          var along = first + step * position;
+          pointOf.set(end.i + ":" + end.node, {
+            x: across ? box.left + along : (side === "left" ? box.left : box.right),
+            y: across ? (side === "top" ? box.top : box.bottom) : box.top + along,
+          });
+        });
+      });
+    });
+
+    data.edges.forEach(function (edge) {
+      var from = pointOf.get(edge.i + ":" + edge.c);
+      var to = pointOf.get(edge.i + ":" + edge.p);
+      if (!from || !to) return;
+      setEdge(edge.i,
+        "M " + drawable(from.x) + " " + drawable(from.y) + " L " + drawable(to.x) + " " + drawable(to.y),
+        (from.x + to.x) / 2, (from.y + to.y) / 2);
+    });
+  }
+
+  // A hit may name a table the picture is not showing: outside the neighbourhood it opened on,
+  // switched off by a chip, or folded into a collapsed cyclic group. Selecting the hit has to show
+  // that table — a search whose result selects a card nobody can see reads as a search that does
+  // nothing at all — so the three ways of hiding a card are undone before the card is selected.
+  function showCard(index) {
+    var card = cardElement(index);
+    if (!card) return;
+
+    // The chips own their filter, so a chip that hides this table is switched back on rather than the
+    // card's own class being removed behind the chip's back: the next chip click must not undo this.
+    // Every axis the table is claimed by has to be on again, or the reveal would leave it hidden.
+    var switched = false;
+    claimsOf(card).forEach(function (claim) {
+      var chip = document.querySelector("#chips .chip[data-c=\"" + claim + "\"]");
+      if (chip && !chip.classList.contains("on")) {
+        setChip(chip, true);
+        switched = true;
+      }
+    });
+    if (switched) applyChips();
+
+    card.classList.remove("away");
+
+    if (card.classList.contains("hidden")) {
+      var group = card.getAttribute("data-m");
+      var supernode = group === null ? null
+        : document.querySelector("#viewport .super[data-g=\"" + group + "\"]");
+      if (supernode && !supernode.classList.contains("hidden")) {
+        toggleGroup(Number(group));
+      } else {
+        card.classList.remove("hidden");
+      }
+    }
+
+    // An arrow is shown only while both of its tables are, so the arrows this card joins to tables the
+    // picture already shows come back with it; the ones to tables still out of sight stay hidden rather
+    // than pointing at blank space.
+    edges.forEach(function (element2) {
+      var edge = data.edges[Number(element2.getAttribute("data-e"))];
+      var other = edge.c === index ? edge.p : edge.p === index ? edge.c : null;
+      if (other === null) return;
+      var neighbour = cardElement(other);
+      if (neighbour && shown(neighbour)) element2.classList.remove("away");
+    });
+
+    updateCounts();
+    focusNode(index);
+    bringIntoView(index);
+  }
+
+  // A revealed table can be outside the part of the picture on screen: the layout of a large catalog is
+  // far wider and taller than the stage it is clipped to. Taking the card to the middle is what "the
+  // picture shows it" means, and the scale is raised to the document's own size because below 100% a
+  // card's name is smaller than the text it was drawn with. A card the reader can already see is left
+  // where they put it. The move is measured on the screen, not read from the card's coordinates: the
+  // stage shows whatever part of the picture it was laid out over, so only the two boxes say where the
+  // card is now.
+  function bringIntoView(index) {
+    var card = cardElement(index);
+    if (!card) return;
+    var stage = svg.parentNode.getBoundingClientRect();
+    var canvas = svg.getBoundingClientRect();
+    var left = Math.max(stage.left, canvas.left);
+    var top = Math.max(stage.top, canvas.top);
+    var right = Math.min(stage.right, canvas.right);
+    var bottom = Math.min(stage.bottom, canvas.bottom);
+    var box = card.getBoundingClientRect();
+    if (box.left >= left && box.top >= top && box.right <= right && box.bottom <= bottom) return;
+    taken = true;
+    scale = Math.max(scale, 1);
+    applyTransform();
+
+    // The picture is painted on the svg's own box, which is the canvas, so a shift that carries a card
+    // past the canvas paints nothing at all: the middle a reveal aims at is the middle of the part of the
+    // canvas the stage can show, not the middle of the window.
+    box = card.getBoundingClientRect();
+    shiftX += (left + right) / 2 - (box.left + box.width / 2);
+    shiftY += (top + bottom) / 2 - (box.top + box.height / 2);
+    applyTransform();
+  }
+
+  function runSearch(query) {
+    while (hits.firstChild) hits.removeChild(hits.firstChild);
+    var needle = query.trim().toLowerCase();
+    if (!needle) { hits.hidden = true; return; }
+    var matches = data.search.filter(function (entry) {
+      return entry.text.toLowerCase().indexOf(needle) >= 0;
+    });
+    hits.hidden = false;
+    hits.appendChild(element("p", "hits-title",
+      matches.length === 1 ? "1 match" : matches.length + " matches"));
+    if (matches.length === 0) {
+      hits.appendChild(element("p", "meta", "no table, column, constraint or comment carries that word"));
+      return;
+    }
+    matches.forEach(function (entry) {
+      var row = element("button", "hit");
+      row.setAttribute("data-n", String(entry.n));
+      row.appendChild(element("b", null, data.nodes[entry.n].name));
+      row.appendChild(element("span", null, caption(entry.field) + ": " + entry.text));
+      hits.appendChild(row);
+    });
+  }
+
+  var scale = 1;
+  var shiftX = 0;
+  var shiftY = 0;
+  var pointerX = 0;
+  var pointerY = 0;
+  var dragging = false;
+  var travelled = 0;
+  var pressed = null;
+  // The camera belongs to the reader from the moment they take it: a drag, a wheel or a zoom button
+  // ends the document's own placing, so the picture never re-arranges itself under a reader who has
+  // already chosen where to look.
+  var taken = false;
+  // Where the reader has carried a card, by node index. The layout stays the picture's own; this is
+  // the one coordinate a reader may state, and it never travels back into the arrangement.
+  var carried = new Map();
+  var moving = null;
+  // The constraints that meet each table, so a card the reader carries takes its own arrows with it
+  // and leaves every other arrow where the layout drew it.
+  var edgesOfNode = new Map();
+  // A table that names itself is drawn as a ring around its own card, and a ring has no second box to be
+  // routed between: it is carried with the card it belongs to, by the distance the card went.
+  var loopsOfNode = new Map();
+  data.edges.forEach(function (edge) {
+    if (edge.c === edge.p) { addLoopOf(edge.c, edge.i); return; }
+    addEdgeOf(edge.c, edge.i);
+    addEdgeOf(edge.p, edge.i);
+  });
+
+  function addEdgeOf(node, edge) {
+    if (!edgesOfNode.has(node)) edgesOfNode.set(node, []);
+    edgesOfNode.get(node).push(edge);
+  }
+
+  function addLoopOf(node, edge) {
+    if (!loopsOfNode.has(node)) loopsOfNode.set(node, []);
+    loopsOfNode.get(node).push(edge);
+  }
+
+  // The ring keeps the shape the routing drew for it and is carried by the same distance as the card: a
+  // loop left behind would stand around blank canvas the moment the table it names was moved, and the
+  // text it carries is moved with it rather than staying where the routing put it.
+  function shiftLoops(index, far) {
+    (loopsOfNode.get(index) || []).forEach(function (edgeIndex) {
+      var at = labelAt.get(edgeIndex);
+      var label = document.querySelector("#viewport text.elabel[data-e=\"" + edgeIndex + "\"]");
+      if (label && at) {
+        label.setAttribute("x", String(drawable(Number(at.x) + far.x)));
+        label.setAttribute("y", String(drawable(Number(at.y) + far.y)));
+      }
+      Array.prototype.forEach.call(
+        document.querySelectorAll("#viewport path[data-e=\"" + edgeIndex + "\"]"),
+        function (element2) {
+          if (far.x === 0 && far.y === 0) {
+            element2.removeAttribute("transform");
+          } else {
+            element2.setAttribute("transform",
+              "translate(" + drawable(far.x) + "," + drawable(far.y) + ")");
+          }
+        });
+    });
+  }
+
+  function applyTransform() {
+    view.setAttribute("transform",
+      "translate(" + shiftX + "," + shiftY + ") scale(" + scale + ")");
+  }
+
+  // Where the picture stands, read from the address the viewer serves the document at: a filter is a
+  // different picture, never a different place, so the document a chip produces opens where the one
+  // it replaced stood (T28). A copy opened on its own states no camera and keeps opening at its size.
+  function openingCamera() {
+    var query = new URLSearchParams(window.location.search);
+    if (!query.has("s") || !query.has("x") || !query.has("y")) return null;
+    var camera = { s: Number(query.get("s")), x: Number(query.get("x")), y: Number(query.get("y")) };
+    return isFinite(camera.s) && isFinite(camera.x) && isFinite(camera.y) ? camera : null;
+  }
+
+  function applyCamera(camera) {
+    scale = Math.min(4, Math.max(0.02, camera.s));
+    shiftX = camera.x;
+    shiftY = camera.y;
+    applyTransform();
+  }
+
+  // The viewer reads the camera back before it serves the document again, so the place travels through
+  // the host instead of through the one message a document may post (D5). It states three numbers and
+  // nothing else, and a copy opened without a viewer has nobody to ask.
+  window.dbcloneCamera = function () {
+    return { s: scale, x: shiftX, y: shiftY };
+  };
+
+  function zoomAround(factor, clientX, clientY) {
+    taken = true;
+    var box = svg.getBoundingClientRect();
+    var x = clientX - box.left;
+    var y = clientY - box.top;
+    var next = Math.min(4, Math.max(0.12, scale * factor));
+    var ratio = next / scale;
+    shiftX = x - (x - shiftX) * ratio;
+    shiftY = y - (y - shiftY) * ratio;
+    scale = next;
+    applyTransform();
+  }
+
+  function fit() {
+    var stage = svg.parentNode.getBoundingClientRect();
+    var box = pictureBox();
+    if (!box) return;
+    var width = Math.max(1, box.right - box.left);
+    var height = Math.max(1, box.bottom - box.top);
+    placeContent(Math.min(stage.width / width, stage.height / height) * 0.97);
+  }
+
+  // The part of the canvas the reader can actually look at: the cards and the collapsed group boxes on
+  // screen, read off the page and carried back into canvas coordinates with the camera, so the answer
+  // is the same at every zoom and follows a card the reader has carried to another place. A blank
+  // corner of the canvas is not part of it.
+  function pictureBox() {
+    var stage = svg.getBoundingClientRect();
+    var box = null;
+    Array.prototype.forEach.call(document.querySelectorAll("#viewport .node, #viewport .super"), function (element2) {
+      if (!shown(element2) || element2.classList.contains("hidden")) return;
+      var rect = element2.querySelector("rect");
+      if (!rect) return;
+      var painted = rect.getBoundingClientRect();
+      if (painted.width <= 0 || painted.height <= 0) return;
+      var left = (painted.left - stage.left - shiftX) / scale;
+      var top = (painted.top - stage.top - shiftY) / scale;
+      var right = (painted.right - stage.left - shiftX) / scale;
+      var bottom = (painted.bottom - stage.top - shiftY) / scale;
+      box = box === null
+        ? { left: left, top: top, right: right, bottom: bottom }
+        : {
+          left: Math.min(box.left, left), top: Math.min(box.top, top),
+          right: Math.max(box.right, right), bottom: Math.max(box.bottom, bottom),
+        };
+    });
+    return box;
+  }
+
+  // Where the picture goes: the scale asked for, and then either centred in the stage or aligned to its
+  // own top-left corner. The canvas of a large database is many screens across, so the corner the
+  // document used to open on was empty canvas with no table in it — and "100%" put the reader back on
+  // that empty corner (T27). Centring is the answer only while the picture fits: the middle of a
+  // picture taller than the stage is a corridor as often as it is a table, and a reader who asks for
+  // 100% wants the first table, not the middle of nothing.
+  // A ringed picture is the one drawing whose middle is a table by construction: the cards stand on
+  // circles around the middle table, so the corner of its bounding box is empty canvas at any scale and
+  // the picture's own centre is where the reading begins.
+  function placeContent(wanted) {
+    var stage = svg.parentNode.getBoundingClientRect();
+    // A stage the document has not laid out yet measures nothing, and a camera taken against nothing is
+    // wider than nothing on every axis: the picture then lands in the corner with the stage's own blank
+    // white beside it. So a placement is refused until there is a stage to place into, whatever asked for
+    // it — the load and the resize observer take it again once the real size is there.
+    if (stage.width <= 0 || stage.height <= 0) return false;
+    // The picture's box is taken before the scale is: pictureBox reads the page, and the page still shows
+    // the camera the document is leaving, so measuring after the change answers with the picture's size at
+    // the old zoom and places the new one by that stale measure — which puts a fitted picture outside the
+    // stage, blank.
+    var box = pictureBox();
+    // The wheel's floor is where a card stops being readable; a fit is allowed below it, because a
+    // picture that does not fit its stage is not a fit and a reader who asked for one gets all of it.
+    scale = Math.min(4, Math.max(0.02, wanted));
+    if (box === null) {
+      shiftX = 0;
+      shiftY = 0;
+      applyTransform();
+      return true;
+    }
+    var margin = 16;
+    var width = (box.right - box.left) * scale;
+    var height = (box.bottom - box.top) * scale;
+    shiftX = inRings || width <= stage.width
+      ? (stage.width - width) / 2 - box.left * scale
+      : margin - box.left * scale;
+    shiftY = inRings || height <= stage.height
+      ? (stage.height - height) / 2 - box.top * scale
+      : margin - box.top * scale;
+    applyTransform();
+    return true;
+  }
+
+  svg.addEventListener("wheel", function (event) {
+    event.preventDefault();
+    zoomAround(event.deltaY < 0 ? 1.15 : 1 / 1.15, event.clientX, event.clientY);
+  }, { passive: false });
+
+  svg.addEventListener("pointerdown", function (event) {
+    dragging = true;
+    travelled = 0;
+    pressed = event.target;
+    pointerX = event.clientX;
+    pointerY = event.clientY;
+    // A press on a card carries that card; a press anywhere else carries the picture. Where a table
+    // stands is the reader's judgement before it is the layout's, so a card moves by hand and the
+    // arrows that join it follow.
+    moving = event.target.closest ? event.target.closest("#viewport .node") : null;
+    if (moving && (!shown(moving) || moving.classList.contains("hidden"))) moving = null;
+    if (moving) moving.classList.add("moving");
+    svg.classList.add("dragging");
+    svg.setPointerCapture(event.pointerId);
+  });
+
+  svg.addEventListener("pointermove", function (event) {
+    if (!dragging) return;
+    taken = true;
+    travelled += Math.abs(event.clientX - pointerX) + Math.abs(event.clientY - pointerY);
+    var stepX = event.clientX - pointerX;
+    var stepY = event.clientY - pointerY;
+    pointerX = event.clientX;
+    pointerY = event.clientY;
+
+    if (moving) {
+      var index = Number(moving.getAttribute("data-n"));
+      var far = carried.get(index) || { x: 0, y: 0 };
+      far = { x: far.x + stepX / scale, y: far.y + stepY / scale };
+      carried.set(index, far);
+      moving.setAttribute("transform", "translate(" + drawable(far.x) + "," + drawable(far.y) + ")");
+      reflow(index);
+      shiftLoops(index, far);
+      return;
+    }
+
+    shiftX += stepX;
+    shiftY += stepY;
+    applyTransform();
+  });
+
+  function stopDrag(event) {
+    dragging = false;
+    if (moving) moving.classList.remove("moving");
+    moving = null;
+    svg.classList.remove("dragging");
+    if (event && event.pointerId !== undefined) {
+      try { svg.releasePointerCapture(event.pointerId); } catch (ignored) { }
+    }
+  }
+
+  svg.addEventListener("pointerup", stopDrag);
+  svg.addEventListener("pointercancel", stopDrag);
+
+  // A card carried by hand is put back the same way it was moved: pointing at it twice. A picture a
+  // reader has arranged is theirs to undo card by card, without closing the view.
+  svg.addEventListener("dblclick", function (event) {
+    var card = event.target.closest ? event.target.closest("#viewport .node") : null;
+    if (!card) return;
+    var index = Number(card.getAttribute("data-n"));
+    if (!carried.has(index)) return;
+    event.preventDefault();
+    release(index);
+  });
+
+  svg.addEventListener("click", function (event) {
+    // Capturing the pointer hands the pointerup to the svg, and the click that follows is built from
+    // that pair, so its target is the svg even when the press began on a card. The element actually
+    // pressed is remembered at pointerdown instead of read from the event.
+    var target = pressed || event.target;
+    pressed = null;
+    if (travelled > 4) { return; }
+    var supernode = target.closest ? target.closest("[data-g]") : null;
+    if (supernode) { toggleGroup(Number(supernode.getAttribute("data-g"))); return; }
+    var node = target.closest ? target.closest(".node") : null;
+    if (node) { focusNode(Number(node.getAttribute("data-n"))); return; }
+    var edge = target.closest ? target.closest(".edge") : null;
+    if (edge) highlightEdge(Number(edge.getAttribute("data-e")));
+  });
+
+  // The collapsed group's box is reachable with Tab — it states role="button" and tabindex="0" — so
+  // Enter and Space have to expand it: a control that takes the focus and ignores the keyboard is a
+  // button that does not work.
+  svg.addEventListener("keydown", function (event) {
+    if (event.key !== "Enter" && event.key !== " ") return;
+    var supernode = event.target.closest ? event.target.closest("[data-g]") : null;
+    if (!supernode) return;
+    event.preventDefault();
+    toggleGroup(Number(supernode.getAttribute("data-g")));
+  });
+
+  function setChip(chip, on) {
+    chip.classList.toggle("on", on);
+    chip.setAttribute("aria-pressed", on ? "true" : "false");
+    var index = Number(chip.getAttribute("data-c"));
+    if (on) offChips.delete(index); else offChips.add(index);
+  }
+
+  // The picture is drawn again for the clusters that are on: the host re-lays it out, because a
+  // lattice sized for the tables this chip hides is what leaves a hole where they used to stand.
+  // A copy opened outside the viewer has no host, and keeps the class toggle it always had.
+  var host = window.chrome && window.chrome.webview;
+  var redraw = 0;
+
+  function requestRedraw() {
+    if (!host || typeof host.postMessage !== "function") return;
+    clearTimeout(redraw);
+    redraw = setTimeout(function () {
+      host.postMessage(JSON.stringify({ off: Array.from(offChips) }));
+    }, 250);
+  }
+
+  document.getElementById("chips").addEventListener("click", function (event) {
+    var chip = event.target.closest(".chip");
+    if (!chip) return;
+    if (event.altKey || event.shiftKey) {
+      Array.prototype.forEach.call(chip.parentElement.querySelectorAll(".chip"), function (other) {
+        setChip(other, other === chip);
+      });
+    } else {
+      setChip(chip, !chip.classList.contains("on"));
+    }
+    applyChips();
+    requestRedraw();
+  });
+
+  document.getElementById("query").addEventListener("input", function (event) {
+    runSearch(event.target.value);
+  });
+
+  hits.addEventListener("click", function (event) {
+    var row = event.target.closest(".hit");
+    if (row) showCard(Number(row.getAttribute("data-n")));
+  });
+
+  document.querySelectorAll("input[name=direction]").forEach(function (input) {
+    input.addEventListener("change", function () {
+      direction = input.value;
+      applyDirection();
+    });
+  });
+
+  document.getElementById("toolbar").addEventListener("click", function (event) {
+    var button = event.target.closest("button[data-zoom]");
+    if (!button) return;
+    var action = button.getAttribute("data-zoom");
+    var stage = svg.parentNode.getBoundingClientRect();
+    if (action === "in") zoomAround(1.25, stage.left + stage.width / 2, stage.top + stage.height / 2);
+    if (action === "out") zoomAround(1 / 1.25, stage.left + stage.width / 2, stage.top + stage.height / 2);
+    if (action === "fit") { taken = true; fit(); }
+    if (action === "reset") { taken = true; placeContent(1); }
+  });
+
+  var showAll = document.getElementById("showall");
+  if (showAll) {
+    showAll.addEventListener("click", function (event) {
+      nodes.forEach(function (element2) { element2.classList.remove("away"); });
+      edges.forEach(function (element2) { element2.classList.remove("away"); });
+      updateCounts();
+      event.target.hidden = true;
+    });
+  }
+
+  panel.addEventListener("click", function (event) {
+    var button = event.target.closest("button.rel");
+    if (button) highlightEdge(Number(button.getAttribute("data-e")));
+  });
+
+  document.querySelector(".register tbody").addEventListener("click", function (event) {
+    var row = event.target.closest("tr[data-e]");
+    if (!row) return;
+    Array.prototype.forEach.call(document.querySelectorAll(".register tbody tr"), function (other) {
+      other.classList.remove("hot");
+    });
+    row.classList.add("hot");
+    highlightEdge(Number(row.getAttribute("data-e")));
+  });
+
+  applyChips();
+  // The document opens at its own size with the picture placed in the stage, not on the canvas origin:
+  // the picture is laid out across a canvas many screens wide, so the corner it used to open on was
+  // empty canvas and no table at all. Fitting on open would answer with a thumbnail of a large
+  // database, which is why the opening scale is the document's own and "Fit" stays a button (T27).
+  // A picture the viewer serves again for another cluster selection opens where the reader left the
+  // one it replaces: switching a chip changes what is drawn, never where the reader is looking.
+  //
+  // The stage has no size until the document is laid out, so a place taken before then is refused by
+  // placeContent itself rather than written — and taken again as soon as the load event has passed and
+  // on every resize that follows, until the reader takes the camera. Placing means the scale and the
+  // pan both: a picture left at the canvas origin with the stage's blank white beside it is the one
+  // thing an opening view may not be, whatever its size.
+  function placeOnce() {
+    if (taken) return;
+    var stage = svg.parentNode.getBoundingClientRect();
+    if (stage.width <= 0 || stage.height <= 0) return;
+    placeContent(scale);
+  }
+
+  // A place read from the picture a chip replaces is not this picture's place: a selection is drawn
+  // from another arrangement, so the same pan can point at canvas no card stands on — the reader is
+  // then looking at an empty part of a picture that has none of the tables they asked for. A place
+  // that shows no card is refused the way an unreadable camera is, and the picture is placed at the
+  // zoom it kept.
+  function onStage() {
+    var stage = svg.parentNode.getBoundingClientRect();
+    var box = pictureBox();
+    if (!box || stage.width <= 0 || stage.height <= 0) return true;
+    return shiftX + box.right * scale > 0 && shiftY + box.bottom * scale > 0
+      && shiftX + box.left * scale < stage.width && shiftY + box.top * scale < stage.height;
+  }
+
+  var opening = openingCamera();
+  if (opening) {
+    applyCamera(opening);
+    if (!onStage()) placeContent(scale);
+  } else {
+    placeContent(1);
+    window.addEventListener("load", placeOnce, { once: true });
+    window.addEventListener("resize", placeOnce);
+    if (typeof ResizeObserver === "function") new ResizeObserver(placeOnce).observe(svg.parentNode);
+  }
+}());
+</script>
+</body>
+</html>

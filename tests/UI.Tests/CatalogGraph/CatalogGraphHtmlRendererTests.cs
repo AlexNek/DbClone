@@ -123,8 +123,7 @@ public sealed class CatalogGraphHtmlRendererTests
         // Assert — the stage takes the height the window has left instead of a guessed offset, and both
         // the opening view and "100%" centre the visible cards in it rather than moving the canvas
         // origin into the stage's corner.
-        rendered.Document.Should().Contain("function placeContent(wanted)")
-            .And.Contain("if (action === \"reset\") placeContent(1);");
+        rendered.Document.Should().Contain("function placeContent(wanted)");
         rendered.Document.Should().NotContain("calc(100vh");
 
         // The place is taken again once the document has been laid out and on every resize, and a stage
@@ -132,9 +131,22 @@ public sealed class CatalogGraphHtmlRendererTests
         // axis look too wide for the stage and parked a picture that fits in its corner, beside blank
         // stage. No caller can reach that state now, because the refusal is inside placeContent itself.
         rendered.Document.Should().Contain("if (stage.width <= 0 || stage.height <= 0) return false;")
-            .And.Contain("window.addEventListener(\"load\", keepCentred, { once: true });")
-            .And.Contain("window.addEventListener(\"resize\", keepCentred);")
-            .And.Contain("new ResizeObserver(keepCentred)");
+            .And.Contain("window.addEventListener(\"load\", placeOnce, { once: true });")
+            .And.Contain("window.addEventListener(\"resize\", placeOnce);")
+            .And.Contain("new ResizeObserver(placeOnce)");
+
+        // Placing means the scale and the pan both, whatever the picture's size: the document used to
+        // retake the place only while the picture fitted the stage, so a large catalog kept the canvas
+        // origin as its place — the picture drawn from x0/y0 with the stage's blank white beside it.
+        rendered.Document.Should().Contain("if (taken) return;")
+            .And.NotContain("if ((box.right - box.left) * scale > stage.width) return;");
+
+        // The camera belongs to the reader once they take it: a drag, a wheel or a zoom button ends the
+        // document's own placing, so the picture is never re-arranged under a reader who has chosen
+        // where to look. "Fit" and "100%" are the two buttons that state a place of their own.
+        rendered.Document.Should().Contain("taken = true;").And.Contain("var taken = false;")
+            .And.Contain("if (action === \"fit\") { taken = true; fit(); }")
+            .And.Contain("if (action === \"reset\") { taken = true; placeContent(1); }");
 
         // A picture larger than the stage is aligned to its own top-left corner instead of centred, so
         // "100%" lands on the first tables rather than on the middle of the canvas.
@@ -171,6 +183,75 @@ public sealed class CatalogGraphHtmlRendererTests
         rendered.Document.Should().Contain("function openingCamera()");
         rendered.Document.Should().Contain("if (opening) {").And.Contain("applyCamera(opening);");
         rendered.Document.Should().NotContain("else placeContent(1);");
+
+        // A place carried from the picture a chip replaces is not this picture's place: a selection is
+        // drawn from another arrangement, so a pan that now shows no card at all is refused like an
+        // unreadable camera, and the picture is placed at the zoom it kept.
+        rendered.Document.Should().Contain("if (!onStage()) placeContent(scale);");
+    }
+
+    [Fact]
+    public void A_table_can_be_carried_by_hand_and_put_back()
+    {
+        // Where a card stands is the reader's judgement before it is the layout's: a table the
+        // arrangement put far from the table it belongs to is the reader's to move, and moving it is
+        // not something a heuristic can be argued out of. A press on a card carries that card instead
+        // of the picture, and the arrows that join it are drawn again from box to box — a route turned
+        // in a corridor of the layout means nothing once the card it was turned for has gone elsewhere.
+        var rendered = Render(Chain(12));
+
+        // Assert — a press on a card moves the card, a press on anything else still moves the picture.
+        rendered.Document.Should()
+            .Contain("moving = event.target.closest ? event.target.closest(\"#viewport .node\") : null;")
+            .And.Contain("carried.set(index, far);")
+            .And.Contain("moving.setAttribute(\"transform\", \"translate(\" + drawable(far.x) + \",\" + drawable(far.y) + \")\");")
+            .And.Contain("function reflow(index)");
+
+        // A ring a table draws to itself has no second box to be routed between, so it is carried by
+        // the distance the card went instead of standing around the place the card has left.
+        rendered.Document.Should().Contain("function shiftLoops(index, far)")
+            .And.Contain("shiftLoops(index, { x: 0, y: 0 });");
+
+        // Putting it back is the same gesture twice, and the line it goes back to is the one the routing
+        // served, because the script has already overwritten the line on the page.
+        rendered.Document.Should().Contain("function release(index)")
+            .And.Contain("carried.delete(index);")
+            .And.Contain("if (!carried.has(index)) return;")
+            .And.Contain("var path = routed.get(edgeIndex);");
+
+        // The bar and the pointer both say a card is a thing you may take hold of.
+        rendered.Document.Should().Contain("drag a table to move it");
+        rendered.Document.Should().Contain(".node{cursor:move}");
+    }
+
+    [Fact]
+    public void A_catalog_with_a_middle_is_served_in_rings_and_the_page_keeps_the_arrowheads_apart()
+    {
+        // One arrangement per catalog, chosen by the shape of the graph and never handed to the reader to
+        // switch between: a hub is read outward from the table most relations meet, and the air the rings
+        // leave between the cards is what lets an arrow be drawn straight. A catalog with no such middle
+        // keeps the bands, whose reading order is the dependency itself.
+        var hub = Render(Hub(14));
+        var chain = Render(Chain(14));
+
+        // Assert — the engine states the arrangement it drew, and the island hands it to the script.
+        hub.Island.Should().Contain("\"rings\":true");
+        chain.Island.Should().Contain("\"rings\":false");
+        hub.Document.Should().Contain("var inRings = data.rings === true;");
+
+        // Nobody is offered a second arrangement to toggle the picture into.
+        hub.Document.Should().NotContain("data-zoom=\"star\"");
+
+        // Every end of a ringed picture is dealt its own point on the border it faces: thirteen arrows
+        // let go at the one place a centre line crosses a border are drawn as one thick stroke.
+        hub.Document.Should().Contain("function drawStraight()")
+            .And.Contain("function addEnd(ends, edge, node, box, other)")
+            .And.Contain("function sideToward(box, towards)");
+
+        // A card the reader carries re-deals the whole ringed picture instead of redrawing one arrow, and
+        // the routes the engine served come back once the last card is put home.
+        hub.Document.Should().Contain("if (inRings) { drawStraight(); return; }")
+            .And.Contain("if (carried.size > 0) { drawStraight(); return; }");
     }
 
     [Fact]
@@ -719,7 +800,10 @@ public sealed class CatalogGraphHtmlRendererTests
         rendered.Document.Should().Contain(
             "<b>one-to-one (1:1)</b> each record in the target table can be referenced by at most one record in the source table");
         rendered.Document.Should().Contain("<b>dashed</b> the table it points at is not in this catalog");
-        rendered.Document.Should().Contain("<b>curve</b> a cycle: the two tables point at each other");
+        // A curve is the way an arrow goes round a card, in both arrangements: a lattice carries a
+        // cycle's closing edge over one, rings bow an ordinary edge aside, and a key that promised the
+        // curve meant a cycle would be read wrong by half the pictures it ships under.
+        rendered.Document.Should().Contain("<b>curve</b> the arrow goes around a table that stands in its way");
         rendered.Document.Should().Contain("<b>loop</b> the table points at itself");
         rendered.Document.Should().Contain("<b>card</b> one table: its name and row count");
         rendered.Document.Should().Contain("<b>collapsed</b> a cyclic group as one box; select to expand");
@@ -1006,6 +1090,26 @@ public sealed class CatalogGraphHtmlRendererTests
                 CatalogGraphFixture.TableId("public", $"r{(index + 1) % members:D2}"),
                 $"fk_r{index:D2}",
                 ["id"],
+                ["id"]);
+        }
+
+        return fixture;
+    }
+
+    /// <summary>One table that every other table names: the shape the rings are drawn around.</summary>
+    private static CatalogGraphFixture Hub(int satellites)
+    {
+        var fixture = CatalogGraphFixture.Create()
+            .Table("public", "hub", 100, Column("id", "integer", isPrimaryKey: true));
+        for (var index = 0; index < satellites; index++)
+        {
+            var name = $"s{index:D2}";
+            fixture.Table("public", name, index + 1, Column("id", "integer", isPrimaryKey: true));
+            fixture.Edge(
+                CatalogGraphFixture.TableId("public", name),
+                CatalogGraphFixture.TableId("public", "hub"),
+                $"fk_{name}",
+                ["hub_id"],
                 ["id"]);
         }
 

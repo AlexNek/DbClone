@@ -56,6 +56,7 @@ internal sealed class RelationshipViewHandler : IRelationshipViewHandler
     private readonly RelationshipDocumentBuilder _builder;
     private readonly IRelationshipViewPresenter _presenter;
     private readonly RelationshipPictureWriter _pictureWriter;
+    private readonly IWaitCursor _waitCursor;
     private readonly ILogger<RelationshipViewHandler> _logger;
 
     /// <summary>The catalog behind the document on screen, which a later redraw arranges again.</summary>
@@ -71,12 +72,14 @@ internal sealed class RelationshipViewHandler : IRelationshipViewHandler
         RelationshipDocumentBuilder builder,
         IRelationshipViewPresenter presenter,
         RelationshipPictureWriter pictureWriter,
+        IWaitCursor waitCursor,
         ILogger<RelationshipViewHandler> logger)
     {
         _graph = graph ?? throw new ArgumentNullException(nameof(graph));
         _builder = builder ?? throw new ArgumentNullException(nameof(builder));
         _presenter = presenter ?? throw new ArgumentNullException(nameof(presenter));
         _pictureWriter = pictureWriter ?? throw new ArgumentNullException(nameof(pictureWriter));
+        _waitCursor = waitCursor ?? throw new ArgumentNullException(nameof(waitCursor));
         _logger = logger ?? throw new ArgumentNullException(nameof(logger));
     }
 
@@ -151,26 +154,38 @@ internal sealed class RelationshipViewHandler : IRelationshipViewHandler
         Func<CancellationToken, Task<RelationshipGraphView>> read,
         CancellationToken cancellationToken)
     {
-        var view = await ReadAsync(read, state, cancellationToken).ConfigureAwait(false);
-        if (view is null) return;
-
-        _presented = view;
-        var document = _builder.Build(view);
-
+        // Reading an origin and arranging its picture take long enough that the reader needs to be told
+        // the request was heard: the waiting pointer covers the whole run, and the arrangement — which
+        // holds nothing of the window's — is computed off the thread that draws it, so the pointer can
+        // turn while the work goes on.
+        _waitCursor.Show();
         try
         {
-            await _presenter
-                .PresentAsync(document, Refresh(read, state), Redraw(), cancellationToken)
-                .ConfigureAwait(false);
+            var view = await ReadAsync(read, state, cancellationToken).ConfigureAwait(false);
+            if (view is null) return;
+
+            _presented = view;
+            var document = await Task.Run(() => _builder.Build(view)).ConfigureAwait(false);
+
+            try
+            {
+                await _presenter
+                    .PresentAsync(document, Refresh(read, state), Redraw(), cancellationToken)
+                    .ConfigureAwait(false);
+            }
+            catch (OperationCanceledException)
+            {
+                state.Log($"{OperationName} cancelled.");
+            }
+            catch (Exception ex)
+            {
+                _logger.LogWarning(ex, "The relationship view of {Origin} could not be shown", view.Origin.Label);
+                state.LogWarning($"{OperationName} of {view.Origin.Label} could not be shown: {ex.Message}");
+            }
         }
-        catch (OperationCanceledException)
+        finally
         {
-            state.Log($"{OperationName} cancelled.");
-        }
-        catch (Exception ex)
-        {
-            _logger.LogWarning(ex, "The relationship view of {Origin} could not be shown", view.Origin.Label);
-            state.LogWarning($"{OperationName} of {view.Origin.Label} could not be shown: {ex.Message}");
+            _waitCursor.Hide();
         }
     }
 

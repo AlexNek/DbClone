@@ -34,6 +34,7 @@ internal sealed class GraphIslandWriter
     private readonly CatalogGraphModel _model;
     private readonly CatalogGraphModel _whole;
     private readonly IReadOnlySet<int> _offChips;
+    private readonly bool _inRings;
     private readonly GraphOriginWords _words;
 
     /// <summary>Creates the writer for one document.</summary>
@@ -44,11 +45,17 @@ internal sealed class GraphIslandWriter
     /// switched-off selection; the same model as <paramref name="model"/> for a whole-catalog picture.
     /// </param>
     /// <param name="offChips">The chips the picture was drawn without.</param>
+    /// <param name="inRings">
+    /// Whether the layout arranged the cards in rings around one middle table. The script needs the
+    /// answer to draw a card the reader carries the way the picture was drawn: across the empty space
+    /// the rings left, with each end on a border point of its own.
+    /// </param>
     public GraphIslandWriter(
         RelationshipGraphView view,
         CatalogGraphModel model,
         CatalogGraphModel whole,
-        IReadOnlySet<int> offChips)
+        IReadOnlySet<int> offChips,
+        bool inRings)
     {
         ArgumentNullException.ThrowIfNull(view);
         ArgumentNullException.ThrowIfNull(model);
@@ -59,6 +66,7 @@ internal sealed class GraphIslandWriter
         _model = model;
         _whole = whole;
         _offChips = offChips;
+        _inRings = inRings;
         _words = GraphOriginWords.For(model.Origin.Kind);
     }
 
@@ -76,6 +84,11 @@ internal sealed class GraphIslandWriter
             relations = _whole.RelationCount,
             hasData = _model.HasData,
             source = _view.Origin.Dialect,
+            // Which arrangement the engine served: rings around a middle table, or bands. The shape of
+            // the catalog decided it and the reader is never put in charge of choosing between two
+            // drawings; the script only asks what the served picture was drawn as, so a card it carries
+            // by hand is drawn again in the same arrangement (GraphWedgePlacement).
+            rings = _inRings,
             // The two sentences the panel and the card print for a figure the origin cannot supply.
             // They travel with the island so the script never states a word of its own (D12).
             rowsNote = _words.RowsNote,

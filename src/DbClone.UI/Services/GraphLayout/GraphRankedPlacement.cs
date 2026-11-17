@@ -467,6 +467,16 @@ internal static class GraphRankedPlacement
                 ? next.RowOfUnit[neighbour] - height
                 : next.RowOfUnit[neighbour] + neighbourHeight;
 
+            // A side with room is not yet a side the card may take: the reading order names the side a
+            // joined card is drawn on — a table that names the table it joins stands below it — and a card
+            // carried to the other side turns its own arrow around, which a reader feels as a relation
+            // running the wrong way. The overflow a fan leaves is the room's to answer, never the arrow's.
+            var side = RequiredSide(model, next, unit, neighbour);
+            if (side != 0 && Math.Sign(row - next.RowOfUnit[neighbour]) != side)
+            {
+                continue;
+            }
+
             // The free cell is looked for beside the table joined, not beside where the card stands now:
             // the point of the move is to keep the card next to that table, on its free side.
             var anchored = next.Moved(unit, row, next.ColumnOfUnit[neighbour]);
@@ -489,6 +499,49 @@ internal static class GraphRankedPlacement
         }
 
         return next;
+    }
+
+    /// <summary>
+    /// The side of a table the reading order asks a joined card for: a card that names the table it joins
+    /// is its child and stands below it, a card the table names is its parent and stands above it.
+    /// </summary>
+    /// <param name="model">The analyzed graph.</param>
+    /// <param name="arrangement">The arrangement whose units are named.</param>
+    /// <param name="unit">The card being asked about.</param>
+    /// <param name="neighbour">The table it is joined to.</param>
+    /// <returns>
+    /// 1 for the side below, -1 for the side above, and 0 when the two state nothing — a pair joined both
+    /// ways asks for either side, so it asks for neither.
+    /// </returns>
+    private static int RequiredSide(
+        CatalogGraphModel model,
+        GraphArrangement arrangement,
+        int unit,
+        int neighbour)
+    {
+        var below = false;
+        var above = false;
+
+        foreach (var edge in model.Edges)
+        {
+            var child = arrangement.UnitOf(edge.ChildIndex);
+            var parent = arrangement.UnitOf(edge.ParentIndex);
+            if (child == parent)
+            {
+                continue;
+            }
+
+            if (child == unit && parent == neighbour)
+            {
+                below = true;
+            }
+            else if (child == neighbour && parent == unit)
+            {
+                above = true;
+            }
+        }
+
+        return below && !above ? 1 : above && !below ? -1 : 0;
     }
 
     /// <summary>How many arrows reach one unit from above it, and how many from below.</summary>

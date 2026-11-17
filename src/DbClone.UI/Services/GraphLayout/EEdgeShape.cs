@@ -8,8 +8,9 @@ namespace DbClone.UI.Services.GraphLayout;
 internal enum EEdgeShape
 {
     /// <summary>
-    /// A constraint between two different parts of the picture, drawn straight where the way is clear
-    /// and as a dog-leg through a corridor where a card is in the way.
+    /// A constraint between two different parts of the picture, drawn the way its arrangement draws it:
+    /// a dog-leg through a corridor where a card stands in the way of a lattice, a bow aside where a
+    /// chord crosses one in rings.
     /// </summary>
     Line,
 

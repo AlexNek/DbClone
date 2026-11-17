@@ -70,7 +70,7 @@ internal static class GraphLegendWriter
         Row(html, Bar, "one-to-one (1:1)",
             "each record in the target table can be referenced by at most one record in the source table");
         Row(html, Dashed, "dashed", words.LegendOutside);
-        Row(html, Curve, "curve", "a cycle: the two tables point at each other");
+        Row(html, Curve, "curve", "the arrow goes around a table that stands in its way");
         Row(html, Loop, "loop", "the table points at itself");
         Row(html, Card, "card", "one table: its name and row count");
         Row(html, Collapsed, "collapsed", "a cyclic group as one box; select to expand");
