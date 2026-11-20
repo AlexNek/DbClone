@@ -67,10 +67,31 @@ public sealed class RelationshipViewPresenterResolverTests
         probe.Asked.Should().Be(0);
     }
 
+    [Fact]
+    public async Task The_notice_takes_the_same_side_as_the_document()
+    {
+        // Arrange — the notice is the window's first page, so it must be decided by the same rule: a
+        // machine without the runtime has nowhere to state it and answers that nothing was shown.
+        var probe = new Probe(available: false);
+        var window = new Window(hasWindow: false);
+        var browser = new Recorder();
+
+        // Act
+        var shown = await CreateResolver(probe, window, browser).ShowNoticeAsync(Notice(), CancellationToken.None);
+
+        // Assert
+        shown.Should().BeFalse("the browser has no page this app can write a notice into");
+        browser.Notices.Should().Be(1);
+        window.Notices.Should().Be(0);
+    }
+
     private static RelationshipViewPresenterResolver CreateResolver(
         IWebViewRuntimeProbe probe,
         IInAppRelationshipPresenter window,
         IRelationshipViewPresenter browser) => new(probe, window, browser);
+
+    private static RelationshipNotice Notice() =>
+        new("fixture", "Reading the stored catalog\u2026", "The picture opens as soon as it is arranged.");
 
     private static RelationshipDocument Document() =>
         new(
@@ -100,7 +121,16 @@ public sealed class RelationshipViewPresenterResolverTests
     {
         public int Presented { get; private set; }
 
+        public int Notices { get; private set; }
+
         public bool HasWindow => hasWindow;
+
+        public Task<bool> ShowNoticeAsync(RelationshipNotice notice, CancellationToken ct)
+        {
+            Notices++;
+
+            return Task.FromResult(true);
+        }
 
         public Task PresentAsync(
             RelationshipDocument document,
@@ -118,6 +148,15 @@ public sealed class RelationshipViewPresenterResolverTests
     private sealed class Recorder : IRelationshipViewPresenter
     {
         public int Presented { get; private set; }
+
+        public int Notices { get; private set; }
+
+        public Task<bool> ShowNoticeAsync(RelationshipNotice notice, CancellationToken ct)
+        {
+            Notices++;
+
+            return Task.FromResult(false);
+        }
 
         public Task PresentAsync(
             RelationshipDocument document,

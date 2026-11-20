@@ -70,6 +70,9 @@ internal sealed partial class RelationshipViewWindow : FluentWindow
     private readonly Func<RelationshipDocument, CancellationToken, Task> _saveAs;
 
     private RelationshipDocument? _document;
+
+    /// <summary>The notice on screen before any document exists, which the document replaces.</summary>
+    private string? _page;
     private Func<CancellationToken, Task<RelationshipDocument>>? _refresh;
     private Func<IReadOnlySet<int>, RelationshipDocument>? _reshape;
     private IReadOnlySet<int> _offChips = EmptyChips;
@@ -119,6 +122,40 @@ internal sealed partial class RelationshipViewWindow : FluentWindow
     }
 
     /// <summary>
+    /// Opens the window before its document exists and states what the request is doing, so the reader
+    /// is looking at the viewer from the moment it was asked for rather than at a desktop that says
+    /// nothing while the origin is read.
+    /// </summary>
+    /// <param name="notice">The origin, the sentence and the reason or the promise beside it.</param>
+    /// <param name="ct">The caller's cancellation token.</param>
+    internal async Task ShowNoticeAsync(RelationshipNotice notice, CancellationToken ct)
+    {
+        ArgumentNullException.ThrowIfNull(notice);
+
+        if (!IsVisible) Show();
+        Activate();
+
+        // Nothing of a previous document may be acted on here: the toolbar offers no refresh, no copy
+        // and nothing to hand to the browser until the picture that carries them is on screen.
+        _document = null;
+        _refresh = null;
+        _reshape = null;
+        _offChips = EmptyChips;
+        _page = RelationshipNoticePage.Of(notice);
+
+        RefreshButton.IsEnabled = false;
+        Status.Text = string.Empty;
+
+        var title = $"Relationship view \u2014 {notice.Origin}";
+        Title = title;
+        Bar.Title = title;
+
+        await EnsureRuntimeAsync(ct).ConfigureAwait(true);
+
+        Navigate(camera: null);
+    }
+
+    /// <summary>
     /// The window is kept for the next view: a close request hides it, and the process still ends when
     /// the main window closes, because the app shuts down on that event (D6).
     /// </summary>
@@ -141,6 +178,9 @@ internal sealed partial class RelationshipViewWindow : FluentWindow
         _document = document;
         _refresh = refresh;
         _reshape = reshape;
+
+        // The notice has been replaced: the page served from now on is the document's own.
+        _page = null;
 
         RefreshButton.IsEnabled = refresh is not null;
         Status.Text = string.Empty;
@@ -208,7 +248,9 @@ internal sealed partial class RelationshipViewWindow : FluentWindow
 
         if (e.Request.Uri.StartsWith(DocumentAddress, StringComparison.OrdinalIgnoreCase))
         {
-            var body = new MemoryStream(NoBomUtf8.GetBytes(_document?.Html ?? string.Empty));
+            // Before a document exists the window holds the notice that says the request was heard;
+            // both are served from memory and neither names a file.
+            var body = new MemoryStream(NoBomUtf8.GetBytes(_document?.Html ?? _page ?? string.Empty));
             e.Response = _core.Environment.CreateWebResourceResponse(
                 body,
                 200,
@@ -278,6 +320,18 @@ internal sealed partial class RelationshipViewWindow : FluentWindow
     }
 
     /// <summary>
+    /// The expression that answers with the page as it stands and with how many cards a hand carried:
+    /// the count alone keeps an unchanged picture from being copied across the process boundary by the
+    /// megabyte, and it is the count that says whether a copy has anything to keep.
+    /// </summary>
+    private const string ShownPageExpression =
+        "(function(){var moved=document.querySelectorAll('#viewport .node[transform]').length;"
+        + "return JSON.stringify({moved:moved,page:document.documentElement.outerHTML});})()";
+
+    /// <summary>The declaration the page is served with; a captured page is written back under it.</summary>
+    private const string PageDoctype = "<!DOCTYPE html>\n";
+
+    /// <summary>
     /// Where the picture on screen stands, as the document itself answers. A camera that cannot be
     /// read is no camera: the document opens at its own size rather than at a guess.
     /// </summary>
@@ -296,6 +350,54 @@ internal sealed partial class RelationshipViewWindow : FluentWindow
             _logger.LogWarning(ex, "The relationship view could not read where its picture stood");
             return null;
         }
+    }
+
+    /// <summary>
+    /// The page exactly as the reader left it: a card they carried stays where they put it, and the
+    /// relations it joins stay drawn to it. A copy taken from the document as it was built would stand
+    /// every card back where the arrangement left it and lose that work.
+    /// </summary>
+    /// <returns>
+    /// The page as HTML, or <see langword="null"/> when no card was carried — the document as it was
+    /// built is then the page on screen, and copying it keeps the file small.
+    /// </returns>
+    /// <exception cref="InvalidOperationException">The page answered with nothing that could be read.</exception>
+    internal async Task<string?> ReadShownHtmlAsync()
+    {
+        if (_core is null) return null;
+
+        string answer;
+        try
+        {
+            answer = await _core.ExecuteScriptAsync(ShownPageExpression).ConfigureAwait(true);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "The relationship view could not read the page as it stands");
+
+            // A copy that cannot be read is refused rather than replaced by the arrangement the document
+            // was built with: a save the reader asked for must never quietly undo what they arranged.
+            throw new InvalidOperationException("The page could not be read, so nothing was saved.", ex);
+        }
+
+        var payload = JsonSerializer.Deserialize<string>(answer);
+        if (string.IsNullOrEmpty(payload))
+        {
+            throw new InvalidOperationException("The page answered with nothing, so nothing was saved.");
+        }
+
+        using var read = JsonDocument.Parse(payload);
+        if (!read.RootElement.TryGetProperty("moved", out var moved) || !read.RootElement.TryGetProperty("page", out var page))
+        {
+            throw new InvalidOperationException("The page answered with a shape this copy cannot read, so nothing was saved.");
+        }
+
+        if (moved.GetInt32() == 0) return null;
+
+        var html = page.GetString();
+        return string.IsNullOrEmpty(html)
+            ? throw new InvalidOperationException("The page could not be written out, so nothing was saved.")
+            : PageDoctype + html;
     }
 
     /// <summary>

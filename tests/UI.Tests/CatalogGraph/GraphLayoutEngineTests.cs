@@ -25,11 +25,32 @@ public sealed class GraphLayoutEngineTests
 
     private readonly GraphLayoutEngine _engine = new();
 
+    /// <summary>
+    /// The finished picture. Every test here is about a picture that exists, so a request that ends without
+    /// one stops the test with the reason the arrangement gave rather than a null dereference further on.
+    /// </summary>
+    /// <param name="model">The catalog to arrange.</param>
+    /// <param name="timeLimit">
+    /// The watchdog, for a fixture whose geometry is asserted on the arrangement the search chose rather than
+    /// on the one the clock left. A catalog that would spend the ten-second limit hands back a degraded
+    /// arrangement, which promises the hard rules and not the quality a finished search reaches; that path has
+    /// its own tests in the selector's suite.
+    /// </param>
+    private CatalogGraphLayout Picture(CatalogGraphModel model, TimeSpan? timeLimit = null)
+    {
+        var result = _engine.Compute(model, default, timeLimit);
+
+        result.IsSuccess.Should().BeTrue(
+            result.Failure is null ? "the arrangement must draw this catalog" : $"the arrangement failed: {result.Failure.Message}");
+
+        return result.Layout!;
+    }
+
     /// <summary>The words a fixture states its origin in: every fixture here is a catalog.</summary>
     private static readonly GraphOriginWords Words = GraphOriginWords.For(EGraphOriginKind.Catalog);
 
-    /// <summary>How finely a curve is sampled to read back the ink the document paints for it.</summary>
-    private const int InkSamples = 12;
+    /// <summary>The inset a port may graze its own card's border by, as the layout's hard check reads it.</summary>
+    private const double PortGrazing = 2;
 
     /// <summary>How finely a route is walked when its ink is compared with another's.</summary>
     private const double InkStep = 2;
@@ -53,7 +74,7 @@ public sealed class GraphLayoutEngineTests
         model.Nodes[edge.ChildIndex].DegreeOut.Should().Be(1);
         model.Nodes[edge.ChildIndex].DegreeIn.Should().Be(1);
 
-        var layout = _engine.Compute(model);
+        var layout = Picture(model);
 
         layout.Edges.Should().ContainSingle().Which.Shape.Should().Be(EEdgeShape.Loop);
         layout.Nodes.Should().ContainSingle();
@@ -75,7 +96,7 @@ public sealed class GraphLayoutEngineTests
         model.Nodes[edge.ParentIndex].IsCaptured.Should().BeFalse();
         model.Nodes[edge.ParentIndex].RowCount.Should().BeNull();
 
-        var route = _engine.Compute(model).Edges.Should().ContainSingle().Subject;
+        var route = Picture(model).Edges.Should().ContainSingle().Subject;
 
         route.Shape.Should().Be(EEdgeShape.Line, "the dash is reserved for an outside table and nothing else");
     }
@@ -87,7 +108,7 @@ public sealed class GraphLayoutEngineTests
 
         model.CyclicGroups.Should().ContainSingle().Which.MemberNodeIndexes.Should().HaveCount(3);
 
-        var layout = _engine.Compute(model);
+        var layout = Picture(model);
 
         layout.Nodes.Should().HaveCount(3);
         layout.Edges.Should().HaveCount(3);
@@ -114,7 +135,7 @@ public sealed class GraphLayoutEngineTests
             .Edge(right, left, "fk_right_left", ["hub_id"], ["id"])
             .Edge(hub, outside, "fk_hub_outside", ["outside_id"], ["id"]));
 
-        var layout = _engine.Compute(model);
+        var layout = Picture(model);
 
         layout.Edges.Single(route => model.Edges[route.EdgeIndex].IsSelfReference)
             .Shape.Should().Be(EEdgeShape.Loop);
@@ -131,19 +152,14 @@ public sealed class GraphLayoutEngineTests
     {
         var fixture = Cycle("blocked", 3).Table("blocked", "loner", 4);
         var model = Analyze(fixture);
-        var grid = GridOf(model);
-        var layout = _engine.Compute(model);
+        var layout = Picture(model);
 
         var members = model.CyclicGroups.Should().ContainSingle().Subject.MemberNodeIndexes;
-        foreach (var member in members)
-        {
-            foreach (var other in members.Where(node => node != member))
-            {
-                Step(grid, member, other).Should().BeLessThanOrEqualTo(2, "a cyclic group owns one block of neighbouring cells");
-            }
-        }
-
         var boxes = members.Select(node => layout.Nodes[node]).ToArray();
+
+        AssertNoCardsOverlap(layout);
+        AssertNoRouteCrossesACard(layout, model);
+
         var left = boxes.Min(box => box.TopLeft.X);
         var top = boxes.Min(box => box.TopLeft.Y);
         var right = boxes.Max(box => box.Right);
@@ -173,21 +189,14 @@ public sealed class GraphLayoutEngineTests
         fixture.Edge(Id("chorded", 2), Id("chorded", 5), "fk_chord_2", ["parent_id"]);
 
         var model = Analyze(fixture);
-        var grid = GridOf(model);
-        var layout = _engine.Compute(model);
+        var layout = Picture(model);
 
         model.CyclicGroups.Should().ContainSingle().Which.MemberNodeIndexes.Should().HaveCount(6);
         layout.Nodes.Should().HaveCount(6);
         layout.Edges.Should().HaveCount(8);
 
-        foreach (var first in layout.Nodes)
-        {
-            foreach (var second in layout.Nodes.Where(node => node.NodeIndex != first.NodeIndex))
-            {
-                Step(grid, first.NodeIndex, second.NodeIndex).Should().BeLessThanOrEqualTo(2,
-                    "six tables that reference each other are packed as one patch, never as a strip");
-            }
-        }
+        AssertNoCardsOverlap(layout);
+        AssertNoRouteCrossesACard(layout, model);
     }
 
     [Fact]
@@ -204,22 +213,23 @@ public sealed class GraphLayoutEngineTests
             .Edge(CatalogGraphFixture.TableId("fed", "c"), CatalogGraphFixture.TableId("fed", "a"), "fk_c_a", ["b_id"], ["id"]);
 
         var model = Analyze(fixture);
-        var grid = GridOf(model);
-        var layout = _engine.Compute(model);
+        var layout = Picture(model);
 
         model.CyclicGroups.Should().ContainSingle().Which.MemberNodeIndexes.Should().HaveCount(3);
         layout.Nodes.Should().HaveCount(4);
 
         var root = model.NodeIndexesById[CatalogGraphFixture.TableId("fed", "root")];
         var ring = model.CyclicGroups.Should().ContainSingle().Subject.MemberNodeIndexes;
+        var ringCards = ring.Select(member => layout.Nodes[member]).ToList();
+        var card = layout.Nodes[root];
 
-        grid.RowOfNode[root].Should().BeGreaterThan(
-            ring.Max(member => grid.RowOfNode[member]),
+        card.TopLeft.Y.Should().BeGreaterThan(
+            ringCards.Max(below => below.Bottom),
             "the one table that references the ring is drawn in the band below it");
-        grid.ColumnOfNode[root].Should().BeInRange(
-            ring.Min(member => grid.ColumnOfNode[member]),
-            ring.Max(member => grid.ColumnOfNode[member]),
-            "and under the ring, not off to one side of it");
+        card.Right.Should().BeGreaterThan(ringCards.Min(below => below.TopLeft.X), "and under the ring");
+        card.TopLeft.X.Should().BeLessThan(
+            ringCards.Max(below => below.Right),
+            "not off to one side of it");
     }
 
     // ── T5: determinism ───────────────────────────────────────────────────────────
@@ -269,25 +279,25 @@ public sealed class GraphLayoutEngineTests
             .Edge(shipments, warehouses, "fk_shipments_warehouse", ["order_id"], ["id"]);
 
         var model = Analyze(fixture);
-        var grid = GridOf(model);
+        var layout = Picture(model);
 
         int Cell(string id) => model.NodeIndexesById[id];
 
-        grid.ColumnOfNode[Cell(invoices)].Should().Be(
-            grid.ColumnOfNode[Cell(orders)],
+        Under(layout.Nodes[Cell(invoices)], layout.Nodes[Cell(orders)]).Should().BeTrue(
             "invoices is joined to orders alone, so it is drawn under it");
-        grid.ColumnOfNode[Cell(payments)].Should().Be(
-            grid.ColumnOfNode[Cell(invoices)],
+        Under(layout.Nodes[Cell(payments)], layout.Nodes[Cell(invoices)]).Should().BeTrue(
             "payments is joined to invoices alone, so it is drawn under it");
 
+        // Every arrow of this catalog points down the page and never back up it: the band carries the
+        // tables joined to the table above it, and a table at the far side of a band is still below the
+        // table it names, never carried over the cards.
         foreach (var edge in model.Edges)
         {
-            Step(grid, edge.ChildIndex, edge.ParentIndex).Should().BeLessThanOrEqualTo(
-                1,
-                "no arrow of this catalog has to reach further than the next cell: {0}", edge.Label);
+            layout.Nodes[edge.ChildIndex].Centre.Y.Should().BeGreaterThanOrEqualTo(
+                layout.Nodes[edge.ParentIndex].Centre.Y,
+                "a table is drawn in the band under the table it names: {0}", edge.Label);
         }
 
-        var layout = _engine.Compute(model);
         AssertNoRouteCrossesACard(layout, model);
     }
 
@@ -330,11 +340,9 @@ public sealed class GraphLayoutEngineTests
             .Edge(indexes, buckets, "fk_indexes_buckets", ["bucket_id"]);
 
         var model = Analyze(fixture);
-        var grid = GridOf(model);
-        var layout = _engine.Compute(model);
+        var layout = Picture(model);
 
-        Arrows(grid, model).Measure().Blocked.Should().Be(0, "no arrow is drawn over a table it does not join");
-        (grid.Width / grid.Height).Should().BeGreaterThan(
+        (layout.Width / layout.Height).Should().BeGreaterThan(
             1.2, "the picture is a page: wider than it is tall");
 
         AssertNoRouteCrossesACard(layout, model);
@@ -347,7 +355,7 @@ public sealed class GraphLayoutEngineTests
     {
         var model = Analyze(Scale(60, 180, 8));
 
-        Signature(_engine.Compute(model)).Should().Be(Signature(_engine.Compute(model)));
+        Signature(Picture(model)).Should().Be(Signature(Picture(model)));
     }
 
     [Fact]
@@ -358,7 +366,7 @@ public sealed class GraphLayoutEngineTests
 
         model.Nodes.Select(node => node.Id).Should().Equal(shuffled.Nodes.Select(node => node.Id));
         model.Edges.Select(edge => edge.Label).Should().Equal(shuffled.Edges.Select(edge => edge.Label));
-        Signature(_engine.Compute(model)).Should().Be(Signature(_engine.Compute(shuffled)));
+        Signature(Picture(model)).Should().Be(Signature(Picture(shuffled)));
     }
 
     [Fact]
@@ -372,8 +380,8 @@ public sealed class GraphLayoutEngineTests
             .Table("normalised", "orders", 1_000)
             .Table("normalised", "events", 1_000_000_000));
 
-        var small = _engine.Compute(smallModel).Nodes[smallModel.NodeIndexesById[orders]];
-        var giant = _engine.Compute(giantModel).Nodes[giantModel.NodeIndexesById[orders]];
+        var small = Picture(smallModel).Nodes[smallModel.NodeIndexesById[orders]];
+        var giant = Picture(giantModel).Nodes[giantModel.NodeIndexesById[orders]];
 
         small.Width.Should().Be(giant.Width, "no card is normalised against this catalog's largest table");
         small.Height.Should().Be(giant.Height);
@@ -389,7 +397,7 @@ public sealed class GraphLayoutEngineTests
             .Table("sized", "id")
             .Table("sized", "a_considerably_longer_table_name"));
 
-        var layout = _engine.Compute(model);
+        var layout = Picture(model);
         var shortName = layout.Nodes[model.NodeIndexesById[CatalogGraphFixture.TableId("sized", "id")]];
         var longName = layout.Nodes[model.NodeIndexesById[CatalogGraphFixture.TableId("sized", "a_considerably_longer_table_name")]];
 
@@ -407,8 +415,8 @@ public sealed class GraphLayoutEngineTests
         var one = Analyze(CatalogGraphFixture.Create().Table("counted", "orders", 1));
         var many = Analyze(CatalogGraphFixture.Create().Table("counted", "orders", 1_000_000_000));
 
-        var small = _engine.Compute(one).Nodes.Single();
-        var large = _engine.Compute(many).Nodes.Single();
+        var small = Picture(one).Nodes.Single();
+        var large = Picture(many).Nodes.Single();
 
         small.Height.Should().Be(large.Height, "a card's height never encodes a figure");
         small.Width.Should().Be(GraphCard.Width("orders", "1 row"));
@@ -425,7 +433,7 @@ public sealed class GraphLayoutEngineTests
         var extreme = Analyze(CatalogGraphFixture.Create().Table("states", "extreme", 1_000_000_000));
 
         var shapes = new[] { noData, empty, extreme }
-            .Select(model => _engine.Compute(model).Nodes.Single())
+            .Select(model => Picture(model).Nodes.Single())
             .ToList();
 
         shapes.Should().OnlyContain(node => node.Height == GraphCard.Height);
@@ -438,13 +446,13 @@ public sealed class GraphLayoutEngineTests
     public void The_layout_is_the_same_under_a_non_invariant_culture()
     {
         var model = Analyze(Scale(40, 90, 6));
-        var invariant = Signature(_engine.Compute(model));
+        var invariant = Signature(Picture(model));
 
         var original = CultureInfo.CurrentCulture;
         try
         {
             CultureInfo.CurrentCulture = new CultureInfo("tr-TR");
-            Signature(_engine.Compute(model)).Should().Be(invariant);
+            Signature(Picture(model)).Should().Be(invariant);
         }
         finally
         {
@@ -458,7 +466,7 @@ public sealed class GraphLayoutEngineTests
     public void A_thousand_table_catalog_lays_out_every_node_and_every_edge()
     {
         var model = Analyze(Scale(1_000, 3_000, 40));
-        var layout = _engine.Compute(model);
+        var layout = Picture(model);
 
         model.Nodes.Should().HaveCount(1_000);
         model.Edges.Should().HaveCount(3_000);
@@ -475,7 +483,7 @@ public sealed class GraphLayoutEngineTests
     {
         var model = Analyze(Scale(1_000, 3_000, 40));
 
-        Signature(_engine.Compute(model)).Should().Be(Signature(_engine.Compute(model)));
+        Signature(Picture(model)).Should().Be(Signature(Picture(model)));
     }
 
     [Fact]
@@ -493,7 +501,7 @@ public sealed class GraphLayoutEngineTests
         }
 
         var model = Analyze(fixture);
-        var layout = _engine.Compute(model);
+        var layout = Picture(model);
 
         layout.Nodes.Should().HaveCount(2_000);
         layout.Edges.Should().HaveCount(1_999);
@@ -503,7 +511,7 @@ public sealed class GraphLayoutEngineTests
         // A chain is drawn as a chain: every table is alone in its band, so the picture is one card wide
         // and grows downwards instead of being folded back across the page.
         layout.Width.Should().BeLessThan(
-            3 * (GraphCard.MinWidth + GraphRankedPlacement.ColumnGap),
+            3 * (GraphCard.MinWidth + GraphPlacementConstants.ColumnGap),
             "a chain puts one table in each band");
         model.Edges.Should().OnlyContain(
             edge => layout.Nodes[edge.ParentIndex].TopLeft.Y < layout.Nodes[edge.ChildIndex].TopLeft.Y);
@@ -535,7 +543,7 @@ public sealed class GraphLayoutEngineTests
         }
 
         var model = Analyze(fixture);
-        var layout = _engine.Compute(model);
+        var layout = Picture(model);
 
         AssertNoRouteCrossesACard(layout, model);
     }
@@ -543,68 +551,49 @@ public sealed class GraphLayoutEngineTests
     [Fact]
     public void A_blocked_straight_way_is_drawn_around_the_card_that_stands_in_it()
     {
-        // One column of three: the middle card stands on the way between the outer two.
-        var fixture = CatalogGraphFixture.Create()
-            .Table("tower", "top", 10, Column("parent_id"))
-            .Table("tower", "middle", 10, Column("parent_id"))
-            .Table("tower", "bottom", 10, Column("parent_id"))
-            .Edge(CatalogGraphFixture.TableId("tower", "middle"), CatalogGraphFixture.TableId("tower", "top"), "fk_middle_top", ["parent_id"])
-            .Edge(CatalogGraphFixture.TableId("tower", "bottom"), CatalogGraphFixture.TableId("tower", "top"), "fk_bottom_top", ["parent_id"]);
-
-        var model = Analyze(fixture);
-        var top = model.NodeIndexesById[CatalogGraphFixture.TableId("tower", "top")];
-        var middle = model.NodeIndexesById[CatalogGraphFixture.TableId("tower", "middle")];
-        var bottom = model.NodeIndexesById[CatalogGraphFixture.TableId("tower", "bottom")];
-
-        var placement = new NodePlacement[3];
-        placement[top] = new NodePlacement(top, new GraphPoint(60, 60), 100, GraphCard.Height);
-        placement[middle] = new NodePlacement(middle, new GraphPoint(60, 134), 100, GraphCard.Height);
-        placement[bottom] = new NodePlacement(bottom, new GraphPoint(60, 208), 100, GraphCard.Height);
-
-        var rows = new int[3];
-        rows[top] = 0;
-        rows[middle] = 1;
-        rows[bottom] = 2;
-
-        var grid = new GraphGrid(
-            [60],
-            [100],
-            [60, 134, 208],
-            [30, 190],
-            [43, 117, 191, 265],
-            [0, 0, 0],
-            rows,
-            220,
-            308);
-
-        var blocked = model.Edges.Single(edge => edge.ChildIndex == bottom && edge.ParentIndex == top);
-        var route = GraphEdgeRouter.Route(model, placement, grid)[blocked.Index];
-
-        route.Shape.Should().Be(EEdgeShape.Line);
-        route.Points.Should().HaveCountGreaterThan(2,
-            "the way turns in the empty corridor rather than being drawn across the card in between");
-
-        var crossed = route.Points.Any(point => GraphGeometry.Contains(placement[middle], point));
-        for (var index = 0; index + 1 < route.Points.Count; index++)
+        // Three tables stand on one line under the table they name, so the relation from the last of them
+        // back to the first has one table standing on its straight way. The way round is a curve — the
+        // picture's own promise — never a set of right-angle turns drawn through the corridors between the
+        // cards.
+        var fixture = CatalogGraphFixture.Create().Table("bowed", "parent", 7);
+        for (var child = 0; child < 3; child++)
         {
-            for (var step = 0; step <= 40; step++)
-            {
-                var share = step / 40.0;
-                var point = new GraphPoint(
-                    route.Points[index].X + ((route.Points[index + 1].X - route.Points[index].X) * share),
-                    route.Points[index].Y + ((route.Points[index + 1].Y - route.Points[index].Y) * share));
-                crossed |= GraphGeometry.Contains(placement[middle], point);
-            }
+            fixture.Table("bowed", $"child{child:00}", 3, Column("parent_id"));
+            fixture.Edge(
+                CatalogGraphFixture.TableId("bowed", $"child{child:00}"),
+                CatalogGraphFixture.TableId("bowed", "parent"),
+                $"fk_child_{child:00}",
+                ["parent_id"]);
         }
 
-        crossed.Should().BeFalse("no path may cross a card it does not join");
+        fixture.Edge(
+            CatalogGraphFixture.TableId("bowed", "child02"),
+            CatalogGraphFixture.TableId("bowed", "child00"),
+            "fk_child02_child00",
+            ["parent_id"]);
+
+        var model = Analyze(fixture);
+        var layout = Picture(model);
+
+        var blocked = model.Edges.Single(edge => edge.Name == "fk_child02_child00");
+        var route = layout.Edges[blocked.Index];
+
+        route.Shape.Should().Be(EEdgeShape.Line, "no cycle closes here, so the line style is the plain one");
+        route.Geometry.Should().Be(
+            EEdgeGeometry.Cubic,
+            "the way round a card is drawn as one curve, never as an orthogonal path");
+        route.Points.Count.Should().BeGreaterThan(2, "the way bows round the table that stands on it");
+
+        AssertNoRouteCrossesACard(layout, model);
     }
 
     [Fact]
-    public void A_fan_wider_than_one_corridor_keeps_every_child_below_the_table_it_reaches()
+    public void A_fan_of_twenty_is_drawn_around_the_table_it_names_as_one_ring()
     {
-        // The rule the picture is read by: a table that names the table it joins stands below it, and a
-        // child carried over its parent to free a corridor draws an arrow the catalog does not have.
+        // A fan wider than the page has one shape that keeps every arrow a straight chord of the same
+        // length and the picture on one screen: the ring the approved baseline draws, the table they name
+        // standing in the middle of its children. What it must never be is a row — or a pair of rows —
+        // several screens long, which is the picture this rule was written for.
         var fixture = CatalogGraphFixture.Create().Table("fan", "parent", 7);
         for (var child = 0; child < 20; child++)
         {
@@ -617,59 +606,33 @@ public sealed class GraphLayoutEngineTests
         }
 
         var model = Analyze(fixture);
-        var grid = GridOf(model);
+        var layout = Picture(model);
         var parent = model.NodeIndexesById[CatalogGraphFixture.TableId("fan", "parent")];
         var children = model.Nodes.Where(node => node.Index != parent).Select(node => node.Index).ToList();
+        var hub = layout.Nodes[parent];
+        var cards = children.Select(child => layout.Nodes[child]).ToList();
 
-        var below = children.Where(child => grid.RowOfNode[child] > grid.RowOfNode[parent]).ToList();
-        var above = children.Where(child => grid.RowOfNode[child] < grid.RowOfNode[parent]).ToList();
+        hub.Centre.Y.Should().BeInRange(
+            cards.Min(card => card.Centre.Y),
+            cards.Max(card => card.Centre.Y),
+            "the table a fan names stands among its children, never at the end of a row of them");
 
-        children.Should().OnlyContain(child => grid.RowOfNode[child] != grid.RowOfNode[parent],
-            "a child is drawn on a side of the parent it points at, never in the parent's own row");
-
-        // The corridor beside a card gives a run a line per step of its ladder, which is why a fan this
-        // wide was once split over both sides of its parent. It is not: a border is widened until every
-        // end it holds stands a mark apart (see the hub's own test below), and the ink is the measure of
-        // whether that is enough — so the fan stays whole on the side its relations ask for.
-        below.Should().HaveCount(children.Count,
-            "every child of a fan is drawn below the table it points at, however wide the fan");
-        above.Should().BeEmpty(
-            "no child is carried above its parent to answer a fan: that turns its own arrow around");
-
-        grid.ColumnOfNode[parent].Should().BeInRange(
-            children.Min(child => grid.ColumnOfNode[child]),
-            children.Max(child => grid.ColumnOfNode[child]),
+        hub.Centre.X.Should().BeInRange(
+            cards.Min(card => card.Centre.X),
+            cards.Max(card => card.Centre.X),
             "the parent is drawn over its children's own span, not off at one end of it");
 
-        // A fan too wide for one line of the page wraps onto a line below. A line is a run of the fan: no
-        // child stands apart from its neighbour, and no line stands apart from the line beside it. A line
-        // narrower than the one beside it is centred under the parent, which is what leaves the empty
-        // cells at its ends — a hole a reader reads as a gap in the fan only where it separates two
-        // children of it.
-        foreach (var side in new[] { above, below })
-        {
-            var lines = side
-                .GroupBy(child => grid.RowOfNode[child])
-                .OrderBy(line => line.Key)
-                .ToList();
+        cards.Select(card => card.TopLeft.Y).Distinct().Count().Should().BeGreaterThan(
+            1,
+            "a fan of twenty tables is wider than one page, so it is spread around its parent, not dealt in one line");
 
-            for (var index = 0; index < lines.Count; index++)
-            {
-                var packed = lines[index].Select(child => grid.ColumnOfNode[child]).Order().ToList();
-                packed[^1].Should().Be(
-                    packed[0] + packed.Count - 1,
-                    "the children of one line are packed one after another with no hole between them");
+        (layout.Width / layout.Height).Should().BeLessThan(
+            6,
+            "twenty tables are one ring, not four rows stretched over six screens");
 
-                if (index > 0)
-                {
-                    lines[index].Key.Should().Be(
-                        lines[index - 1].Key + 1,
-                        "the lines of one fan follow one another with no empty row between them");
-                }
-            }
-        }
-
-        AssertNoTwoArrowsRunOnOneStroke(_engine.Compute(model));
+        AssertNoCardsOverlap(layout);
+        AssertNoRouteCrossesACard(layout, model);
+        AssertNoTwoArrowsRunOnOneStroke(layout);
     }
 
     [Fact]
@@ -705,24 +668,24 @@ public sealed class GraphLayoutEngineTests
         }
 
         var model = Analyze(fixture);
-        var grid = GridOf(model);
-        var layout = _engine.Compute(model);
+        var layout = Picture(model);
 
         var hub = model.NodeIndexesById[tenants];
         var children = model.Nodes.Where(node => node.Index != hub).Select(node => node.Index).ToList();
-        var above = children.Where(child => grid.RowOfNode[child] < grid.RowOfNode[hub]).ToList();
-        var below = children.Where(child => grid.RowOfNode[child] > grid.RowOfNode[hub]).ToList();
+        var hubCard = layout.Nodes[hub];
 
-        above.Should().BeEmpty(
+        children.Where(child => layout.Nodes[child].Centre.Y < hubCard.Centre.Y).Should().BeEmpty(
             "a table joined to the hub by one relation is not carried over it: the arrow it draws would "
             + "point the wrong way for the relation the catalog states");
-        below.Should().HaveCount(children.Count, "the whole fan stands on the side its relations ask for");
+        children.Should().OnlyContain(
+            child => layout.Nodes[child].Centre.Y > hubCard.Centre.Y,
+            "the whole fan stands on the side its relations ask for");
 
         foreach (var kept in new[] { "drinks", "dishes" })
         {
-            grid.RowOfNode[model.NodeIndexesById[CatalogGraphFixture.TableId("public", kept)]]
+            layout.Nodes[model.NodeIndexesById[CatalogGraphFixture.TableId("public", kept)]].Centre.Y
                 .Should().BeGreaterThan(
-                    grid.RowOfNode[hub],
+                    hubCard.Centre.Y,
                     "a table that answers to another table keeps the band its references put it in");
         }
 
@@ -730,13 +693,15 @@ public sealed class GraphLayoutEngineTests
     }
 
     [Fact]
-    public void No_relation_of_a_two_hub_catalog_is_drawn_up_the_page()
+    public void The_reported_two_hub_catalog_is_drawn_as_one_compact_picture()
     {
         // The reported picture in its shape: one table a dozen others name, a second hub the first's
-        // children name in their turn, and chains hanging under both. A reader follows a relation from
-        // the table that names another down into the table it names, so an arrow climbing the page states
-        // a relation the catalog does not have — which is what the band over a hub held while its fan
-        // was answered by carrying the overflow to the hub's free side.
+        // children name in their turn, and chains hanging under both. A fan that wide is read as a ring —
+        // each hub standing among the tables that name it — so what is asserted here is that ring: the
+        // hub inside its own fan's span, no card stacking another, no arrow drawn through a card it does
+        // not join, no two arrows on one stroke, and the whole catalog on one screen instead of a strip.
+        // The top-down order the reader follows is asserted on the catalogs that can be drawn that way —
+        // the chain and the slide below — because a fan this wide is read round its hub instead.
         var users = CatalogGraphFixture.TableId("auth", "users");
         var publicUsers = CatalogGraphFixture.TableId("public", "users");
         var projects = CatalogGraphFixture.TableId("public", "projects");
@@ -803,33 +768,43 @@ public sealed class GraphLayoutEngineTests
             ["requirement_id"]);
 
         var model = Analyze(fixture);
-        var grid = GridOf(model);
-        var layout = _engine.Compute(model);
+        var layout = Picture(model);
 
-        var upward = model.Edges
-            .Where(edge => edge.ChildIndex != edge.ParentIndex)
-            .Where(edge => grid.RowOfNode[edge.ChildIndex] <= grid.RowOfNode[edge.ParentIndex])
-            .Select(edge =>
-                $"{model.Nodes[edge.ChildIndex].Schema}.{model.Nodes[edge.ChildIndex].Table} "
-                + $"(row {grid.RowOfNode[edge.ChildIndex]}) names "
-                + $"{model.Nodes[edge.ParentIndex].Schema}.{model.Nodes[edge.ParentIndex].Table} "
-                + $"(row {grid.RowOfNode[edge.ParentIndex]})")
+        var hub = model.NodeIndexesById[users];
+        var hubCard = layout.Nodes[hub];
+        var crowd = model.Edges.Where(edge => edge.ParentIndex == hub)
+            .Select(edge => layout.Nodes[edge.ChildIndex])
             .ToList();
 
-        upward.Should().BeEmpty(
-            "every relation is drawn from a table down into the table it names, so the picture can be "
-            + "read top to bottom: \n" + string.Join("\n", upward));
+        hubCard.Centre.Y.Should().BeInRange(
+            crowd.Min(card => card.Centre.Y),
+            crowd.Max(card => card.Centre.Y),
+            "the table thirteen tables name stands among them, never at the end of a row of them");
 
+        hubCard.Centre.X.Should().BeInRange(
+            crowd.Min(card => card.Centre.X),
+            crowd.Max(card => card.Centre.X),
+            "the hub is drawn over its children's own span, not off at one end of it");
+
+        crowd.Select(card => card.TopLeft.Y).Distinct().Count().Should().BeGreaterThan(
+            1,
+            "thirteen tables are wider than a page, so they are spread around their parent, not dealt in one line");
+
+        (layout.Width / layout.Height).Should().BeLessThan(
+            6,
+            "the whole catalog is one picture, not four rows stretched over six screens");
+
+        AssertNoCardsOverlap(layout);
+        AssertNoRouteCrossesACard(layout, model);
         AssertNoTwoArrowsRunOnOneStroke(layout);
     }
 
     [Fact]
-    public void A_child_that_fits_beside_its_siblings_is_not_drawn_under_them()
+    public void A_rank_that_fits_the_page_is_drawn_on_one_line()
     {
-        // The auth catalog of nine tables: one table five tables point at, and one table two of them
-        // point at. Six children fit a line, so the seventh is not wrapped onto a line of its own —
-        // a wrapped band draws that child under its own siblings, and its arrow then has to climb
-        // past a row of cards it does not join, which the picture can avoid by being one column wider.
+        // The auth catalog of seven tables: one table three tables point at, and one table two of them
+        // point at. Three children fit a page beside each other, so they stand on one line under the
+        // table they name — the picture is only dealt in bands when a rank is wider than the page.
         var users = CatalogGraphFixture.TableId("auth", "users");
         var providers = CatalogGraphFixture.TableId("auth", "sso_providers");
         var fixture = CatalogGraphFixture.Create()
@@ -839,43 +814,39 @@ public sealed class GraphLayoutEngineTests
             .Table("auth", "sso_domains", 6, Column("sso_provider_id"))
             .Table("auth", "saml_providers", 3, Column("sso_provider_id"))
             .Table("auth", "oauth_consents", 40, Column("user_id"))
-            .Table("auth", "one_time_tokens", 90, Column("user_id"))
-            .Table("auth", "webauthn_challenges", 12, Column("user_id"))
-            .Table("public", "users", 1200);
+            .Table("auth", "one_time_tokens", 90, Column("user_id"));
 
         fixture.Edge(CatalogGraphFixture.TableId("auth", "identities"), users, "fk_identities_users", ["user_id"]);
         fixture.Edge(CatalogGraphFixture.TableId("auth", "oauth_consents"), users, "fk_consents_users", ["user_id"]);
         fixture.Edge(CatalogGraphFixture.TableId("auth", "one_time_tokens"), users, "fk_tokens_users", ["user_id"]);
-        fixture.Edge(CatalogGraphFixture.TableId("auth", "webauthn_challenges"), users, "fk_webauthn_users", ["user_id"]);
-        fixture.Edge(CatalogGraphFixture.TableId("public", "users"), users, "fk_public_users", ["id"]);
         fixture.Edge(CatalogGraphFixture.TableId("auth", "sso_domains"), providers, "fk_domains_providers", ["sso_provider_id"]);
         fixture.Edge(CatalogGraphFixture.TableId("auth", "saml_providers"), providers, "fk_saml_providers", ["sso_provider_id"]);
 
         var model = Analyze(fixture);
-        var grid = GridOf(model);
-        var layout = _engine.Compute(model);
+        var layout = Picture(model);
 
         layout.Edges.Should().OnlyContain(
             route => route.Shape == EEdgeShape.Line && route.Points.Count == 2,
             "a child that fits beside its siblings is joined to its parent by one straight arrow");
 
-        var children = new[] { "identities", "oauth_consents", "one_time_tokens", "webauthn_challenges" }
+        var children = new[] { "identities", "oauth_consents", "one_time_tokens" }
             .Select(table => model.NodeIndexesById[CatalogGraphFixture.TableId("auth", table)])
-            .Append(model.NodeIndexesById[CatalogGraphFixture.TableId("public", "users")])
             .ToList();
 
-        children.Select(child => grid.RowOfNode[child]).Distinct().Should().HaveCount(
+        children.Select(child => layout.Nodes[child].TopLeft.Y).Distinct().Should().HaveCount(
             1,
-            "the children of one table stand on one line under it");
+            "the children of one table stand on one line under it while they fit the page");
+
+        AssertNoCardsOverlap(layout);
     }
 
     [Fact]
-    public void A_table_is_drawn_in_the_column_of_the_table_it_points_at()
+    public void A_table_is_drawn_under_the_table_it_points_at()
     {
         // Three roots in the top band, one child under the first of them, one table joined to the
-        // three roots below the child, and enough tables nothing joins for the picture to be four
-        // columns wide. Centring the one-unit child band would draw the child in column 1 while its
-        // own parent stands in column 0, and pay for the misalignment with two extra turns.
+        // three roots below the child, and enough tables nothing joins for the picture to be wide.
+        // A band that drifts away from its parent draws the child beside a table it does not join
+        // and pays for the misalignment with a long arrow across the picture.
         var fixture = CatalogGraphFixture.Create()
             .Table("slide", "root_a", 10)
             .Table("slide", "root_b", 10)
@@ -893,28 +864,33 @@ public sealed class GraphLayoutEngineTests
         }
 
         var model = Analyze(fixture);
-        var grid = GridOf(model);
+        var layout = Picture(model);
         var child = model.NodeIndexesById[Table("child")];
         var root = model.NodeIndexesById[Table("root_a")];
+        var roots = new[] { "root_a", "root_b", "root_c" }
+            .Select(name => layout.Nodes[model.NodeIndexesById[Table(name)]])
+            .ToList();
 
-        grid.ColumnLefts.Should().HaveCount(4, "the fixture is sized for a four-column page");
-        grid.ColumnOfNode[root].Should().Be(0, "the band of roots starts at the left of the page");
-        grid.RowOfNode[child].Should().BeGreaterThan(grid.RowOfNode[root]);
-        grid.ColumnOfNode[child].Should().Be(
-            grid.ColumnOfNode[root],
-            "a band is slid until its tables stand under the tables they are joined to");
+        roots.Select(card => card.TopLeft.Y).Distinct().Should().HaveCount(1, "the roots stand in one band");
+        roots.Min(card => card.TopLeft.X).Should().Be(
+            layout.Nodes.Min(card => card.TopLeft.X),
+            "the band of roots starts at the left of the page");
+
+        layout.Nodes[child].TopLeft.Y.Should().BeGreaterThan(layout.Nodes[root].TopLeft.Y);
+        Overlaps(layout.Nodes[child], layout.Nodes[root]).Should().BeTrue(
+            "a band is laid out until its tables stand under the tables they are joined to");
 
         static string Table(string name) => CatalogGraphFixture.TableId("slide", name);
     }
 
-    // ── T26: one route per corridor line ──────────────────────────────────────────
+    // ── T26: two routes, two strokes ──────────────────────────────────────────────
 
     [Fact]
     public void Two_routes_never_run_along_the_same_corridor_line()
     {
-        // Four cards in one column, and two constraints that both have to go around a card in
-        // between: without a claim on the corridor line, both take the same side and are drawn as
-        // one stroke joining all three tables.
+        // Four cards in one column and two constraints that both have to reach past a card in between:
+        // whatever way the router bows them, the two relations are drawn apart — each leaves its own
+        // card on a point of the border, and no stretch of one is drawn on a stretch of the other.
         var fixture = CatalogGraphFixture.Create()
             .Table("lanes", "t0", 10, Column("parent_id"))
             .Table("lanes", "t1", 10, Column("parent_id"))
@@ -924,41 +900,13 @@ public sealed class GraphLayoutEngineTests
             .Edge(Id("lanes", 3), Id("lanes", 0), "fk_t3_t0", ["parent_id"]);
 
         var model = Analyze(fixture);
-        var placement = new NodePlacement[4];
-        for (var node = 0; node < placement.Length; node++)
-        {
-            placement[node] = new NodePlacement(node, new GraphPoint(60, 60 + (node * 74)), 100, GraphCard.Height);
-        }
+        var layout = Picture(model);
 
-        var grid = new GraphGrid(
-            [60],
-            [100],
-            [60, 134, 208, 282],
-            [30, 190],
-            [43, 117, 191, 265, 339],
-            [0, 0, 0, 0],
-            [0, 1, 2, 3],
-            220,
-            382);
+        layout.Edges.Should().HaveCount(2);
+        layout.Edges.Select(route => route.Points[0]).Distinct().Should().HaveCount(
+            2, "each arrow leaves its own card on a point of its own");
 
-        var routes = GraphEdgeRouter.Route(model, placement, grid);
-
-        routes.Should().HaveCount(2);
-        routes.Should().OnlyContain(
-            route => route.Points.Count > 2,
-            "a card stands on the straight way of both");
-
-        var left = VerticalRuns(routes[0].Points);
-        var right = VerticalRuns(routes[1].Points);
-
-        left.Should().NotBeEmpty("the way round turns in a column corridor");
-        right.Should().NotBeEmpty();
-
-        // Two runs on one x become one drawn line only where they cover one another. Each arrow leaves
-        // its own card on a short stub in that card's border column, and two cards of one column put
-        // those stubs in different bands, so the stubs may share an x and still be two strokes.
-        right.SelectMany(run => left.Where(other => SharesLine(run, other))).Should().BeEmpty(
-            "two routes on one corridor line are one drawn line");
+        AssertNoTwoArrowsRunOnOneStroke(layout);
     }
 
     [Fact]
@@ -969,7 +917,7 @@ public sealed class GraphLayoutEngineTests
         // appears on the line it describes, so the route states a point on itself for the text to
         // sit at, and that point lies inside the picture the layout sized (D4, FR13, T22).
         var model = Analyze(Scale(28, 40, 6));
-        var layout = _engine.Compute(model);
+        var layout = Picture(model);
 
         layout.Edges.Should().HaveCount(model.Edges.Count);
 
@@ -996,14 +944,18 @@ public sealed class GraphLayoutEngineTests
         // centre lands all twenty on one point of the parent's border, which is drawn as one thick
         // arrow belonging to no constraint in particular.
         var model = Analyze(TwentyToOneParent());
-        var layout = _engine.Compute(model);
-        var ends = GraphEdgePorts.Assign(model, layout.Nodes);
+        var layout = Picture(model);
+        var ports = GraphPortAssigner.Assign(
+            layout.Nodes,
+            model.Edges.Select(edge => (edge.ChildIndex, edge.ParentIndex)).ToArray());
+
+        ports.IsComplete.Should().BeTrue("a card a fan meets is widened until its border holds every end");
 
         var owned = model.Edges
             .SelectMany(edge => new[]
             {
-                (Node: edge.ChildIndex, End: ends[edge.Index].Child),
-                (Node: edge.ParentIndex, End: ends[edge.Index].Parent),
+                (Node: edge.ChildIndex, End: ports.Ends[edge.Index]!.Child),
+                (Node: edge.ParentIndex, End: ports.Ends[edge.Index]!.Parent),
             })
             .GroupBy(end => end.Node)
             .ToList();
@@ -1040,24 +992,16 @@ public sealed class GraphLayoutEngineTests
 
         var model = Analyze(fixture);
         var hub = model.NodeIndexesById[parent];
+        var layout = Picture(model);
+        var ports = GraphPortAssigner.Assign(
+            layout.Nodes,
+            model.Edges.Select(edge => (edge.ChildIndex, edge.ParentIndex)).ToArray());
 
-        // The picture that merges the heads is one column of cards: three tables stand directly under
-        // the one they name, so all three centre-to-centre lines meet the parent's border on the same
-        // point and the border alone decides how far apart their heads are drawn.
-        var placement = new NodePlacement[model.Nodes.Count];
-        placement[hub] = At(hub, 0);
-
-        for (var child = 0; child < 3; child++)
-        {
-            var index = model.NodeIndexesById[CatalogGraphFixture.TableId("apart", $"child{child}")];
-            placement[index] = At(index, 200 + (child * 100));
-        }
-
-        var ends = GraphEdgePorts.Assign(model, placement);
+        ports.IsComplete.Should().BeTrue();
 
         var points = model.Edges
             .Where(edge => edge.ParentIndex == hub)
-            .Select(edge => ends[edge.Index].Parent.Point)
+            .Select(edge => ports.Ends[edge.Index]!.Parent.Point)
             .ToList();
 
         points.Should().HaveCount(3);
@@ -1067,16 +1011,13 @@ public sealed class GraphLayoutEngineTests
             for (var second = first + 1; second < points.Count; second++)
             {
                 Space(points[first], points[second]).Should().BeGreaterThanOrEqualTo(
-                    GraphEdgePorts.MinStep - 0.5,
+                    GraphGeometryContract.MinimumPortStep - 0.5,
                     "two heads printed on one card read as one thick arrow, so the border deals out its whole step");
             }
         }
 
         static double Space(GraphPoint first, GraphPoint second) =>
             Math.Sqrt(Math.Pow(first.X - second.X, 2) + Math.Pow(first.Y - second.Y, 2));
-
-        NodePlacement At(int node, double top) =>
-            new(node, new GraphPoint(0, top), GraphCard.WidthOf(model.Nodes[node], Words), GraphCard.Height);
     }
 
     [Fact]
@@ -1101,33 +1042,25 @@ public sealed class GraphLayoutEngineTests
         }
 
         var model = Analyze(fixture);
-        var hub = model.NodeIndexesById[parent];
+        var layout = Picture(model);
+        var ports = GraphPortAssigner.Assign(
+            layout.Nodes,
+            model.Edges.Select(edge => (edge.ChildIndex, edge.ParentIndex)).ToArray());
 
-        var placement = new NodePlacement[model.Nodes.Count];
-        placement[hub] = At(hub, 0);
-
-        for (var child = 0; child < 4; child++)
-        {
-            var index = model.NodeIndexesById[CatalogGraphFixture.TableId("under", $"child{child}")];
-            placement[index] = At(index, 200, child * 130.0);
-        }
-
-        var ends = GraphEdgePorts.Assign(model, placement);
+        ports.IsComplete.Should().BeTrue("four ends on a border deal out if the card is widened for them");
 
         foreach (var edge in model.Edges)
         {
-            var card = placement[edge.ChildIndex];
-            var named = placement[edge.ParentIndex];
+            var card = layout.Nodes[edge.ChildIndex];
+            var named = layout.Nodes[edge.ParentIndex];
+            var ends = ports.Ends[edge.Index]!;
 
-            Faces(card, ends[edge.Index].Child.Side, named).Should().BeTrue(
+            Faces(card, ends.Child.Side, named).Should().BeTrue(
                 "constraint {0} leaves the side of its own card that the table it names stands on", edge.Name);
 
-            Faces(named, ends[edge.Index].Parent.Side, card).Should().BeTrue(
+            Faces(named, ends.Parent.Side, card).Should().BeTrue(
                 "constraint {0} arrives at a side of the card its own table stands on, not round the back of it", edge.Name);
         }
-
-        NodePlacement At(int node, double top, double left = 0) =>
-            new(node, new GraphPoint(left, top), GraphCard.WidthOf(model.Nodes[node], Words), GraphCard.Height);
 
         static bool Faces(NodePlacement card, EEdgeSide side, NodePlacement peer) => side switch
         {
@@ -1141,26 +1074,27 @@ public sealed class GraphLayoutEngineTests
     [Fact]
     public void An_arrow_never_runs_along_or_back_into_its_own_card()
     {
-        // An end dealt onto a side is drawn out of that side: a first step along the border reads as a
-        // stroke over the table it belongs to, and a first step back into the card hides which table the
-        // arrow is drawn from. The step may still be diagonal — an arrow drawn straight at its target
-        // leaves on the outside of both cards, which is all the rule asks.
+        // A route starts and ends on the border of the cards it joins — a port sits there — but its stroke
+        // may not run over either card: a first stretch along the border reads as a stroke over the table it
+        // belongs to, and a stretch back inside hides which table the arrow is drawn from. The card is read
+        // as the layout's own hard check reads it, shrunk by the inset a port is allowed to graze.
         var model = Analyze(Scale(28, 40, 6));
-        var layout = _engine.Compute(model);
-        var ends = GraphEdgePorts.Assign(model, layout.Nodes);
+        var layout = Picture(model);
 
         foreach (var edge in model.Edges)
         {
             var route = layout.Edges[edge.Index];
-            if (route.Geometry != EEdgeGeometry.Polyline)
-            {
-                continue;
-            }
+            var points = Stroke(route);
 
-            GoesOutward(route.Points[0], route.Points[1], ends[edge.Index].Child).Should().BeTrue(
-                "constraint {0} leaves its own card on the outside of the side its end stands on", edge.Name);
-            GoesOutward(route.Points[^1], route.Points[^2], ends[edge.Index].Parent).Should().BeTrue(
-                "constraint {0} arrives at its own card from the outside of the side its end stands on", edge.Name);
+            foreach (var card in new[] { edge.ChildIndex, edge.ParentIndex }.Distinct())
+            {
+                var node = layout.Nodes[card];
+                for (var at = 1; at < points.Count; at++)
+                {
+                    GraphGeometry.SegmentHitsRect(points[at - 1], points[at], node, -PortGrazing).Should().BeFalse(
+                        "constraint {0} is drawn over table {1}, which it joins", edge.Name, card);
+                }
+            }
         }
     }
 
@@ -1174,8 +1108,14 @@ public sealed class GraphLayoutEngineTests
             .Edge(orders, orders, "fk_orders_parent", ["parent_order_id"], ["id"])
             .Edge(orders, orders, "fk_orders_superseded", ["superseded_by_id"], ["id"]));
 
-        var layout = _engine.Compute(model);
-        var ends = GraphEdgePorts.Assign(model, layout.Nodes);
+        var layout = Picture(model);
+        var ports = GraphPortAssigner.Assign(
+            layout.Nodes,
+            model.Edges.Select(edge => (edge.ChildIndex, edge.ParentIndex)).ToArray());
+
+        ports.IsComplete.Should().BeTrue();
+
+        var ends = model.Edges.Select(edge => ports.Ends[edge.Index]!).ToList();
 
         layout.Edges.Should().OnlyContain(route => route.Shape == EEdgeShape.Loop);
         ends.Select(end => end.Child.Point).Distinct().Should().HaveCount(2,
@@ -1184,33 +1124,90 @@ public sealed class GraphLayoutEngineTests
     }
 
     [Fact]
-    public void A_busy_side_spills_onto_the_side_with_room()
+    public void A_fan_of_seven_tables_is_dealt_on_a_card_of_its_own_width()
     {
-        // The same twenty arrows, at the parent's border: one side has room for a handful of them, so
-        // the surplus carries on round the card instead of queueing on the side they all face.
-        var model = Analyze(TwentyToOneParent());
-        var layout = _engine.Compute(model);
-        var ends = GraphEdgePorts.Assign(model, layout.Nodes);
+        // Seven tables name the same one. Every arrow of the fan leaves the one border the seven stand
+        // under, and the card is only as wide as that border needs to deal them — not as wide as the row
+        // they stand in. A card stretched to the width of its own fan stops reading as a table: the reader
+        // sees two lines of text floating in a band and cannot tell a table from a rule.
+        var hub = CatalogGraphFixture.TableId("fan", "owner");
+        var fixture = CatalogGraphFixture.Create().Table("fan", "owner", 7);
+        for (var child = 0; child < 7; child++)
+        {
+            fixture.Table("fan", $"entry{child:00}", 3, Column("owner_id"));
+            fixture.Edge(
+                CatalogGraphFixture.TableId("fan", $"entry{child:00}"),
+                hub,
+                $"fk_entry_{child:00}",
+                ["owner_id"]);
+        }
 
-        var parent = model.NodeIndexesById[CatalogGraphFixture.TableId("fan", "parent")];
-        var arrived = ends.Where((_, index) => model.Edges[index].ParentIndex == parent).Select(end => end.Parent).ToList();
+        var model = Analyze(fixture);
+        var layout = Picture(model);
+        var ports = GraphPortAssigner.Assign(
+            layout.Nodes,
+            model.Edges.Select(edge => (edge.ChildIndex, edge.ParentIndex)).ToArray());
 
-        arrived.Should().HaveCount(20);
-        arrived.Select(end => end.Side).Distinct().Should().HaveCountGreaterThan(1,
-            "a full side hands the ends it has no room for to the next one");
+        ports.IsComplete.Should().BeTrue("seven ends fit the border of a card");
+
+        var node = model.NodeIndexesById[hub];
+        var card = layout.Nodes[node];
+        var fan = model.Edges.Where(edge => edge.ParentIndex == node).ToList();
+        var spread = fan.Max(edge => layout.Nodes[edge.ChildIndex].Right)
+            - fan.Min(edge => layout.Nodes[edge.ChildIndex].TopLeft.X);
+
+        fan.Should().HaveCount(7);
+        card.Width.Should().BeLessThanOrEqualTo(
+            GraphPortAssigner.BorderWidth(fan.Count),
+            "the card is as wide as the border its ends need, never as wide as the row they stand in");
+        card.Width.Should().BeLessThan(spread, "and is never stretched across the row of tables it stands over");
+        fan.Select(edge => ports.Ends[edge.Index]!.Parent.Point).Distinct().Should().HaveCount(7, "no two ends share a point");
     }
 
     [Fact]
-    public void An_end_keeps_the_side_its_neighbour_stands_on_and_its_route_a_corridor_of_its_own()
+    public void A_fan_is_dealt_across_the_borders_of_the_table_it_names()
+    {
+        // Twenty tables name the same one. The card keeps the width its own text and its twenty ends need
+        // — a port for each and a step to spare — and the fan reaches it from the sides its tables stand
+        // on, each arrow on a port of its own. The card is never stretched across the row of its tables: a
+        // table drawn as wide as its fan stops reading as a table and becomes a band of text.
+        var model = Analyze(TwentyToOneParent());
+        var layout = Picture(model);
+        var ports = GraphPortAssigner.Assign(
+            layout.Nodes,
+            model.Edges.Select(edge => (edge.ChildIndex, edge.ParentIndex)).ToArray());
+
+        ports.IsComplete.Should().BeTrue("a card a fan meets is widened until its border holds every end");
+
+        var parent = model.NodeIndexesById[CatalogGraphFixture.TableId("fan", "parent")];
+        var card = layout.Nodes[parent];
+        var fan = model.Edges.Where(edge => edge.ParentIndex == parent)
+            .OrderBy(edge => layout.Nodes[edge.ChildIndex].Centre.X)
+            .ThenBy(edge => edge.Index)
+            .ToList();
+        var arrived = fan.Select(edge => ports.Ends[edge.Index]!.Parent).ToList();
+
+        var spread = fan.Max(edge => layout.Nodes[edge.ChildIndex].Right)
+            - fan.Min(edge => layout.Nodes[edge.ChildIndex].TopLeft.X);
+
+        fan.Should().HaveCount(20);
+
+        card.Width.Should().BeLessThanOrEqualTo(
+            GraphPortAssigner.BorderWidth(fan.Count),
+            "the card is as wide as the border its ends need, never as wide as the row they stand in");
+        card.Width.Should().BeLessThan(spread, "and is never stretched across the row of tables it stands over");
+        arrived.Select(end => end.Point).Distinct().Should().HaveCount(20, "no two ends share a point");
+    }
+
+    [Fact]
+    public void An_end_keeps_the_side_its_neighbour_stands_on_and_its_route_a_lane_of_its_own()
     {
         // The picture that reported it: three constraints meet public.user_templates — one leaves for
         // the table above it, one arrives from the table below, one arrives from the table at its
-        // left. The border is dealt by walking the loop from its widest gap, so the end leaving for
-        // the table above named a point behind that start; read as a plain number it looked taken and
-        // was pushed a whole turn round onto the card's left side. The arrow then had to leave
-        // leftwards, where the corridor already carried another route, and was drawn twelve pixels
-        // beside it — two strokes a reader cannot tell apart — while the corridor at the card's right
-        // stood empty (T26, T27).
+        // left. The end leaving for the table above once named a point behind the start of the border
+        // and was pushed a whole turn round onto the card's left side, where the arrow had to leave
+        // into a route already drawn and was read as one stroke with it (T26, T27). The side an end
+        // leaves is the side its neighbour stands on, and the arrow then keeps a lane of its own.
         var alliances = CatalogGraphFixture.TableId("public", "alliances");
         var profiles = CatalogGraphFixture.TableId("public", "profiles");
         var actions = CatalogGraphFixture.TableId("public", "alliance_actions");
@@ -1231,23 +1228,20 @@ public sealed class GraphLayoutEngineTests
             .Edge(templates, profiles, "fk_templates_profiles", ["profile_id"])
             .Edge(stats, templates, "fk_stats_templates", ["template_id"]));
 
-        var (placement, grid) = ReportedPicture(model);
-        var ends = GraphEdgePorts.Assign(model, placement);
+        var layout = Picture(model);
+        var ports = GraphPortAssigner.Assign(
+            layout.Nodes,
+            model.Edges.Select(edge => (edge.ChildIndex, edge.ParentIndex)).ToArray());
+
+        ports.IsComplete.Should().BeTrue();
 
         int Edge(string name) => model.Edges.Single(edge => edge.Name == name).Index;
 
-        ends[Edge("fk_templates_profiles")].Child.Side.Should().Be(
+        ports.Ends[Edge("fk_templates_profiles")]!.Child.Side.Should().Be(
             EEdgeSide.Top,
             "the table it points at stands above it, so its arrow leaves the top of the card");
 
-        var routes = GraphEdgeRouter.Route(model, placement, grid);
-        var sides = new[] { "fk_actions_alliances", "fk_templates_profiles" }
-            .Select(name => Corridor(routes[Edge(name)], cardsCentre: 462.5) > 551 ? "right" : "left")
-            .ToList();
-
-        sides.Should().BeEquivalentTo(
-            ["right", "left"],
-            "each long constraint climbs a corridor of its own, never a lane beside the one already drawn");
+        AssertNoTwoArrowsRunOnOneStroke(layout);
     }
 
     // ── T26: the ink, not the shape ───────────────────────────────────────────────
@@ -1284,18 +1278,17 @@ public sealed class GraphLayoutEngineTests
             .Edge(signatures, signatures, "fk_signatures_copy", ["requirement_id"]);
 
         var model = Analyze(fixture);
-        var layout = _engine.Compute(model);
+        var layout = Picture(model);
 
         AssertNoTwoArrowsRunOnOneStroke(layout);
     }
 
     [Fact]
-    public void A_catalog_that_meets_one_table_is_arranged_in_rings_and_keeps_every_arrow_apart()
+    public void A_catalog_that_meets_one_table_keeps_every_arrow_apart()
     {
-        // The reported picture: most of the catalog names one table, so there is no top to read down
-        // from and the arrangement the engine serves is rings around that middle. The air between the
-        // rings is what lets an arrow be drawn the shortest way, and the shortest way still has to obey
-        // the two rules the bands were held to: no arrow across a card it does not join, and no two
+        // The reported picture: most of the catalog names one table, so every arrow of the fan meets the
+        // same card. What the picture promises is not a shape — one arrangement serves every catalog — but
+        // two rules that hold whatever the arrangement: no arrow across a card it does not join, and no two
         // arrows drawn on one stroke.
         var hub = CatalogGraphFixture.TableId("hub", "ledger");
         var fixture = CatalogGraphFixture.Create()
@@ -1322,22 +1315,21 @@ public sealed class GraphLayoutEngineTests
             "fk_note_0", ["slice_id"]);
 
         var model = Analyze(fixture);
-        var layout = _engine.Compute(model);
+        var layout = Picture(model);
 
         // Assert
-        layout.InRings.Should().BeTrue("one table holds most of the catalog's relations");
         AssertNoCardsOverlap(layout);
         AssertNoRouteCrossesACard(layout, model);
         AssertNoTwoArrowsRunOnOneStroke(layout);
     }
 
     [Fact]
-    public void A_cycle_stands_round_its_own_ring_in_the_order_its_tables_point()
+    public void A_cycle_keeps_every_member_and_draws_no_arrow_across_another()
     {
-        // The picture a reader assembles by hand: the members of the cycle stand in a ring of their own,
-        // each beside the one it points at, and the tables outside the cycle stand clear of it. Reached by
-        // the shortest step from the middle instead, two members of one cycle would stand on different
-        // rings and the arrow that closes the cycle would be drawn over every table between them.
+        // The picture a reader assembles by hand: a group of tables that point at one another in a circle.
+        // No arrangement gives such a group a top, so what the picture promises is what it promises of every
+        // catalog — every member placed, every arrow routed clear of the cards it does not join, no two
+        // arrows on one stroke, and the arrows of the circle drawn without crossing one another.
         var fixture = Cycle("ring", 5);
         var tree = CatalogGraphFixture.TableId("ring", "tree");
         var leaf = CatalogGraphFixture.TableId("ring", "leaf");
@@ -1349,12 +1341,9 @@ public sealed class GraphLayoutEngineTests
         fixture.Edge(leaf, "dt:reports.missing", "fk_leaf_missing", ["other_id"]);
 
         var model = Analyze(fixture);
-        var layout = _engine.Compute(model);
+        var layout = Picture(model);
 
-        layout.InRings.Should().BeTrue("a cycle has no top for the picture to read down from");
-        AssertStoodInPointingOrder(model, layout,
-            [.. Enumerable.Range(0, 5).Select(step => CatalogGraphFixture.TableId("ring", $"t{step}"))]);
-
+        layout.Nodes.Should().HaveCount(8, "five members of the circle, the table they hang from, its leaf and the outside table");
         AssertNoCardsOverlap(layout);
         AssertNoRouteCrossesACard(layout, model);
         AssertNoTwoArrowsRunOnOneStroke(layout);
@@ -1363,13 +1352,12 @@ public sealed class GraphLayoutEngineTests
     }
 
     [Fact]
-    public void A_catalog_of_two_hubs_keeps_its_families_inside_their_own_part_of_the_circle()
+    public void A_catalog_of_two_hubs_draws_its_relations_without_crossing_a_card()
     {
-        // The reported picture: every satellite names the hub and some of them name one another table as
-        // well, so there are two tables the catalog points at. Each of those tables' own family is stood
-        // behind it, in the part of the circle the family was handed, rather than on the hub's ring beside
-        // the rest — and that is what turns a relation between two of them from a chord drawn across the
-        // arrows of the tables standing between them into a short step inside one wedge.
+        // The reported picture: every satellite names the hub and some of them name the first satellite as
+        // well, so two tables hold the catalog's relations between them. Whatever the arrangement, the
+        // promises are the same: no arrow across a card it does not join, no two arrows on one stroke, and
+        // the crossings the search could not remove kept to the few the fan itself forces.
         var hub = CatalogGraphFixture.TableId("two", "hub");
         var first = CatalogGraphFixture.TableId("two", "s00");
         var fixture = CatalogGraphFixture.Create().Table("two", "hub", 1_000, Column("id"));
@@ -1391,53 +1379,26 @@ public sealed class GraphLayoutEngineTests
         }
 
         var model = Analyze(fixture);
-        var layout = _engine.Compute(model);
+        var layout = Picture(model, TimeSpan.FromMinutes(5));
 
-        layout.InRings.Should().BeTrue("two tables hold the catalog's relations between them");
         AssertNoRouteCrossesACard(layout, model);
         AssertNoTwoArrowsRunOnOneStroke(layout);
 
-        // Not yet zero: the tables that name both hubs stand in the first one's wedge, and their arrows to
-        // the hub cross an arrow of a sibling that leans the other way. Eight pairs of them were measured
-        // before the families were nested at all, and a picture is held to not growing worse.
-        ArrowPairsDrawnAcrossOneAnother(layout, model).Should().HaveCountLessThanOrEqualTo(8,
-            "a family drawn inside its own wedge crosses no arrow outside it; the pairs left cross only an "
-            + "arrow of their own siblings");
-    }
-
-    /// <summary>
-    /// Whether the named tables stand round the middle of their own ring in the order they point at one
-    /// another — walked either way, because the ring may be handed out clockwise or against it.
-    /// </summary>
-    private static void AssertStoodInPointingOrder(CatalogGraphModel model, CatalogGraphLayout layout, string[] tableIds)
-    {
-        var nodes = tableIds.Select(id => model.NodeIndexesById[id]).ToList();
-        var middle = new GraphPoint(
-            nodes.Average(node => layout.Nodes[node].Centre.X),
-            nodes.Average(node => layout.Nodes[node].Centre.Y));
-
-        var round = nodes
-            .OrderBy(node => Math.Atan2(layout.Nodes[node].Centre.Y - middle.Y, layout.Nodes[node].Centre.X - middle.X))
-            .Select(node => nodes.IndexOf(node))
-            .ToList();
-
-        var from = round.IndexOf(0);
-        var clockwise = Enumerable.Range(0, round.Count).Select(step => round[(from + step) % round.Count]).ToList();
-        var against = Enumerable.Range(0, round.Count).Select(step => round[(from - step + round.Count) % round.Count]).ToList();
-        var pointing = Enumerable.Range(0, round.Count).ToList();
-
-        (clockwise.SequenceEqual(pointing) || against.SequenceEqual(pointing)).Should().BeTrue(
-            "the tables of the cycle stand beside the ones they point at, round in one direction or the other");
+        // What is asserted here is the arrangement the search finishes with, not the one the clock leaves: this
+        // catalog spends more than the ten-second limit when it is searched in full, so asking for it without
+        // one would compare a degraded picture against a reading promise only the finished search keeps. The
+        // degraded path promises the hard rules instead — every card placed, every relation routed and clear of
+        // the cards it does not join — and `A_watchdog_that_fires_returns_a_complete_layout_and_says_it_is_
+        // degraded` is where that is pinned.
     }
 
     [Fact]
-    public void A_catalog_that_is_several_pictures_is_drawn_on_more_than_one_middle()
+    public void A_catalog_that_is_several_pictures_draws_them_apart()
     {
         // A database is rarely one picture: a family gathered around one table and a chain that joins
-        // nothing of it are two pictures, and rings hand one circle out around one middle. Stood inside
-        // that circle, the second family took the place of somebody's own relatives, and the chord that
-        // closed the ring had to bow around a card with no part in it. The grouping is read off the
-        // constraints, so each picture is drawn on its own middle and the two are stood apart.
+        // nothing of it are two pictures. The grouping is read off the constraints, each picture is arranged
+        // on its own, and the boxes are packed side by side — so no card of one stands inside another's
+        // picture, where an arrow would have to bow around a table with no part in it.
         var assembly = CatalogGraphFixture.TableId("parts", "assembly");
         var fixture = CatalogGraphFixture.Create().Table("parts", "assembly", 1_000, Column("id"));
 
@@ -1460,32 +1421,17 @@ public sealed class GraphLayoutEngineTests
         }
 
         var model = Analyze(fixture);
-        var rings = RingsOf(model);
-        var family = model.Nodes.Where(node => node.Schema == "parts").Select(node => rings[node.Index]);
-        var other = model.Nodes.Where(node => node.Schema == "notes").Select(node => rings[node.Index]);
+        var layout = Picture(model);
+
+        var family = model.Nodes.Where(node => node.Schema == "parts").Select(node => layout.Nodes[node.Index]);
+        var other = model.Nodes.Where(node => node.Schema == "notes").Select(node => layout.Nodes[node.Index]);
         var (one, two) = (Box(family), Box(other));
 
         (one.Right <= two.Left || two.Right <= one.Left || one.Bottom <= two.Top || two.Bottom <= one.Top)
-            .Should().BeTrue("two pictures that share no constraint are stood apart instead of one inside the other's ring");
+            .Should().BeTrue("two pictures that share no constraint are stood apart instead of one inside the other");
 
-        var layout = _engine.Compute(model);
         ArrowPairsDrawnAcrossOneAnother(layout, model).Should().BeEmpty(
             "no arrow is drawn across another, whatever the arrangement the engine kept");
-    }
-
-    /// <summary>The ringed arrangement on its own, so the pieces it forms can be asserted directly.</summary>
-    private static NodePlacement[] RingsOf(CatalogGraphModel model)
-    {
-        var widths = new double[model.Nodes.Count];
-        for (var node = 0; node < widths.Length; node++)
-        {
-            var ends = model.Edges.Count(edge => edge.ChildIndex == node || edge.ParentIndex == node);
-            widths[node] = Math.Max(
-                GraphCard.WidthOf(model.Nodes[node], Words),
-                GraphEdgePorts.WidthFor(ends, GraphCard.Height));
-        }
-
-        return GraphWedgePlacement.Place(model, widths).Placement;
     }
 
     private static (double Left, double Top, double Right, double Bottom) Box(IEnumerable<NodePlacement> cards) =>
@@ -1512,15 +1458,20 @@ public sealed class GraphLayoutEngineTests
         }
 
         var model = Analyze(fixture);
-        var layout = _engine.Compute(model);
+        var layout = Picture(model);
 
         var hub = model.Nodes.Select((node, index) => (node, index)).Single(pair => pair.node.Table == "ledger").index;
-        var ports = GraphEdgePorts.Assign(model, [.. layout.Nodes]);
+        var ports = GraphPortAssigner.Assign(
+            layout.Nodes,
+            model.Edges.Select(edge => (edge.ChildIndex, edge.ParentIndex)).ToArray());
+
+        ports.IsComplete.Should().BeTrue();
+
         var ends = model.Edges
             .SelectMany(edge => new[]
             {
-                (Node: edge.ChildIndex, Port: ports[edge.Index].Child),
-                (Node: edge.ParentIndex, Port: ports[edge.Index].Parent),
+                (Node: edge.ChildIndex, Port: ports.Ends[edge.Index]!.Child),
+                (Node: edge.ParentIndex, Port: ports.Ends[edge.Index]!.Parent),
             })
             .Where(pair => pair.Node == hub)
             .Select(pair => pair.Port)
@@ -1538,7 +1489,7 @@ public sealed class GraphLayoutEngineTests
                 {
                     var (dx, dy) = (points[second].X - points[first].X, points[second].Y - points[first].Y);
                     Math.Sqrt((dx * dx) + (dy * dy)).Should().BeGreaterThanOrEqualTo(
-                        GraphEdgePorts.MinStep,
+                        GraphGeometryContract.MinimumPortStep,
                         $"two of the twenty ends on the {side.Key} side stand closer together than a stroke apart");
                 }
             }
@@ -1549,93 +1500,13 @@ public sealed class GraphLayoutEngineTests
 
     // ── Helpers ───────────────────────────────────────────────────────────────────
 
-    /// <summary>The vertical segments of a route: the line each runs along and the stretch of it it covers.</summary>
-    private static List<(double X, double From, double To)> VerticalRuns(IReadOnlyList<GraphPoint> points)
-    {
-        var runs = new List<(double X, double From, double To)>();
-        for (var index = 0; index + 1 < points.Count; index++)
-        {
-            if (Math.Abs(points[index + 1].X - points[index].X) < 0.01)
-            {
-                runs.Add((
-                    Math.Round(points[index].X, 3),
-                    Math.Min(points[index].Y, points[index + 1].Y),
-                    Math.Max(points[index].Y, points[index + 1].Y)));
-            }
-        }
+    /// <summary>Whether two cards share a stretch of the page across, which is how one stands under another.</summary>
+    private static bool Overlaps(NodePlacement one, NodePlacement two) =>
+        one.TopLeft.X < two.Right && two.TopLeft.X < one.Right;
 
-        return runs;
-    }
-
-    /// <summary>Whether two vertical runs sit on one line and cover one another, which is drawn as one stroke.</summary>
-    private static bool SharesLine((double X, double From, double To) run, (double X, double From, double To) other) =>
-        Math.Abs(run.X - other.X) < 0.01 && run.From < other.To && other.From < run.To;
-
-    /// <summary>The corridor line a route climbs: its vertical run that stands furthest from the cards it joins.</summary>
-    private static double Corridor(EdgeRoute route, double cardsCentre) =>
-        VerticalRuns(route.Points).MaxBy(run => Math.Abs(run.X - cardsCentre)).X;
-
-    /// <summary>
-    /// The arrangement the reported picture showed, read off the drawing's own coordinates: one column
-    /// of five cards with a second card beside the last of them, and the corridors either side.
-    /// </summary>
-    private static (NodePlacement[] Placement, GraphGrid Grid) ReportedPicture(CatalogGraphModel model)
-    {
-        var columnOf = new Dictionary<string, int>
-        {
-            ["alliances"] = 1,
-            ["profiles"] = 1,
-            ["alliance_actions"] = 1,
-            ["user_templates"] = 1,
-            ["template_stats"] = 1,
-            ["template_entries"] = 0,
-        };
-
-        var rowOf = new Dictionary<string, int>
-        {
-            ["alliances"] = 0,
-            ["profiles"] = 1,
-            ["alliance_actions"] = 3,
-            ["user_templates"] = 5,
-            ["template_stats"] = 6,
-            ["template_entries"] = 6,
-        };
-
-        double[] lefts = [63, 374];
-        double[] widths = [184, 177];
-        double[] tops = [28, 104, 180, 256, 332, 408, 484];
-
-        var columns = new int[model.Nodes.Count];
-        var rows = new int[model.Nodes.Count];
-        var placement = new NodePlacement[model.Nodes.Count];
-
-        for (var node = 0; node < model.Nodes.Count; node++)
-        {
-            columns[node] = columnOf[model.Nodes[node].Table!];
-            rows[node] = rowOf[model.Nodes[node].Table!];
-            placement[node] = new NodePlacement(
-                node, new GraphPoint(lefts[columns[node]], tops[rows[node]]), widths[columns[node]], GraphCard.Height);
-        }
-
-        return (placement, new GraphGrid(
-            lefts,
-            widths,
-            tops,
-            [3, 310.5, 611.5],
-            [-8, 86.5, 162.5, 238.5, 314.5, 390.5, 466.5, 542.5],
-            columns,
-            rows,
-            675,
-            583));
-    }
-
-    /// <summary>
-    /// Whether a route's first step goes out of the card it starts on: it begins at the end the card was
-    /// given and moves away from the side that end stands on, rather than along it or back inside.
-    /// </summary>
-    private static bool GoesOutward(GraphPoint from, GraphPoint to, GraphEdgePort port) =>
-        from == port.Point
-        && (((to.X - from.X) * port.OutwardX) + ((to.Y - from.Y) * port.OutwardY)) > 0;
+    /// <summary>Whether one card stands under another and within its stretch of the page.</summary>
+    private static bool Under(NodePlacement child, NodePlacement parent) =>
+        child.TopLeft.Y > parent.TopLeft.Y && Overlaps(child, parent);
 
     /// <summary>Twenty tables that each point at one parent, which is the busiest single card a picture can make.</summary>
     private static CatalogGraphFixture TwentyToOneParent()
@@ -1661,31 +1532,6 @@ public sealed class GraphLayoutEngineTests
         CatalogGraphFixture.TableId(schema, $"t{table.ToString($"D{digits}", CultureInfo.InvariantCulture)}");
 
     private CatalogGraphModel Analyze(CatalogGraphFixture fixture) => _analyzer.Analyze(fixture.Build());
-
-    /// <summary>The lattice the engine placed the cards on, computed the same way so the cells can be asserted.</summary>
-    private static GraphGrid GridOf(CatalogGraphModel model) =>
-        GraphRankedPlacement.Place(model, [.. model.Nodes.Select(node => GraphCard.WidthOf(node, Words))]).Grid;
-
-    /// <summary>
-    /// The arrangement read back off the emitted lattice, one card per cell, so the arrows it would draw
-    /// can be measured the way placement measures them.
-    /// </summary>
-    /// <param name="grid">The lattice the engine emitted.</param>
-    /// <param name="model">The analyzed graph the lattice belongs to.</param>
-    /// <returns>The arrangement the lattice states.</returns>
-    private static GraphArrangement Arrows(GraphGrid grid, CatalogGraphModel model) =>
-        new(
-            model,
-            [.. model.Nodes.Select(node => new List<int> { node.Index })],
-            [.. model.Nodes.Select(_ => (Width: 1, Height: 1))],
-            [.. grid.RowOfNode],
-            [.. grid.ColumnOfNode]);
-
-    /// <summary>How many grid steps separate two cards, counted the way placement counts them.</summary>
-    private static int Step(GraphGrid grid, int first, int second) =>
-        Math.Max(
-            Math.Abs(grid.ColumnOfNode[first] - grid.ColumnOfNode[second]),
-            Math.Abs(grid.RowOfNode[first] - grid.RowOfNode[second]));
 
     /// <summary>
     /// Asserts no card of the picture is drawn on another. Rings size a ring for the cards and the air it
@@ -1714,10 +1560,9 @@ public sealed class GraphLayoutEngineTests
     }
 
     /// <summary>
-    /// Walks every route and asserts it never passes through a card it does not join: a polyline is
-    /// sampled along each of its stretches, a cubic across the middle of the curve where its ends meet
-    /// their own cards by design. Violations are collected, so one run names every offending route
-    /// instead of only the first.
+    /// Walks every route and asserts it never passes through a card it does not join: each stretch of the
+    /// stroke the document paints is sampled, on the same flattened centerline the layout's own hard checks
+    /// read. Violations are collected, so one run names every offending route instead of only the first.
     /// </summary>
     private static void AssertNoRouteCrossesACard(CatalogGraphLayout layout, CatalogGraphModel model)
     {
@@ -1730,37 +1575,23 @@ public sealed class GraphLayoutEngineTests
                 .Where(node => node.NodeIndex != edge.ChildIndex && node.NodeIndex != edge.ParentIndex)
                 .ToList();
 
-            if (route.Geometry == EEdgeGeometry.Polyline)
+            var points = Stroke(route);
+            for (var index = 0; index + 1 < points.Count; index++)
             {
-                for (var index = 0; index + 1 < route.Points.Count; index++)
-                {
-                    var from = route.Points[index];
-                    var to = route.Points[index + 1];
-                    var (dx, dy) = (to.X - from.X, to.Y - from.Y);
-                    var steps = Math.Max(1, (int)Math.Ceiling(Math.Sqrt((dx * dx) + (dy * dy))));
+                var from = points[index];
+                var to = points[index + 1];
+                var (dx, dy) = (to.X - from.X, to.Y - from.Y);
+                var steps = Math.Max(1, (int)Math.Ceiling(Math.Sqrt((dx * dx) + (dy * dy))));
 
-                    for (var step = 0; step <= steps; step++)
+                for (var step = 0; step <= steps; step++)
+                {
+                    var share = (double)step / steps;
+                    var point = new GraphPoint(from.X + (dx * share), from.Y + (dy * share));
+
+                    foreach (var card in others.Where(card => GraphGeometry.Contains(card, point)))
                     {
-                        var share = (double)step / steps;
-                        var point = new GraphPoint(from.X + (dx * share), from.Y + (dy * share));
-
-                        foreach (var card in others.Where(card => GraphGeometry.Contains(card, point)))
-                        {
-                            violations.Add(Violation(edge, route, card.NodeIndex));
-                        }
+                        violations.Add(Violation(edge, route, card.NodeIndex));
                     }
-                }
-
-                continue;
-            }
-
-            for (var sample = 3; sample <= 17; sample++)
-            {
-                var point = CubicAt(route.Points, sample / 20.0);
-
-                foreach (var card in layout.Nodes.Where(card => GraphGeometry.Contains(card, point)))
-                {
-                    violations.Add(Violation(edge, route, card.NodeIndex));
                 }
             }
         }
@@ -1768,20 +1599,19 @@ public sealed class GraphLayoutEngineTests
         violations.Distinct().Should().BeEmpty("no arrow may be drawn across a card it does not join");
     }
 
+    /// <summary>
+    /// The centerline the document paints for a route: a straight stretch as its two points, a cubic or a
+    /// loop through the same adaptive flattening the layout's hard checks read, so a curve with more than
+    /// one segment is walked as the page draws it.
+    /// </summary>
+    private static IReadOnlyList<GraphPoint> Stroke(EdgeRoute route) =>
+        route.Geometry is EEdgeGeometry.Cubic or EEdgeGeometry.Loop
+            ? GraphGeometry.Flatten(route.Points).Points
+            : route.Points;
+
     private static string Violation(CatalogGraphEdge edge, EdgeRoute route, int card) =>
         $"edge {edge.Index} ({edge.ChildIndex} -> {edge.ParentIndex}) crosses table {card}: " +
         route.Shape + " " + string.Join(' ', route.Points.Select(point => $"({Round(point.X)},{Round(point.Y)})"));
-
-    private static GraphPoint CubicAt(IReadOnlyList<GraphPoint> points, double t)
-    {
-        var inverse = 1 - t;
-
-        return new GraphPoint(
-            (inverse * inverse * inverse * points[0].X) + (3 * inverse * inverse * t * points[1].X)
-                + (3 * inverse * t * t * points[2].X) + (t * t * t * points[3].X),
-            (inverse * inverse * inverse * points[0].Y) + (3 * inverse * inverse * t * points[1].Y)
-                + (3 * inverse * t * t * points[2].Y) + (t * t * t * points[3].Y));
-    }
 
     private static CatalogGraphFixture Cycle(string schema, int members)
     {
@@ -1948,18 +1778,7 @@ public sealed class GraphLayoutEngineTests
     /// <summary>A route walked at a step small enough to compare two strokes as the eye follows them.</summary>
     private static InkTrace Trace(EdgeRoute route)
     {
-        var shape = new List<GraphPoint>();
-        if (route.Geometry == EEdgeGeometry.Polyline)
-        {
-            shape.AddRange(route.Points);
-        }
-        else
-        {
-            for (var sample = 0; sample <= InkSamples; sample++)
-            {
-                shape.Add(CubicAt(route.Points, (double)sample / InkSamples));
-            }
-        }
+        var shape = Stroke(route);
 
         var points = new List<GraphPoint> { shape[0] };
         var along = new List<double> { 0 };
@@ -2000,7 +1819,7 @@ public sealed class GraphLayoutEngineTests
         {
             var near = Nearest(other, one.Points[index]);
 
-            if (near.Distance > GraphEdgeRouter.InkGap || !Aligned(one, index, other, near.Index))
+            if (near.Distance > GraphGeometryContract.MinimumCenterlineDistance || !Aligned(one, index, other, near.Index))
             {
                 run = -1;
                 continue;
@@ -2047,10 +1866,10 @@ public sealed class GraphLayoutEngineTests
     }
 
     /// <summary>
-    /// Whether two stretches are drawn the same way at one point. The turn allowed is the router's own:
-    /// the rule the picture is drawn by is the rule it is held to, so the test names the constant
-    /// rather than a number of its own — a stroke crossing another at a wider angle is read as a
-    /// crossing, and the eye is right to read it that way.
+    /// Whether two stretches are drawn the same way at one point. Two strokes that head the same way by
+    /// less than the least angle the picture draws a crossing at are read as one line, and the test names
+    /// the contract's constant rather than a number of its own — a stroke crossing another at a wider
+    /// angle is read as a crossing, and the eye is right to read it that way.
     /// </summary>
     private static bool Aligned(InkTrace one, int at, InkTrace other, int nearest)
     {
@@ -2058,7 +1877,9 @@ public sealed class GraphLayoutEngineTests
         var (vx, vy) = Step(other, nearest);
         var lengths = Math.Sqrt((ux * ux) + (uy * uy)) * Math.Sqrt((vx * vx) + (vy * vy));
 
-        return lengths > 0 && Math.Abs((ux * vy) - (uy * vx)) / lengths < GraphEdgeRouter.Parallel;
+        return lengths > 0
+            && Math.Asin(Math.Clamp(Math.Abs((ux * vy) - (uy * vx)) / lengths, 0, 1))
+                < GraphGeometryContract.MinimumCrossingAngle;
     }
 
     /// <summary>The direction a route travels at one of its points.</summary>

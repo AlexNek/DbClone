@@ -225,33 +225,28 @@ public sealed class CatalogGraphHtmlRendererTests
     }
 
     [Fact]
-    public void A_catalog_with_a_middle_is_served_in_rings_and_the_page_keeps_the_arrowheads_apart()
+    public void A_catalog_with_a_middle_is_drawn_the_one_arrangement_and_the_page_keeps_the_arrowheads_apart()
     {
-        // One arrangement per catalog, chosen by the shape of the graph and never handed to the reader to
-        // switch between: a hub is read outward from the table most relations meet, and the air the rings
-        // leave between the cards is what lets an arrow be drawn straight. A catalog with no such middle
-        // keeps the bands, whose reading order is the dependency itself.
+        // One arrangement per catalog and never a second one handed to the reader to switch between:
+        // a hub is drawn under the tables that name it exactly as a chain is, and the island states no
+        // alternative to toggle into. The room between two arrowheads comes from the border instead —
+        // every relation end is dealt a point of its own — so a hub a dozen tables name is still read
+        // as a dozen arrows.
         var hub = Render(Hub(14));
         var chain = Render(Chain(14));
 
-        // Assert — the engine states the arrangement it drew, and the island hands it to the script.
-        hub.Island.Should().Contain("\"rings\":true");
-        chain.Island.Should().Contain("\"rings\":false");
-        hub.Document.Should().Contain("var inRings = data.rings === true;");
+        // Assert — one arrangement: no field names another, and no line of the script branches on one.
+        hub.Island.Should().NotContain("\"rings\"", "the island states the one drawing it was given");
+        chain.Island.Should().NotContain("\"rings\"");
+        hub.Document.Should().NotContain("inRings", "the script has no second arrangement to read");
+        hub.Document.Should().NotContain("data-zoom=\"star\"", "nobody is offered a picture to toggle");
 
-        // Nobody is offered a second arrangement to toggle the picture into.
-        hub.Document.Should().NotContain("data-zoom=\"star\"");
+        // Every arrow of the hub ends on a point of its own: heads that meet on one place are printed
+        // as one thick stroke belonging to no table in particular.
+        var heads = Heads(Picture(hub.Document));
 
-        // Every end of a ringed picture is dealt its own point on the border it faces: thirteen arrows
-        // let go at the one place a centre line crosses a border are drawn as one thick stroke.
-        hub.Document.Should().Contain("function drawStraight()")
-            .And.Contain("function addEnd(ends, edge, node, box, other)")
-            .And.Contain("function sideToward(box, towards)");
-
-        // A card the reader carries re-deals the whole ringed picture instead of redrawing one arrow, and
-        // the routes the engine served come back once the last card is put home.
-        hub.Document.Should().Contain("if (inRings) { drawStraight(); return; }")
-            .And.Contain("if (carried.size > 0) { drawStraight(); return; }");
+        heads.Should().HaveCount(hub.Model.Edges.Count, "one head per relation");
+        heads.Distinct().Should().HaveCount(heads.Count, "two arrow heads on one point read as one thick arrow");
     }
 
     [Fact]
@@ -868,7 +863,7 @@ public sealed class CatalogGraphHtmlRendererTests
     public void A_mark_never_prints_on_the_mark_of_the_end_beside_it()
     {
         // Keeping two arrows from merging is two rules: the border deals every end its own point at
-        // least GraphEdgePorts.MinStep away from the next, and a mark's own ink has to fit inside that
+        // least GraphGeometryContract.MinimumPortStep away from the next, and a mark's own ink has to fit inside that
         // room with a gap left over. A marker scales with the line it hangs on (markerUnits defaults to
         // stroke-width), so the line's width is part of its ink. All three numbers are read back from
         // the drawing rather than repeated here, so fattening a mark or thinning the room fails.
@@ -880,8 +875,8 @@ public sealed class CatalogGraphHtmlRendererTests
         // Room enough for the ink is not room enough: a step that leaves a third of a pixel printed the
         // two heads as one thick mark, which is what made a card with two neighbours look like a card
         // with one arrow whose head was drawn twice (D4).
-        (GraphEdgePorts.MinStep - ink).Should().BeGreaterThanOrEqualTo(6, "two neighbouring heads would print as one thick arrow");
-        (GraphEdgePorts.MinStep - bar).Should().BeGreaterThanOrEqualTo(6, "a bar would print on the head of the end beside it");
+        (GraphGeometryContract.MinimumPortStep - ink).Should().BeGreaterThanOrEqualTo(6, "two neighbouring heads would print as one thick arrow");
+        (GraphGeometryContract.MinimumPortStep - bar).Should().BeGreaterThanOrEqualTo(6, "a bar would print on the head of the end beside it");
     }
 
     [Fact]
@@ -1020,6 +1015,31 @@ public sealed class CatalogGraphHtmlRendererTests
     private static string Picture(string document) =>
         document[document.IndexOf("<g id=\"viewport\"", StringComparison.Ordinal)..];
 
+    /// <summary>
+    /// Where the arrow head of every painted line lands: the last point of its path data. The head is the
+    /// parent end, so two relations that let go at one place are two entries of the same point — the
+    /// merge the port assignment exists to prevent, read straight off the picture the reader is handed.
+    /// </summary>
+    /// <param name="picture">The viewport's own markup.</param>
+    /// <returns>One point per painted line, in edge order.</returns>
+    private static List<(double X, double Y)> Heads(string picture)
+    {
+        var heads = new List<(double X, double Y)>();
+        foreach (Match line in Regex.Matches(picture, "<path class=\"edge[^\"]*\" data-e=\"\\d+\" d=\"([^\"]*)\""))
+        {
+            if (line.Value.Contains("pick", StringComparison.Ordinal))
+            {
+                continue;
+            }
+
+            var numbers = Regex.Matches(line.Groups[1].Value, "-?\\d+(?:\\.\\d+)?")
+                .Select(match => double.Parse(match.Value, CultureInfo.InvariantCulture)).ToArray();
+            heads.Add((numbers[^2], numbers[^1]));
+        }
+
+        return heads;
+    }
+
     private static int Count(string text, string fragment)
     {
         var count = 0;
@@ -1096,7 +1116,7 @@ public sealed class CatalogGraphHtmlRendererTests
         return fixture;
     }
 
-    /// <summary>One table that every other table names: the shape the rings are drawn around.</summary>
+    /// <summary>One table that every other table names: a hub, and the band of its children under it.</summary>
     private static CatalogGraphFixture Hub(int satellites)
     {
         var fixture = CatalogGraphFixture.Create()
@@ -1123,7 +1143,7 @@ public sealed class CatalogGraphHtmlRendererTests
     {
         var view = fixture.Build();
         var model = new CatalogGraphAnalyzer().Analyze(view);
-        var layout = new GraphLayoutEngine().Compute(model);
+        var layout = new GraphLayoutEngine().Compute(model).Layout!;
         var document = new CatalogGraphHtmlRenderer().Render(view, model, layout, Moment);
         var island = document[
             (document.IndexOf("id=\"data\">", StringComparison.Ordinal) + "id=\"data\">".Length)..

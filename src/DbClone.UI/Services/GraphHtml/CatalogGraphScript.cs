@@ -383,11 +383,6 @@ internal static class CatalogGraphScript
   // table — and the panel and the register keep saying everything else. No other card, arrow or line
   // of the picture is touched.
   function reflow(index) {
-    // A ringed picture re-deals every arrow instead of drawing only the carried card's: the point an end
-    // holds on a border belongs to the whole fan that faces along that side, so moving one table changes
-    // where its neighbours' heads sit as well, and redrawing one arrow box-to-box would fuse its head
-    // with the heads the dealing spread it clear of in the first place.
-    if (inRings) { drawStraight(); return; }
     (edgesOfNode.get(index) || []).forEach(function (edgeIndex) {
       var edge = data.edges[edgeIndex];
       var from = cardBox(edge.c);
@@ -434,18 +429,6 @@ internal static class CatalogGraphScript
     var card = cardElement(index);
     if (card) card.removeAttribute("transform");
     shiftLoops(index, { x: 0, y: 0 });
-    // A ringed picture is dealt over the boxes the cards stand in now, so putting one card back touches
-    // every arrow: while another card is still held out of its place the whole picture is dealt again,
-    // and once the last card is home the arrows take back the routes the engine served them — the bows
-    // included, which a gesture on the page cannot work out again.
-    if (inRings) {
-      if (carried.size > 0) { drawStraight(); return; }
-      routed.forEach(function (path, edgeIndex) {
-        var at = labelAt.get(edgeIndex);
-        if (at) setEdge(edgeIndex, path, Number(at.x), Number(at.y));
-      });
-      return;
-    }
     (edgesOfNode.get(index) || []).forEach(function (edgeIndex) {
       var edge = data.edges[edgeIndex];
       var other = edge.c === index ? edge.p : edge.c;
@@ -453,94 +436,6 @@ internal static class CatalogGraphScript
       var path = routed.get(edgeIndex);
       var at = labelAt.get(edgeIndex);
       if (path !== undefined && at) setEdge(edgeIndex, path, Number(at.x), Number(at.y));
-    });
-  }
-
-  // Which arrangement the engine served. Rings around one middle table leave the space between the cards
-  // empty on purpose, and an arrow of such a picture is drawn the shortest way across it; bands pack the
-  // same cards in a lattice and route their arrows in the corridors between them. The reader's own gesture
-  // has to answer for whichever it was given, so a card carried by hand is drawn again in the arrangement
-  // the document arrived in and not in the other one.
-  var inRings = data.rings === true;
-
-  // The least air two ends need on one side of a card, and the border's own inset: the layout keeps the
-  // same distance between the points it deals, and the inset keeps a head off the card's corner.
-  var PortStep = 14;
-  var PortInset = 8;
-
-  // The side of a card an arrow leaves from: the side that faces the table it goes to. A line drawn to
-  // the border the centre-to-centre line happens to cross can leave through a side that looks the other
-  // way from its own target, which reads as an arrow pointing at the wrong table.
-  function sideToward(box, towards) {
-    var dx = towards.cx - box.cx;
-    var dy = towards.cy - box.cy;
-    if (Math.abs(dx) >= Math.abs(dy)) return dx >= 0 ? "right" : "left";
-    return dy >= 0 ? "bottom" : "top";
-  }
-
-  function addEnd(ends, edge, node, box, other) {
-    var side = sideToward(box, other);
-    var crossed = borderPoint(box, other);
-    if (!ends.has(node)) ends.set(node, []);
-    ends.get(node).push({
-      i: edge.i, node: node, side: side,
-      natural: side === "left" || side === "right" ? crossed.y - box.top : crossed.x - box.left,
-    });
-  }
-
-  // Every arrow of a ringed picture, drawn the shortest way between the points of the border its ends were
-  // dealt. Dealing is what keeps a fan apart: thirteen arrows let go at the one place a centre line
-  // crosses a border are drawn as one thick stroke, and no reader can say which head belongs to which
-  // constraint — so each side is given to the ends that face along it, spread the width of a mark apart
-  // and centred on the middle of the side, and the card's own border was drawn wide enough to hold them.
-  // It is the layout's own rule (GraphEdgePorts) read back onto the page, which is why the whole picture
-  // is dealt at once: an end cannot be placed until the neighbours it shares a side with are known.
-  function drawStraight() {
-    var ends = new Map();
-    data.edges.forEach(function (edge) {
-      if (edge.c === edge.p) return;
-      var from = cardBox(edge.c);
-      var to = cardBox(edge.p);
-      if (!from || !to) return;
-      addEnd(ends, edge, edge.c, from, to);
-      addEnd(ends, edge, edge.p, to, from);
-    });
-
-    var pointOf = new Map();
-    ends.forEach(function (list, index) {
-      var box = cardBox(index);
-      if (!box) return;
-      var sides = new Map();
-      list.forEach(function (end) {
-        var on = sides.get(end.side) || [];
-        on.push(end);
-        sides.set(end.side, on);
-      });
-
-      sides.forEach(function (on, side) {
-        on.sort(function (first, second) { return first.natural - second.natural || first.i - second.i; });
-        var across = side === "top" || side === "bottom";
-        var length = across ? box.right - box.left : box.bottom - box.top;
-        var span = Math.max(0, length - PortInset * 2);
-        var step = on.length > 1 ? Math.min(PortStep, span / (on.length - 1)) : 0;
-        var first = Math.max(PortInset, (length - step * (on.length - 1)) / 2);
-        on.forEach(function (end, position) {
-          var along = first + step * position;
-          pointOf.set(end.i + ":" + end.node, {
-            x: across ? box.left + along : (side === "left" ? box.left : box.right),
-            y: across ? (side === "top" ? box.top : box.bottom) : box.top + along,
-          });
-        });
-      });
-    });
-
-    data.edges.forEach(function (edge) {
-      var from = pointOf.get(edge.i + ":" + edge.c);
-      var to = pointOf.get(edge.i + ":" + edge.p);
-      if (!from || !to) return;
-      setEdge(edge.i,
-        "M " + drawable(from.x) + " " + drawable(from.y) + " L " + drawable(to.x) + " " + drawable(to.y),
-        (from.x + to.x) / 2, (from.y + to.y) / 2);
     });
   }
 
@@ -794,9 +689,6 @@ internal static class CatalogGraphScript
   // that empty corner (T27). Centring is the answer only while the picture fits: the middle of a
   // picture taller than the stage is a corridor as often as it is a table, and a reader who asks for
   // 100% wants the first table, not the middle of nothing.
-  // A ringed picture is the one drawing whose middle is a table by construction: the cards stand on
-  // circles around the middle table, so the corner of its bounding box is empty canvas at any scale and
-  // the picture's own centre is where the reading begins.
   function placeContent(wanted) {
     var stage = svg.parentNode.getBoundingClientRect();
     // A stage the document has not laid out yet measures nothing, and a camera taken against nothing is
@@ -821,10 +713,10 @@ internal static class CatalogGraphScript
     var margin = 16;
     var width = (box.right - box.left) * scale;
     var height = (box.bottom - box.top) * scale;
-    shiftX = inRings || width <= stage.width
+    shiftX = width <= stage.width
       ? (stage.width - width) / 2 - box.left * scale
       : margin - box.left * scale;
-    shiftY = inRings || height <= stage.height
+    shiftY = height <= stage.height
       ? (stage.height - height) / 2 - box.top * scale
       : margin - box.top * scale;
     applyTransform();

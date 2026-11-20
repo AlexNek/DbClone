@@ -19,6 +19,19 @@ internal sealed class BrowserRelationshipPresenter : IRelationshipViewPresenter
 
     /// <inheritdoc />
     /// <remarks>
+    /// A browser has no page this app can write a progress notice into before the document exists, and
+    /// a second file on disk for one would be a file the product does not keep (D1). The pointer covers
+    /// the wait until the document can be handed over.
+    /// </remarks>
+    public Task<bool> ShowNoticeAsync(RelationshipNotice notice, CancellationToken ct)
+    {
+        ArgumentNullException.ThrowIfNull(notice);
+
+        return Task.FromResult(false);
+    }
+
+    /// <inheritdoc />
+    /// <remarks>
     /// <paramref name="refresh"/> and <paramref name="redraw"/> are unused: a browser tab has no
     /// control this app can offer, and a reader who wants a fresh document asks for a new view.
     /// </remarks>

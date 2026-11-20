@@ -30,6 +30,10 @@ internal sealed class RelationshipViewPresenterResolver : IRelationshipViewPrese
     }
 
     /// <inheritdoc />
+    public Task<bool> ShowNoticeAsync(RelationshipNotice notice, CancellationToken ct) =>
+        Choose().ShowNoticeAsync(notice, ct);
+
+    /// <inheritdoc />
     public Task PresentAsync(
         RelationshipDocument document,
         Func<CancellationToken, Task<RelationshipDocument>>? refresh,

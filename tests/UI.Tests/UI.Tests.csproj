@@ -28,4 +28,8 @@
     <ProjectReference Include="..\..\src\DbClone.UI\DbClone.UI.csproj" />
   </ItemGroup>
 
+  <ItemGroup>
+    <None Include="../../refactors/14/characterization/GraphLayoutQualityBounds.json" Link="GraphLayoutQualityBounds.json" CopyToOutputDirectory="PreserveNewest" />
+  </ItemGroup>
+
 </Project>

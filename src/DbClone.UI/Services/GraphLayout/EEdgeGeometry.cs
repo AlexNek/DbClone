@@ -8,9 +8,12 @@ namespace DbClone.UI.Services.GraphLayout;
 /// </summary>
 internal enum EEdgeGeometry
 {
-    /// <summary>The points are joined one to the next by a straight stretch: a chord or a dog-leg.</summary>
-    Polyline,
+    /// <summary>Two points: one direct straight stretch between the ports.</summary>
+    Straight,
 
-    /// <summary>The first and last points are the ends and the middle two are a cubic curve's controls.</summary>
+    /// <summary>1 + 3n points: one or more connected cubic segments, each two controls between its ends.</summary>
     Cubic,
+
+    /// <summary>A closed cubic sequence for a self-reference, on the Cubic encoding with the last point equal to the first.</summary>
+    Loop,
 }

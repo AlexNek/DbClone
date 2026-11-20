@@ -140,8 +140,9 @@ internal sealed class GraphPictureWriter
     private static string EdgePath(EdgeRoute route)
     {
         var points = route.Points;
-        if (route.Geometry == EEdgeGeometry.Polyline || points.Count < 4)
+        if (route.Geometry == EEdgeGeometry.Straight || points.Count < 4)
         {
+            // Straight carries two points and emits one segment.
             var path = new StringBuilder();
             path.Append("M ").Append(GraphHtmlText.Num(points[0].X)).Append(' ').Append(GraphHtmlText.Num(points[0].Y));
 
@@ -153,10 +154,19 @@ internal sealed class GraphPictureWriter
             return path.ToString();
         }
 
-        return $"M {GraphHtmlText.Num(points[0].X)} {GraphHtmlText.Num(points[0].Y)} " +
-            $"C {GraphHtmlText.Num(points[1].X)} {GraphHtmlText.Num(points[1].Y)} " +
-            $"{GraphHtmlText.Num(points[2].X)} {GraphHtmlText.Num(points[2].Y)} " +
-            $"{GraphHtmlText.Num(points[3].X)} {GraphHtmlText.Num(points[3].Y)}";
+        // Cubic and Loop share one walk: one C command per three points after the start.
+        var cubic = new StringBuilder();
+        cubic.Append("M ").Append(GraphHtmlText.Num(points[0].X)).Append(' ').Append(GraphHtmlText.Num(points[0].Y));
+
+        for (var at = 1; at + 2 < points.Count; at += 3)
+        {
+            cubic.Append(" C ")
+                .Append(GraphHtmlText.Num(points[at].X)).Append(' ').Append(GraphHtmlText.Num(points[at].Y)).Append(' ')
+                .Append(GraphHtmlText.Num(points[at + 1].X)).Append(' ').Append(GraphHtmlText.Num(points[at + 1].Y)).Append(' ')
+                .Append(GraphHtmlText.Num(points[at + 2].X)).Append(' ').Append(GraphHtmlText.Num(points[at + 2].Y));
+        }
+
+        return cubic.ToString();
     }
 
     private void WriteNodes(StringBuilder html)

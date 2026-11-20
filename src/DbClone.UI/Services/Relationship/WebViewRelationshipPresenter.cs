@@ -41,6 +41,37 @@ internal sealed class WebViewRelationshipPresenter : IInAppRelationshipPresenter
     public bool HasWindow => _window is not null;
 
     /// <inheritdoc />
+    /// <remarks>
+    /// The window is created here even when nothing has been arranged yet, because the wait the reader
+    /// reported is spent reading the origin: a viewer that opens first states the origin and the work,
+    /// and the document replaces the notice in the same window.
+    /// </remarks>
+    public async Task<bool> ShowNoticeAsync(RelationshipNotice notice, CancellationToken ct)
+    {
+        ArgumentNullException.ThrowIfNull(notice);
+
+        try
+        {
+            await UiDispatcher
+                .InvokeAsync(() => NoticeOnUiThreadAsync(notice, ct))
+                .ConfigureAwait(false);
+
+            return true;
+        }
+        catch (OperationCanceledException)
+        {
+            return false;
+        }
+        catch (Exception ex)
+        {
+            // The runtime and not the request is what failed: the pointer takes the wait, and the
+            // document still falls back to the browser when it is ready.
+            _logger.LogWarning(ex, "The in-app relationship view could not be opened for its notice");
+            return false;
+        }
+    }
+
+    /// <inheritdoc />
     public async Task PresentAsync(
         RelationshipDocument document,
         Func<CancellationToken, Task<RelationshipDocument>>? refresh,
@@ -66,31 +97,43 @@ internal sealed class WebViewRelationshipPresenter : IInAppRelationshipPresenter
         }
     }
 
+    private async Task NoticeOnUiThreadAsync(RelationshipNotice notice, CancellationToken ct) =>
+        await EnsureWindow().ShowNoticeAsync(notice, ct).ConfigureAwait(true);
+
     private async Task PresentOnUiThreadAsync(
         RelationshipDocument document,
         Func<CancellationToken, Task<RelationshipDocument>>? refresh,
         Func<IReadOnlySet<int>, RelationshipDocument>? redraw,
         CancellationToken ct)
     {
+        await EnsureWindow().ShowDocumentAsync(document, refresh, redraw, ct).ConfigureAwait(true);
+    }
+
+    /// <summary>The one window, created on the UI thread the first time either the notice or a document needs it.</summary>
+    private RelationshipViewWindow EnsureWindow() =>
         _window ??= new RelationshipViewWindow(_logger, OpenInBrowserAsync, SaveAsync)
         {
             Owner = System.Windows.Application.Current.MainWindow,
         };
 
-        await _window.ShowDocumentAsync(document, refresh, redraw, ct).ConfigureAwait(true);
-    }
-
     /// <summary>The window's "open in browser": the one file rule, shared with the fallback (D10).</summary>
     private Task OpenInBrowserAsync(RelationshipDocument document, CancellationToken ct) =>
         _fallback.PresentAsync(document, refresh: null, redraw: null, ct);
 
-    /// <summary>The window's "save as": a copy wherever the reader asks for it, in the product's encoding.</summary>
+    /// <summary>
+    /// The window's "save as": a copy wherever the reader asks for it, of the page as it stands — a table
+    /// they carried by hand is in the copy, because the arrangement they made is the one they asked to keep.
+    /// </summary>
     private async Task SaveAsync(RelationshipDocument document, CancellationToken ct)
     {
+        // The page is read before the reader is asked where to keep it: a page that cannot be read saves
+        // nothing at all, rather than a file that quietly puts back every card they moved.
+        var shown = _window is null ? null : await _window.ReadShownHtmlAsync().ConfigureAwait(true);
+
         var path = _dialogs.SaveFile("HTML File|*.html", SuggestedName(document.Origin));
         if (string.IsNullOrWhiteSpace(path)) return;
 
-        await RelationshipViewFile.WriteToAsync(path, document.Html, ct).ConfigureAwait(true);
+        await RelationshipViewFile.WriteToAsync(path, shown ?? document.Html, ct).ConfigureAwait(true);
     }
 
     /// <summary>A name a reader can keep: the origin's own label, with nothing a file system refuses.</summary>

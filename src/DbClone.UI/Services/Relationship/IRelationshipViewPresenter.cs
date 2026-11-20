@@ -6,6 +6,19 @@ namespace DbClone.UI.Services.Relationship;
 /// </summary>
 internal interface IRelationshipViewPresenter
 {
+    /// <summary>
+    /// States what the request is doing before its graph exists, or why it could not be had, so a
+    /// relationship view is visible from the moment it is asked for instead of after the read.
+    /// </summary>
+    /// <param name="notice">The origin, the sentence and the reason or the promise beside it.</param>
+    /// <param name="ct">The caller's cancellation token.</param>
+    /// <returns>
+    /// Whether the notice reached the reader inside the app. A presenter with no window of its own
+    /// answers <see langword="false"/>, and the workflow says the request was heard with the waiting
+    /// pointer until the document can be handed over.
+    /// </returns>
+    Task<bool> ShowNoticeAsync(RelationshipNotice notice, CancellationToken ct);
+
     /// <summary>Shows one document, with a way to build it again on request.</summary>
     /// <param name="document">The document to show.</param>
     /// <param name="refresh">

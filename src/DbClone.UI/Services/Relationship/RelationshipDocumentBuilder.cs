@@ -35,8 +35,15 @@ internal sealed class RelationshipDocumentBuilder
 
     /// <summary>Renders one graph into the document that describes it.</summary>
     /// <param name="view">The graph, read from a catalog or from a live database.</param>
-    /// <returns>The origin the graph states and the whole document, held in memory.</returns>
-    internal RelationshipDocument Build(RelationshipGraphView view) => Build(view, EmptyChips);
+    /// <returns>The document, or the layout failure that stopped it.</returns>
+    internal RelationshipDocumentResult Build(RelationshipGraphView view) => Build(view, EmptyChips, default);
+
+    /// <summary>Renders one graph, the caller's cancellation reaching the arrangement.</summary>
+    /// <param name="view">The graph, read from a catalog or from a live database.</param>
+    /// <param name="cancellation">The caller's own cancellation.</param>
+    /// <returns>The document, or the layout failure that stopped it.</returns>
+    internal RelationshipDocumentResult Build(RelationshipGraphView view, CancellationToken cancellation) =>
+        Build(view, EmptyChips, cancellation);
 
     /// <summary>
     /// Renders one graph with the clusters the reader switched off left out of the picture, so the
@@ -45,8 +52,25 @@ internal sealed class RelationshipDocumentBuilder
     /// </summary>
     /// <param name="view">The graph, read from a catalog or from a live database.</param>
     /// <param name="offChips">The chips the reader switched off, by chip index.</param>
-    /// <returns>The origin the graph states and the whole document, held in memory.</returns>
-    internal RelationshipDocument Build(RelationshipGraphView view, IReadOnlySet<int> offChips)
+    /// <returns>The document, or the layout failure that stopped it.</returns>
+    internal RelationshipDocumentResult Build(RelationshipGraphView view, IReadOnlySet<int> offChips) =>
+        Build(view, offChips, default);
+
+    /// <summary>The three stages, for one picture drawn with a selection and a token.</summary>
+    /// <param name="view">The graph, read from a catalog or from a live database.</param>
+    /// <param name="offChips">The chips the reader switched off, by chip index.</param>
+    /// <param name="cancellation">The caller's own cancellation.</param>
+    /// <param name="timeLimit">
+    /// The arrangement's watchdog, <see cref="GraphSearchBudget.MaximumElapsedLayoutTime"/> when omitted. A
+    /// limit of zero answers with the plain complete arrangement, which is how the first picture reaches the
+    /// reader while the refining is still to come.
+    /// </param>
+    /// <returns>The document, or the layout failure that stopped it.</returns>
+    internal RelationshipDocumentResult Build(
+        RelationshipGraphView view,
+        IReadOnlySet<int> offChips,
+        CancellationToken cancellation,
+        TimeSpan? timeLimit = null)
     {
         ArgumentNullException.ThrowIfNull(view);
         ArgumentNullException.ThrowIfNull(offChips);
@@ -57,11 +81,22 @@ internal sealed class RelationshipDocumentBuilder
         var hidden = Hidden(whole, offChips);
         var shown = hidden.Count == 0 ? view : view.Without(hidden);
         var model = hidden.Count == 0 ? whole : _analyzer.Analyze(shown);
-        var layout = _layout.Compute(model);
 
-        return new RelationshipDocument(
-            view.Origin,
-            _renderer.Render(shown, model, layout, DateTimeOffset.Now, whole, offChips));
+        // A picture the arrangement could not finish is reported instead of a document that would be
+        // missing relations: the caller says what happened beside the picture it could not replace.
+        var result = _layout.Compute(model, cancellation, timeLimit);
+        if (result.Layout is not { } layout)
+        {
+            return RelationshipDocumentResult.Failed(result.Failure!);
+        }
+
+        return RelationshipDocumentResult.Success(
+            new RelationshipDocument(
+                view.Origin,
+                _renderer.Render(shown, model, layout, DateTimeOffset.Now, whole, offChips)),
+            result.IsDegraded,
+            result.IsRough,
+            result.Facts);
     }
 
     /// <summary>The selection that switches nothing off, which is how every document starts.</summary>

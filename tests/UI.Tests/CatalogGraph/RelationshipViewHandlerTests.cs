@@ -70,7 +70,11 @@ public sealed class RelationshipViewHandlerTests : IDisposable
         await sut.ShowCatalogAsync(catalog, new WorkflowState());
 
         // Assert — the document reaches the presenter and the folder is untouched: a view writes nothing.
-        _presenter.Presented.Should().ContainSingle().Which.Html.Should().StartWith("<!DOCTYPE html>");
+        // One document arrives: the reader is shown an arrangement once, not a plain one that is then
+        // replaced in front of them.
+        _presenter.Presented.Should().ContainSingle();
+        _presenter.Presented.Should().OnlyContain(document => document.Html.StartsWith("<!DOCTYPE html>"));
+        _presenter.Presented[^1].Origin.Label.Should().Be("fixture");
         Snapshot(catalog).Should().BeEquivalentTo(before);
         TempFiles().Should().BeEmpty();
     }
@@ -96,7 +100,7 @@ public sealed class RelationshipViewHandlerTests : IDisposable
             Arg.Is<ConnectionInfo>(info => info != null && info.DatabaseName == "testdb"),
             ERelationshipRole.Target,
             Arg.Any<CancellationToken>());
-        _presenter.Presented.Should().ContainSingle();
+        _presenter.Presented.Should().NotBeEmpty();
         Snapshot(_root).Should().BeEquivalentTo(before);
         TempFiles().Should().BeEmpty();
     }
@@ -119,7 +123,7 @@ public sealed class RelationshipViewHandlerTests : IDisposable
         // Assert
         state.LogMessages.Should().ContainSingle(entry => entry.Level == ELogLevel.Warning)
             .Which.Message.Should().Contain("testdb");
-        _presenter.Presented.Should().ContainSingle("a database with no tables is still a document");
+        _presenter.Presented.Should().NotBeEmpty("a database with no tables is still a document");
     }
 
     [Fact]
@@ -163,13 +167,13 @@ public sealed class RelationshipViewHandlerTests : IDisposable
     }
 
     [Fact]
-    public async Task ShowCatalogAsync_HoldsTheWaitingPointer_AndPutsItBackWhenTheRunEnds()
+    public async Task The_waiting_pointer_is_the_answer_only_for_a_presenter_with_no_window()
     {
-        // Arrange — reading an origin and arranging its picture take seconds, so the pointer is what tells
-        // the reader the request was heard rather than lost (D7).
+        // Arrange — the browser has no page to state the work in before the document exists, so the
+        // pointer is what tells the reader the request was heard (D7).
         var catalog = CreateCatalog();
         Reading(View());
-        var sut = CreateHandler();
+        var sut = CreateHandler(new RecordingPresenter { AcknowledgesNotice = false });
 
         // Act
         await sut.ShowCatalogAsync(catalog, new WorkflowState());
@@ -186,6 +190,86 @@ public sealed class RelationshipViewHandlerTests : IDisposable
         _cursor.Calls.Should().Equal(
             nameof(IWaitCursor.Show), nameof(IWaitCursor.Hide),
             nameof(IWaitCursor.Show), nameof(IWaitCursor.Hide));
+    }
+
+    [Fact]
+    public async Task The_pointer_is_not_raised_when_the_window_already_states_the_work()
+    {
+        // Arrange — an in-app viewer opens with the notice, so a pointer over the main window would
+        // say nothing the reader is not already looking at.
+        var catalog = CreateCatalog();
+        Reading(View());
+        var sut = CreateHandler();
+
+        // Act
+        await sut.ShowCatalogAsync(catalog, new WorkflowState());
+
+        // Assert
+        _presenter.Notices.Should().ContainSingle();
+        _cursor.Calls.Should().BeEmpty();
+    }
+
+    [Fact]
+    public async Task The_viewer_states_the_origin_before_that_origin_is_read()
+    {
+        // Arrange — the read is the long part of the request, so the window names what it is reading
+        // before the first fact has arrived.
+        var catalog = CreateCatalog();
+        var noticesWhenRead = -1;
+        _graph.ReadCatalogAsync(Arg.Any<string>(), Arg.Any<CancellationToken>())
+            .Returns(_ =>
+            {
+                noticesWhenRead = _presenter.Notices.Count;
+
+                return Task.FromResult(View());
+            });
+        var sut = CreateHandler();
+
+        // Act
+        await sut.ShowCatalogAsync(catalog, new WorkflowState());
+
+        // Assert
+        noticesWhenRead.Should().Be(1, "the notice is the window's first page, not its last");
+        _presenter.Notices[0].Origin.Should().Be(CatalogFolderName);
+        _presenter.Notices[0].Headline.Should().Contain("Reading");
+        _presenter.Notices[0].IsFailure.Should().BeFalse();
+    }
+
+    [Fact]
+    public async Task A_side_is_named_in_the_notice_so_two_panels_cannot_be_confused()
+    {
+        // Arrange — the same database asked from both panels states which side is being read.
+        _graph.ReadDatabaseAsync(Arg.Any<ConnectionInfo>(), Arg.Any<ERelationshipRole>(), Arg.Any<CancellationToken>())
+            .Returns(Task.FromResult(View()));
+        var sut = CreateHandler();
+
+        // Act
+        await sut.ShowDatabaseAsync(Connection(), ERelationshipRole.Source, new WorkflowState());
+
+        // Assert
+        _presenter.Notices[0].Origin.Should().Be("testdb (source)");
+    }
+
+    [Fact]
+    public async Task A_read_that_fails_is_stated_in_the_window_that_was_opened_for_it()
+    {
+        // Arrange — the failure the reader reported was invisible: the window is already open, so the
+        // reason it stopped belongs in it rather than in a state the banner may not show.
+        var catalog = CreateCatalog();
+        _graph.ReadCatalogAsync(Arg.Any<string>(), Arg.Any<CancellationToken>())
+            .Returns(Task.FromException<RelationshipGraphView>(new DirectoryNotFoundException("no catalog")));
+        var state = new WorkflowState();
+        var sut = CreateHandler();
+
+        // Act
+        await sut.ShowCatalogAsync(catalog, state);
+
+        // Assert
+        state.LastError.Should().Contain("no catalog");
+        _presenter.Presented.Should().BeEmpty("there is no picture to present");
+        _presenter.Notices.Should().HaveCount(2, "one for the work, one for the reason it stopped");
+        _presenter.Notices[^1].IsFailure.Should().BeTrue();
+        _presenter.Notices[^1].Detail.Should().Be("no catalog");
     }
 
     [Fact]
@@ -408,11 +492,25 @@ public sealed class RelationshipViewHandlerTests : IDisposable
     {
         internal List<RelationshipDocument> Presented { get; } = [];
 
+        internal List<RelationshipNotice> Notices { get; } = [];
+
         internal Func<CancellationToken, Task<RelationshipDocument>>? Refresh { get; private set; }
 
         internal Func<IReadOnlySet<int>, RelationshipDocument>? Redraw { get; private set; }
 
         internal Exception? Failure { get; init; }
+
+        /// <summary>Whether the notice reached a window; false is the browser presenter's answer.</summary>
+        internal bool AcknowledgesNotice { get; init; } = true;
+
+        public Task<bool> ShowNoticeAsync(RelationshipNotice notice, CancellationToken ct)
+        {
+            if (Failure is not null) throw Failure;
+
+            Notices.Add(notice);
+
+            return Task.FromResult(AcknowledgesNotice);
+        }
 
         public Task PresentAsync(
             RelationshipDocument document,
