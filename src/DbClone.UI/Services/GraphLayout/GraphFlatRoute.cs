@@ -7,19 +7,22 @@ namespace DbClone.UI.Services.GraphLayout;
 /// <param name="Top">The smallest y.</param>
 /// <param name="Right">The largest x.</param>
 /// <param name="Bottom">The largest y.</param>
+/// <param name="IsChord">Whether the route is the chord between its two ports, which the cards are painted over.</param>
 internal sealed record GraphFlatRoute(
     int EdgeIndex,
     IReadOnlyList<GraphPoint> Points,
     double Left,
     double Top,
     double Right,
-    double Bottom)
+    double Bottom,
+    bool IsChord)
 {
     /// <summary>Creates the flat route and measures its box.</summary>
     /// <param name="edgeIndex">The relation index.</param>
     /// <param name="points">The flattened centerline, at least one point.</param>
+    /// <param name="isChord">Whether the route is the chord between its two ports.</param>
     /// <returns>The flat route.</returns>
-    public static GraphFlatRoute Of(int edgeIndex, IReadOnlyList<GraphPoint> points)
+    public static GraphFlatRoute Of(int edgeIndex, IReadOnlyList<GraphPoint> points, bool isChord = false)
     {
         var (left, top, right, bottom) = (double.MaxValue, double.MaxValue, double.MinValue, double.MinValue);
         foreach (var point in points)
@@ -30,7 +33,7 @@ internal sealed record GraphFlatRoute(
             bottom = Math.Max(bottom, point.Y);
         }
 
-        return new GraphFlatRoute(edgeIndex, points, left, top, right, bottom);
+        return new GraphFlatRoute(edgeIndex, points, left, top, right, bottom, isChord);
     }
 
     private GraphStrokeIndex? _index;

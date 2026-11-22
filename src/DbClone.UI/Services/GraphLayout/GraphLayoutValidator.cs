@@ -6,6 +6,14 @@ namespace DbClone.UI.Services.GraphLayout;
 /// joins included, apart from the port it attaches at — and no shared or near-parallel run between two
 /// routes. A crossing at one point is classified and counted; it is not an overlap. Nothing here is a
 /// weighted cost: a layout with one failure is invalid however short it is.
+/// <para>
+/// A chord — a relation drawn as the one straight segment between its two ports — is held to less than that:
+/// its ends must sit on the borders of the cards it joins, and it must stay finite, but the cards are painted
+/// over its ink. A chord may pass behind a table, leave a border at any angle, and run beside or across
+/// another chord; that is what a catalog of ranks looks like. Every meeting between chords is still counted
+/// as a crossing, so the score can prefer the arrangement that crosses least. A curve keeps every rule,
+/// because nothing hides it where it wanders.
+/// </para>
 /// </summary>
 internal sealed class GraphLayoutValidator
 {
@@ -55,9 +63,17 @@ internal sealed class GraphLayoutValidator
             }
 
             var own = ends[route.EdgeIndex];
-            CheckApproach(route, flat, nodes[own.ChildNode], nodes[own.ParentNode], failures);
-            CheckCards(flat, nodes, own, cards, failures);
-            CheckSelfIntersection(flat, route, failures);
+            if (flat.IsChord)
+            {
+                CheckEnds(flat, nodes[own.ChildNode], nodes[own.ParentNode], failures);
+            }
+            else
+            {
+                CheckApproach(route, flat, nodes[own.ChildNode], nodes[own.ParentNode], failures);
+                CheckCards(flat, nodes, own, cards, failures);
+                CheckSelfIntersection(flat, route, failures);
+            }
+
             flats.Add(flat);
         }
 
@@ -144,9 +160,16 @@ internal sealed class GraphLayoutValidator
             return new GraphRouteCheck(null, failures, []);
         }
 
-        CheckApproach(route, flat, nodes[own.ChildNode], nodes[own.ParentNode], failures);
-        CheckCards(flat, nodes, own, cards ?? new GraphCardIndex(nodes, GraphGeometryContract.CardCenterlineClearance), failures);
-        CheckSelfIntersection(flat, route, failures);
+        if (!flat.IsChord)
+        {
+            CheckApproach(route, flat, nodes[own.ChildNode], nodes[own.ParentNode], failures);
+            CheckCards(flat, nodes, own, cards ?? new GraphCardIndex(nodes, GraphGeometryContract.CardCenterlineClearance), failures);
+            CheckSelfIntersection(flat, route, failures);
+        }
+        else
+        {
+            CheckEnds(flat, nodes[own.ChildNode], nodes[own.ParentNode], failures);
+        }
 
         var crossings = new List<GraphCrossing>();
         foreach (var other in near(flat))
@@ -176,7 +199,7 @@ internal sealed class GraphLayoutValidator
 
         if (route.Geometry == EEdgeGeometry.Straight)
         {
-            return GraphFlatRoute.Of(route.EdgeIndex, route.Points);        
+            return GraphFlatRoute.Of(route.EdgeIndex, route.Points, isChord: route.Points.Count == 2);
         }
 
         var flat = GraphGeometry.Flatten(route.Points);
@@ -188,6 +211,24 @@ internal sealed class GraphLayoutValidator
 
         return GraphFlatRoute.Of(route.EdgeIndex, flat.Points);
     }
+
+    /// <summary>
+    /// A chord's two ends must sit on the borders of the cards they join: the segment leans however the cards
+    /// stand, but a relation that begins in the open is not attached to anything.
+    /// </summary>
+    private static void CheckEnds(GraphFlatRoute flat, NodePlacement start, NodePlacement end, List<RouteFailure> failures)
+    {
+        if (DistanceToBorder(start, flat.Points[0]) > BorderTolerance || DistanceToBorder(end, flat.Points[^1]) > BorderTolerance)
+        {
+            failures.Add(new RouteFailure(flat.EdgeIndex, ERouteFailureKind.InvalidPortApproach, [], []));
+        }
+    }
+
+    /// <summary>How far a point stands from the nearest side of a card.</summary>
+    private static double DistanceToBorder(NodePlacement card, GraphPoint point) =>
+        Math.Min(
+            Math.Min(Math.Abs(point.X - card.TopLeft.X), Math.Abs(point.X - card.Right)),
+            Math.Min(Math.Abs(point.Y - card.TopLeft.Y), Math.Abs(point.Y - card.Bottom)));
 
     /// <summary>The route must leave its start card and enter its end card along the border's outward normal.</summary>
     private static void CheckApproach(EdgeRoute route, GraphFlatRoute flat, NodePlacement start, NodePlacement end, List<RouteFailure> failures)
@@ -351,6 +392,20 @@ internal sealed class GraphLayoutValidator
     private static void CheckPair(GraphFlatRoute low, GraphFlatRoute high, List<RouteFailure> failures, List<GraphCrossing> crossings)
     {
         var found = Crossings(low, high);
+
+        // A pair with a chord in it is compared by its crossings alone: the cards are painted over the chord,
+        // so a chord behind a card, beside another chord, beside a self-reference's arc or at an angle to a
+        // border is not a defect.
+        if (low.IsChord || high.IsChord)
+        {
+            foreach (var crossing in found)
+            {
+                crossings.Add(new GraphCrossing(low.EdgeIndex, high.EdgeIndex, crossing.Point, crossing.Angle, true));
+            }
+
+            return;
+        }
+
         var shared = HasSharedRun(low, high, found);
         var shallow = found.Any(crossing => crossing.Angle < GraphGeometryContract.MinimumCrossingAngle);
 

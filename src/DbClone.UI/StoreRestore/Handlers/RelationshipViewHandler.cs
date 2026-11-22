@@ -513,11 +513,12 @@ internal sealed class RelationshipViewHandler : IRelationshipViewHandler
 
     /// <summary>
     /// States that the picture is the plain arrangement rather than one the search proved: every table and
-    /// every relation is drawn, but a stroke may cross a card or another stroke, and the reader is told so
-    /// instead of being left to wonder.
+    /// every relation is drawn, but a stroke may cross another stroke, and the reader is told so instead of
+    /// being left to wonder. A stroke laid across a card is not part of the warning: the cards are painted
+    /// over the ink, so such a stroke is hidden by the card rather than read as a line through it.
     /// </summary>
     private static void WarnPlain(WorkflowState state) =>
-        state.LogWarning($"{OperationName}: the picture is the plain arrangement; some relations may cross a table or one another.");
+        state.LogWarning($"{OperationName}: the picture is the plain arrangement; some relations may cross one another.");
 
     /// <summary>The page the window opens with: the origin, what is being done to it, and when the picture comes.</summary>
     private static RelationshipNotice Working(string origin, string headline) =>

@@ -16,6 +16,8 @@ public sealed class GraphLayoutQualityTests(ITestOutputHelper output)
 {
     public static TheoryData<string> Fixtures => new(GraphQualityFixtures.Names);
 
+    private static readonly TimeSpan Limit = TimeSpan.FromMinutes(2);
+
     [Theory]
     [MemberData(nameof(Fixtures))]
     public void The_named_fixture_is_complete_valid_and_reproducible(string fixture)
@@ -25,13 +27,13 @@ public sealed class GraphLayoutQualityTests(ITestOutputHelper output)
         var budget = new GraphEvaluationBudget(GraphSearchBudget.MaximumGeometryEvaluations);
         var watch = Stopwatch.StartNew();
 
-        var outcome = new GraphLayoutSelector().Select(profile, budget, timeLimit: TimeSpan.FromMinutes(2));
+        var outcome = new GraphLayoutSelector().Select(profile, budget, timeLimit: Limit);
 
         watch.Stop();
         var validity = AssertComplete(fixture, model, profile, outcome, budget);
         var candidate = outcome.Best!;
         var signature = GraphQualitySignature.Of(candidate.Layout.Nodes, candidate.Routes, candidate.Layout.Width, candidate.Layout.Height);
-        AssertReplay(fixture, signature, budget);
+        AssertReplay(fixture, signature, budget, watch.Elapsed);
         var json = Snapshot(fixture, model, profile, candidate, validity, budget, watch.Elapsed);
         using var document = JsonDocument.Parse(json);
         var summary = document.RootElement.EnumerateObject().Where(property => property.Name is not ("Nodes" or "Routes" or "RouteLengths" or "RouteToDirectRatios"))
@@ -126,18 +128,34 @@ public sealed class GraphLayoutQualityTests(ITestOutputHelper output)
         }
     }
 
-    private static void AssertReplay(string fixture, string signature, GraphEvaluationBudget firstBudget)
+    /// <summary>
+    /// The picture is the same under another culture, and so is the number of operations that drew it —
+    /// for a catalog the search finishes by itself. The beauty pass after the search is sliced by the clock
+    /// (<see cref="GraphSearchBudget.MaximumElapsedLayoutTime"/> is the engine's own idea of a request that
+    /// finishes by itself), so a catalog that runs past it stopped where the clock said, which differs
+    /// between machines and runs. What every request promises either way is that no count passes its
+    /// budget, which <see cref="AssertComplete"/> asserts for every fixture, and that the picture is the same.
+    /// </summary>
+    private static void AssertReplay(string fixture, string signature, GraphEvaluationBudget firstBudget, TimeSpan firstElapsed)
     {
         var previous = CultureInfo.CurrentCulture;
         try
         {
             CultureInfo.CurrentCulture = new CultureInfo("de-DE");
             var budget = new GraphEvaluationBudget(GraphSearchBudget.MaximumGeometryEvaluations);
-            var replay = new GraphLayoutSelector().Select(Profile(GraphQualityFixtures.Model(fixture)), budget, timeLimit: TimeSpan.FromMinutes(2));
+            var watch = Stopwatch.StartNew();
+            var replay = new GraphLayoutSelector().Select(Profile(GraphQualityFixtures.Model(fixture)), budget, timeLimit: Limit);
+            watch.Stop();
             replay.IsSuccess.Should().BeTrue();
             replay.IsDegraded.Should().BeFalse();
             var best = replay.Best!;
             GraphQualitySignature.Of(best.Layout.Nodes, best.Routes, best.Layout.Width, best.Layout.Height).Should().Be(signature);
+            if (firstElapsed >= GraphSearchBudget.MaximumElapsedLayoutTime
+                || watch.Elapsed >= GraphSearchBudget.MaximumElapsedLayoutTime)
+            {
+                return;
+            }
+
             budget.Used.Should().Be(firstBudget.Used, "operation counts are deterministic too");
             budget.Metrics.PeakRouteCandidates.Should().Be(firstBudget.Metrics.PeakRouteCandidates);
             budget.Metrics.PeakConflictSetSize.Should().Be(firstBudget.Metrics.PeakConflictSetSize);

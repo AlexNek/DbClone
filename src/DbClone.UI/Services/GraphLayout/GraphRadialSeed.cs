@@ -26,6 +26,7 @@ internal static class GraphRadialSeed
         var indexOf = nodes.Select((node, at) => (node, at)).ToDictionary(pair => pair.node, pair => pair.at);
         var radius = 0.0;
         var previousWidest = 0.0;
+        var rings = new Dictionary<int, (double Radius, double Step)>();
 
         for (var ring = 0; ring <= distance.Values.Max(); ring++)
         {
@@ -40,6 +41,7 @@ internal static class GraphRadialSeed
             var needed = members.Sum(node => profile.Widths[node] + GraphPlacementConstants.CardGap) / (2 * Math.PI);
             var step = ring == 0 ? 0 : GraphCard.Height + GraphPlacementConstants.RowGap + ((previousWidest + widest) / 4);
             radius = ring == 0 && members.Count == 1 ? 0 : Math.Max(needed, radius + step);
+            rings[ring] = (radius, step);
 
             var angles = Spread(members, facing, radius, profile.Widths);
             for (var at = 0; at < members.Count; at++)
@@ -53,6 +55,18 @@ internal static class GraphRadialSeed
         }
 
         GraphCardSeparator.Settle(nodes, x, y, profile.Widths);
+
+        GraphLaneReservation.Reserve(
+            nodes,
+            x,
+            y,
+            profile.Widths,
+            nodes.Select(node => distance[node]).ToArray(),
+            rings,
+            profile.Edges
+                .Where(edge => edge.Child != edge.Parent && indexOf.ContainsKey(edge.Child) && indexOf.ContainsKey(edge.Parent))
+                .Select(edge => (indexOf[edge.Child], indexOf[edge.Parent]))
+                .ToArray());
 
         return GraphLocalLayout.FromCentres(nodes, x, y, profile.Widths);
     }

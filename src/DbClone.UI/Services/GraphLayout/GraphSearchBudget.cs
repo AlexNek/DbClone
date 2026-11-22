@@ -78,4 +78,12 @@ internal static class GraphSearchBudget
 
     /// <summary>How many crossings crossing removal tries placement moves for in one round.</summary>
     public const int MaximumCrossingsPerMoveRound = 3;
+    /// <summary>The angle, in radians, one move of the radial lane reservation turns a card along its ring.</summary>
+    public const double ReservationAngleStep = 0.03;
+    /// <summary>How many angular steps in one direction the radial lane reservation tries for one card.</summary>
+    public const int MaximumReservationSteps = 24;
+    /// <summary>How many sweeps over the cards the radial lane reservation makes.</summary>
+    public const int MaximumReservationRounds = 4;
+    /// <summary>How many ring growths the radial lane reservation may accept in one component.</summary>
+    public const int MaximumReservationGrowths = 6;
 }

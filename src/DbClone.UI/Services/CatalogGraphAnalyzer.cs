@@ -17,10 +17,10 @@ namespace DbClone.UI.Services;
 /// index — so a rule can change in one place and every consumer of it stays in step (D12).
 /// </para>
 /// <para>
-/// The three size decisions below are product defaults stated apart from any readability claim: how
-/// many tables may open at once, how dense the opening picture may be, and how large a cyclic group
-/// may grow before it is drawn behind a supernode. They are constants here so a test asserts the rule
-/// and not a pixel.
+/// The size decision below is a product default stated apart from any readability claim: how large a
+/// cyclic group may grow before it is drawn behind a supernode. It is a constant here so a test
+/// asserts the rule and not a pixel. No such default narrows the first picture: every table the model
+/// holds opens on it, and only a table the reader selected narrows it.
 /// </para>
 /// <para>
 /// Nothing is ever keyed, merged, looked up or drawn by display text. A node's identity is the
@@ -30,15 +30,6 @@ namespace DbClone.UI.Services;
 /// </remarks>
 internal sealed class CatalogGraphAnalyzer
 {
-    /// <summary>How many captured tables may still open the whole database.</summary>
-    internal const int InitialWholeGraphTableLimit = 60;
-
-    /// <summary>The relation-per-table density under which the whole database may open.</summary>
-    internal const int InitialWholeGraphEdgePerTableLimit = 2;
-
-    /// <summary>The largest closed one-step neighbourhood the picture opens on.</summary>
-    internal const int InitialFocusNodeLimit = 60;
-
     /// <summary>The member count above which a cyclic group opens behind a supernode.</summary>
     internal const int CollapsedComponentSizeLimit = 8;
 
@@ -51,8 +42,9 @@ internal sealed class CatalogGraphAnalyzer
     /// <summary>Analyzes one catalog's relationship view.</summary>
     /// <param name="view">The facts read from the catalog folder.</param>
     /// <param name="preferredFocusId">
-    /// The node the reader already selected, when there is one. It seeds the opening view ahead of
-    /// the default rule, and only matters when the whole database does not open.
+    /// The node the reader already selected, when there is one. It is the only thing that narrows the
+    /// opening view: the picture then opens on this table and its neighbours instead of on the whole
+    /// database.
     /// </param>
     /// <returns>The model every later stage reads.</returns>
     public CatalogGraphModel Analyze(RelationshipGraphView view, string? preferredFocusId = null)
@@ -73,8 +65,6 @@ internal sealed class CatalogGraphAnalyzer
         var chips = GraphClusterChips.Build(view, seeds, groups, degrees, out var chipsByNode);
         var initialView = GraphInitialViewPlanner.Plan(
             seeds,
-            edges,
-            degrees,
             neighbours,
             indexById,
             preferredFocusId);

@@ -146,10 +146,10 @@ public sealed class CatalogGraphAnalyzerTests
         edge.Label.Should().Be("(tenant_id, region_id, code) → natural_keys.(tenant_id, region_id, code)");
     }
 
-    // ── T21: the seed is measured, never guessed ───────────────────────────────────
+    // ── D8: the picture opens whole, and only a selected table narrows it ──────────
 
     [Fact]
-    public void A_dense_catalog_opens_on_a_legible_neighbourhood_and_never_on_the_hub()
+    public void A_dense_catalog_opens_with_every_table_and_the_hub_is_no_exception()
     {
         var view = HubAndChainCatalog();
         var model = _analyzer.Analyze(view);
@@ -158,18 +158,15 @@ public sealed class CatalogGraphAnalyzerTests
 
         model.Nodes.Should().HaveCount(150);
         model.Edges.Should().HaveCount(160);
-        model.InitialView.ShowsWholeGraph.Should().BeFalse();
+        model.InitialView.ShowsWholeGraph.Should().BeTrue();
         model.InitialView.TableCount.Should().Be(150);
-        model.InitialView.FocusNodeIndex.Should().NotBeNull();
-        model.InitialView.FocusNodeIndex.Should().NotBe(hub);
-        (model.DetailsByNode[hub].NeighbourNodeIndexes.Count + 1).Should().BeGreaterThan(CatalogGraphAnalyzer.InitialFocusNodeLimit);
-        (model.DetailsByNode[model.InitialView.FocusNodeIndex!.Value].NeighbourNodeIndexes.Count + 1)
-            .Should().BeLessThanOrEqualTo(CatalogGraphAnalyzer.InitialFocusNodeLimit);
-        model.InitialView.DenseCandidateCount.Should().Be(1);
+        model.InitialView.FocusNodeIndex.Should().BeNull();
+        model.InitialView.VisibleNodeIndexes.Should().BeEquivalentTo(Enumerable.Range(0, model.Nodes.Count));
+        model.InitialView.VisibleNodeIndexes.Should().Contain(hub);
     }
 
     [Fact]
-    public void A_table_the_reader_already_selected_seeds_the_view_ahead_of_the_rule()
+    public void A_table_the_reader_already_selected_seeds_the_view_ahead_of_the_whole_catalog()
     {
         var view = HubAndChainCatalog();
         var hubId = CatalogGraphFixture.TableId("core", "t000");
@@ -184,7 +181,7 @@ public sealed class CatalogGraphAnalyzerTests
     }
 
     [Fact]
-    public void A_catalog_with_no_legible_neighbourhood_opens_with_no_focus_and_counts_the_dense_candidates()
+    public void A_catalog_where_every_table_touches_sixty_others_still_opens_whole()
     {
         var fixture = CatalogGraphFixture.Create();
         for (var table = 0; table < 70; table++)
@@ -204,9 +201,9 @@ public sealed class CatalogGraphAnalyzerTests
 
         var model = _analyzer.Analyze(fixture.Build());
 
+        model.InitialView.ShowsWholeGraph.Should().BeTrue();
         model.InitialView.FocusNodeIndex.Should().BeNull();
-        model.InitialView.VisibleNodeIndexes.Should().BeEmpty();
-        model.InitialView.DenseCandidateCount.Should().Be(70);
+        model.InitialView.VisibleNodeIndexes.Should().HaveCount(70);
         model.Nodes.Should().HaveCount(70);
     }
 

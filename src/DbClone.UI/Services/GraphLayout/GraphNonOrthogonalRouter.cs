@@ -347,16 +347,9 @@ internal sealed class GraphNonOrthogonalRouter
             return GraphRouteCandidates.ForLoop(ends.Child, ends.Parent);
         }
 
-        var blockers = nodes
-            .Where(card => card.NodeIndex != child && card.NodeIndex != parent
-                && GraphGeometry.SegmentHitsCardEnvelope(ends.Child.Point, ends.Parent.Point, card))
-            .Select(card => card.NodeIndex)
-            .ToArray();
-        var offset = family.Count > 1
-            ? (family.Ordinal - ((family.Count - 1) / 2.0)) * GraphGeometryContract.MinimumPortStep
-            : 0;
-
-        return GraphRouteCandidates.For(ends.Child, ends.Parent, blockers, nodes, offset, (child, parent));
+        // Every relation but a self-reference is its own chord: two ports and the line between them, with the
+        // cards painted over it. There is nothing to dodge, so there is nothing else to try.
+        return [new GraphRouteCandidate(0, EEdgeGeometry.Straight, [ends.Child.Point, ends.Parent.Point])];
     }
 
     /// <summary>

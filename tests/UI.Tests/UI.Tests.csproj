@@ -29,7 +29,7 @@
   </ItemGroup>
 
   <ItemGroup>
-    <None Include="../../refactors/14/characterization/GraphLayoutQualityBounds.json" Link="GraphLayoutQualityBounds.json" CopyToOutputDirectory="PreserveNewest" />
+    <None Update="CatalogGraph\GraphLayoutQualityBounds.json" Link="GraphLayoutQualityBounds.json" CopyToOutputDirectory="PreserveNewest" />
   </ItemGroup>
 
 </Project>

@@ -19,12 +19,16 @@ public sealed class GraphLayoutValidityTests
     ];
 
     [Fact]
-    public void A_straight_route_through_a_card_it_does_not_join_is_a_collision_naming_the_card()
+    public void A_chord_passes_behind_a_card_it_does_not_join_and_a_curve_may_not()
     {
-        var validity = Validate([Straight(0, (100, 100), (400, 100))], [new(0, 1)]);
+        // Card 2 stands between the two cards the relation joins. The cards are painted over the ink, so a
+        // straight relation running behind a table is the picture a catalog draws; a curve, which nothing
+        // hides, still may not enter a card it does not join.
+        Validate([Straight(0, (100, 100), (400, 100))], [new(0, 1)]).IsValid.Should().BeTrue();
 
-        validity.IsValid.Should().BeFalse();
-        var failure = validity.Failures.Single();
+        var curve = Validate([Curve(0, (100, 100), (400, 100))], [new(0, 1)]);
+
+        var failure = curve.Failures.Should().ContainSingle().Subject;
         failure.Kind.Should().Be(ERouteFailureKind.CardCollision);
         failure.EdgeIndex.Should().Be(0);
         failure.BlockingCards.Should().Equal(2);
@@ -65,16 +69,16 @@ public sealed class GraphLayoutValidityTests
     {
         var edge = GraphGeometryContract.CardCenterlineClearance;
 
-        Validate([Straight(0, (100, 80 - edge - 0.5), (400, 80 - edge - 0.5))], [new(0, 1)]).IsValid.Should().BeTrue();
-        Validate([Straight(0, (100, 80 - edge + 0.5), (400, 80 - edge + 0.5))], [new(0, 1)])
+        Validate([Curve(0, (100, 80 - edge - 0.5), (400, 80 - edge - 0.5))], [new(0, 1)]).IsValid.Should().BeTrue();
+        Validate([Curve(0, (100, 80 - edge + 0.5), (400, 80 - edge + 0.5))], [new(0, 1)])
             .Failures.Single().Kind.Should().Be(ERouteFailureKind.CardCollision);
     }
 
     [Fact]
-    public void Two_coincident_routes_are_an_overlap_on_the_later_edge()
+    public void Two_coincident_curves_are_an_overlap_on_the_later_edge()
     {
         var validity = Validate(
-            [Straight(0, (100, 150), (400, 150)), Straight(1, (100, 150), (400, 150))],
+            [Curve(0, (100, 150), (400, 150)), Curve(1, (100, 150), (400, 150))],
             [new(0, 1), new(0, 1)]);
 
         var failure = validity.Failures.Should().ContainSingle().Subject;
@@ -88,7 +92,7 @@ public sealed class GraphLayoutValidityTests
     {
         var close = GraphGeometryContract.MinimumCenterlineDistance - 1;
         var validity = Validate(
-            [Straight(0, (100, 150), (400, 150)), Straight(1, (100, 150 + close), (400, 150 + close))],
+            [Curve(0, (100, 150), (400, 150)), Curve(1, (100, 150 + close), (400, 150 + close))],
             [new(0, 1), new(0, 1)]);
 
         validity.Failures.Single().Kind.Should().Be(ERouteFailureKind.StrokeOverlap);
@@ -123,7 +127,7 @@ public sealed class GraphLayoutValidityTests
     public void A_shallow_crossing_whose_close_run_outlasts_the_neighborhood_is_a_shared_route()
     {
         var validity = Validate(
-            [Straight(0, (100, 290), (400, 310)), Straight(1, (100, 310), (400, 290))],
+            [Curve(0, (100, 290), (400, 310)), Curve(1, (100, 310), (400, 290))],
             [new(0, 1), new(0, 1)]);
 
         validity.Failures.Single().Kind.Should().Be(ERouteFailureKind.StrokeOverlap);
@@ -135,7 +139,7 @@ public sealed class GraphLayoutValidityTests
     {
         var rise = 300 * Math.Tan(Math.PI / 20);
         var validity = Validate(
-            [Straight(0, (100, 200), (400, 200 + rise)), Straight(1, (100, 200 + rise), (400, 200))],
+            [Curve(0, (100, 200), (400, 200 + rise)), Curve(1, (100, 200 + rise), (400, 200))],
             [new(0, 1), new(0, 1)]);
 
         validity.Failures.Single().Kind.Should().Be(ERouteFailureKind.ShallowCrossing);
@@ -217,6 +221,18 @@ public sealed class GraphLayoutValidityTests
 
     private static EdgeRoute Straight(int index, (double X, double Y) start, (double X, double Y) end) =>
         new(index, EEdgeShape.Line, EEdgeGeometry.Straight, [new(start.X, start.Y), new(end.X, end.Y)], new GraphPoint(0, 0));
+
+    /// <summary>
+    /// A smooth route along the same line as a straight one. Curves keep the strict rules — nothing is
+    /// painted over them — so the tests that pin those rules draw their routes this way.
+    /// </summary>
+    private static EdgeRoute Curve(int index, (double X, double Y) start, (double X, double Y) end) =>
+        Cubic(
+            index,
+            start,
+            (start.X + ((end.X - start.X) / 3), start.Y + ((end.Y - start.Y) / 3)),
+            (start.X + (2 * (end.X - start.X) / 3), start.Y + (2 * (end.Y - start.Y) / 3)),
+            end);
 
     private static EdgeRoute Cubic(int index, params (double X, double Y)[] points) =>
         new(index, EEdgeShape.Line, EEdgeGeometry.Cubic, points.Select(point => new GraphPoint(point.X, point.Y)).ToArray(), new GraphPoint(0, 0));

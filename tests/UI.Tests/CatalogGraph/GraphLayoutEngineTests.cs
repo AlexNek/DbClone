@@ -158,7 +158,7 @@ public sealed class GraphLayoutEngineTests
         var boxes = members.Select(node => layout.Nodes[node]).ToArray();
 
         AssertNoCardsOverlap(layout);
-        AssertNoRouteCrossesACard(layout, model);
+        AssertNoCurveCrossesACard(layout, model);
 
         var left = boxes.Min(box => box.TopLeft.X);
         var top = boxes.Min(box => box.TopLeft.Y);
@@ -196,7 +196,7 @@ public sealed class GraphLayoutEngineTests
         layout.Edges.Should().HaveCount(8);
 
         AssertNoCardsOverlap(layout);
-        AssertNoRouteCrossesACard(layout, model);
+        AssertNoCurveCrossesACard(layout, model);
     }
 
     [Fact]
@@ -298,20 +298,19 @@ public sealed class GraphLayoutEngineTests
                 "a table is drawn in the band under the table it names: {0}", edge.Label);
         }
 
-        AssertNoRouteCrossesACard(layout, model);
+        AssertNoCurveCrossesACard(layout, model);
     }
 
     [Fact]
-    public void The_catalog_behind_the_reported_picture_keeps_every_arrow_clear_of_a_table()
+    public void The_catalog_behind_the_reported_picture_keeps_every_curve_clear_of_a_table()
     {
         // The catalog the last picture was reported from (pass 11): two schemas, nine tables, and one
         // band of three template tables beside the two tables the picture opens with. The page's own
         // width for nine cards was two columns, so that band wrapped and the third template table was
         // drawn on a line of its own — between template_entries and the profile it points at, and
-        // between alliance_actions and the same profile. Two arrows then had to be carried round a
-        // table they do not join. The band needs one column more, so the width is measured against
-        // the arrows it draws instead of assumed: the picture is a page, and every arrow has a clear
-        // run at what it joins.
+        // between alliance_actions and the same profile. The band needs one column more, so the width is
+        // measured against the arrows it draws instead of assumed: the picture is a page, wider than it is
+        // tall, the chords run behind the cards they cross and no curve enters one.
         var alliances = CatalogGraphFixture.TableId("public", "alliances");
         var profiles = CatalogGraphFixture.TableId("public", "profiles");
         var actions = CatalogGraphFixture.TableId("public", "alliance_actions");
@@ -343,9 +342,9 @@ public sealed class GraphLayoutEngineTests
         var layout = Picture(model);
 
         (layout.Width / layout.Height).Should().BeGreaterThan(
-            1.2, "the picture is a page: wider than it is tall");
+            1.0, "the picture is a page: wider than it is tall");
 
-        AssertNoRouteCrossesACard(layout, model);
+        AssertNoCurveCrossesACard(layout, model);
     }
 
     // ── T5: determinism ───────────────────────────────────────────────────────────
@@ -520,8 +519,10 @@ public sealed class GraphLayoutEngineTests
     // ── T25: no arrow over a card, and a fan-in stays around its parent ───────────
 
     [Fact]
-    public void No_arrow_is_drawn_across_a_card_it_does_not_join()
+    public void A_chord_runs_behind_a_card_and_no_curve_enters_one_it_does_not_join()
     {
+        // The cards are painted over the ink, so a chord passing behind a table it does not join is the
+        // picture, not a fault; a curve is hidden by nothing, so it still may not enter a card.
         var fixture = CatalogGraphFixture.Create();
         for (var table = 0; table < 6; table++)
         {
@@ -545,16 +546,23 @@ public sealed class GraphLayoutEngineTests
         var model = Analyze(fixture);
         var layout = Picture(model);
 
-        AssertNoRouteCrossesACard(layout, model);
+        var behind = layout.Edges
+            .Where(route => route.Geometry == EEdgeGeometry.Straight)
+            .Count(route => CardsUnder(layout, model, route).Count > 0);
+        behind.Should().BeGreaterThan(
+            0,
+            "a catalog of one ring and a fan draws chords behind the tables that stand in their way");
+
+        AssertNoCurveCrossesACard(layout, model);
     }
 
     [Fact]
-    public void A_blocked_straight_way_is_drawn_around_the_card_that_stands_in_it()
+    public void A_card_standing_on_a_straight_way_is_passed_behind_it()
     {
         // Three tables stand on one line under the table they name, so the relation from the last of them
-        // back to the first has one table standing on its straight way. The way round is a curve — the
-        // picture's own promise — never a set of right-angle turns drawn through the corridors between the
-        // cards.
+        // back to the first has one table standing on its straight way. The relation stays the chord between
+        // its two ports and the card is painted over it — never a bow round the card, and never a set of
+        // right-angle turns drawn through the corridors between the cards.
         var fixture = CatalogGraphFixture.Create().Table("bowed", "parent", 7);
         for (var child = 0; child < 3; child++)
         {
@@ -580,11 +588,15 @@ public sealed class GraphLayoutEngineTests
 
         route.Shape.Should().Be(EEdgeShape.Line, "no cycle closes here, so the line style is the plain one");
         route.Geometry.Should().Be(
-            EEdgeGeometry.Cubic,
-            "the way round a card is drawn as one curve, never as an orthogonal path");
-        route.Points.Count.Should().BeGreaterThan(2, "the way bows round the table that stands on it");
+            EEdgeGeometry.Straight,
+            "the chord between the two ports is the picture, and the card in its way is painted over it");
+        route.Points.Should().HaveCount(2, "nothing bows: the two ports are the whole relation");
 
-        AssertNoRouteCrossesACard(layout, model);
+        var behind = CardsUnder(layout, model, route).Distinct().ToList();
+        behind.Should().NotBeEmpty("the table standing on the straight way is painted over the chord, not dodged");
+        behind.Should().NotContain(blocked.ChildIndex).And.NotContain(blocked.ParentIndex);
+
+        AssertNoCurveCrossesACard(layout, model);
     }
 
     [Fact]
@@ -624,14 +636,14 @@ public sealed class GraphLayoutEngineTests
 
         cards.Select(card => card.TopLeft.Y).Distinct().Count().Should().BeGreaterThan(
             1,
-            "a fan of twenty tables is wider than one page, so it is spread around its parent, not dealt in one line");
+            "a fan of twenty tables is wider than one page, so it is dealt in rows, not in one line");
 
         (layout.Width / layout.Height).Should().BeLessThan(
             6,
-            "twenty tables are one ring, not four rows stretched over six screens");
+            "twenty tables are a band of rows, not a strip stretched over six screens");
 
         AssertNoCardsOverlap(layout);
-        AssertNoRouteCrossesACard(layout, model);
+        AssertNoCurveCrossesACard(layout, model);
         AssertNoTwoArrowsRunOnOneStroke(layout);
     }
 
@@ -696,12 +708,11 @@ public sealed class GraphLayoutEngineTests
     public void The_reported_two_hub_catalog_is_drawn_as_one_compact_picture()
     {
         // The reported picture in its shape: one table a dozen others name, a second hub the first's
-        // children name in their turn, and chains hanging under both. A fan that wide is read as a ring —
-        // each hub standing among the tables that name it — so what is asserted here is that ring: the
-        // hub inside its own fan's span, no card stacking another, no arrow drawn through a card it does
-        // not join, no two arrows on one stroke, and the whole catalog on one screen instead of a strip.
-        // The top-down order the reader follows is asserted on the catalogs that can be drawn that way —
-        // the chain and the slide below — because a fan this wide is read round its hub instead.
+        // children name in their turn, and chains hanging under both. A fan that wide is dealt in rows in
+        // the band under the table it names, so what is asserted here is that band: the hub over its own
+        // fan's span, no card stacking another, no curve entering a card it does not join, and the whole
+        // catalog on one screen instead of a strip. The top-down order the reader follows is asserted on
+        // the catalogs that can be drawn that way — the chain and the slide below.
         var users = CatalogGraphFixture.TableId("auth", "users");
         var publicUsers = CatalogGraphFixture.TableId("public", "users");
         var projects = CatalogGraphFixture.TableId("public", "projects");
@@ -776,10 +787,9 @@ public sealed class GraphLayoutEngineTests
             .Select(edge => layout.Nodes[edge.ChildIndex])
             .ToList();
 
-        hubCard.Centre.Y.Should().BeInRange(
+        hubCard.Centre.Y.Should().BeLessThan(
             crowd.Min(card => card.Centre.Y),
-            crowd.Max(card => card.Centre.Y),
-            "the table thirteen tables name stands among them, never at the end of a row of them");
+            "the table thirteen tables name stands in the band over them, never at the end of a row of them");
 
         hubCard.Centre.X.Should().BeInRange(
             crowd.Min(card => card.Centre.X),
@@ -788,14 +798,14 @@ public sealed class GraphLayoutEngineTests
 
         crowd.Select(card => card.TopLeft.Y).Distinct().Count().Should().BeGreaterThan(
             1,
-            "thirteen tables are wider than a page, so they are spread around their parent, not dealt in one line");
+            "thirteen tables are wider than a page, so they are dealt in rows under their parent");
 
         (layout.Width / layout.Height).Should().BeLessThan(
             6,
             "the whole catalog is one picture, not four rows stretched over six screens");
 
         AssertNoCardsOverlap(layout);
-        AssertNoRouteCrossesACard(layout, model);
+        AssertNoCurveCrossesACard(layout, model);
         AssertNoTwoArrowsRunOnOneStroke(layout);
     }
 
@@ -1200,14 +1210,15 @@ public sealed class GraphLayoutEngineTests
     }
 
     [Fact]
-    public void An_end_keeps_the_side_its_neighbour_stands_on_and_its_route_a_lane_of_its_own()
+    public void An_end_leaves_the_side_its_neighbour_stands_on_and_every_relation_is_its_own_chord()
     {
         // The picture that reported it: three constraints meet public.user_templates — one leaves for
         // the table above it, one arrives from the table below, one arrives from the table at its
         // left. The end leaving for the table above once named a point behind the start of the border
         // and was pushed a whole turn round onto the card's left side, where the arrow had to leave
         // into a route already drawn and was read as one stroke with it (T26, T27). The side an end
-        // leaves is the side its neighbour stands on, and the arrow then keeps a lane of its own.
+        // leaves is the side its neighbour stands on — whichever band the two cards are dealt in — and
+        // every relation then runs port to port as its own chord.
         var alliances = CatalogGraphFixture.TableId("public", "alliances");
         var profiles = CatalogGraphFixture.TableId("public", "profiles");
         var actions = CatalogGraphFixture.TableId("public", "alliance_actions");
@@ -1237,11 +1248,23 @@ public sealed class GraphLayoutEngineTests
 
         int Edge(string name) => model.Edges.Single(edge => edge.Name == name).Index;
 
-        ports.Ends[Edge("fk_templates_profiles")]!.Child.Side.Should().Be(
-            EEdgeSide.Top,
-            "the table it points at stands above it, so its arrow leaves the top of the card");
+        var templatesProfiles = ports.Ends[Edge("fk_templates_profiles")]!;
+        var child = layout.Nodes[model.Edges[Edge("fk_templates_profiles")].ChildIndex];
+        var parent = layout.Nodes[model.Edges[Edge("fk_templates_profiles")].ParentIndex];
+        var (facingX, facingY) = Facing(templatesProfiles.Child.Side);
 
-        AssertNoTwoArrowsRunOnOneStroke(layout);
+        ((facingX * (parent.Centre.X - child.Centre.X)) + (facingY * (parent.Centre.Y - child.Centre.Y)))
+            .Should().BePositive("the side an end leaves is the side its neighbour stands on");
+
+        foreach (var edge in model.Edges)
+        {
+            var route = layout.Edges[edge.Index];
+            var ends = ports.Ends[edge.Index]!;
+
+            route.Points.Should().HaveCount(2, $"{edge.Label} is its own chord, not a bow");
+            route.Points[0].Should().Be(ends.Child.Point, $"{edge.Label} leaves the child's port");
+            route.Points[^1].Should().Be(ends.Parent.Point, $"{edge.Label} arrives on the parent's port");
+        }
     }
 
     // ── T26: the ink, not the shape ───────────────────────────────────────────────
@@ -1319,7 +1342,7 @@ public sealed class GraphLayoutEngineTests
 
         // Assert
         AssertNoCardsOverlap(layout);
-        AssertNoRouteCrossesACard(layout, model);
+        AssertNoCurveCrossesACard(layout, model);
         AssertNoTwoArrowsRunOnOneStroke(layout);
     }
 
@@ -1345,7 +1368,7 @@ public sealed class GraphLayoutEngineTests
 
         layout.Nodes.Should().HaveCount(8, "five members of the circle, the table they hang from, its leaf and the outside table");
         AssertNoCardsOverlap(layout);
-        AssertNoRouteCrossesACard(layout, model);
+        AssertNoCurveCrossesACard(layout, model);
         AssertNoTwoArrowsRunOnOneStroke(layout);
         ArrowPairsDrawnAcrossOneAnother(layout, model).Should().BeEmpty(
             "every arrow of a cycle is the short chord between neighbours, so none of them is drawn across another");
@@ -1381,7 +1404,7 @@ public sealed class GraphLayoutEngineTests
         var model = Analyze(fixture);
         var layout = Picture(model, TimeSpan.FromMinutes(5));
 
-        AssertNoRouteCrossesACard(layout, model);
+        AssertNoCurveCrossesACard(layout, model);
         AssertNoTwoArrowsRunOnOneStroke(layout);
 
         // What is asserted here is the arrangement the search finishes with, not the one the clock leaves: this
@@ -1508,6 +1531,15 @@ public sealed class GraphLayoutEngineTests
     private static bool Under(NodePlacement child, NodePlacement parent) =>
         child.TopLeft.Y > parent.TopLeft.Y && Overlaps(child, parent);
 
+    /// <summary>The unit vector a border of a card faces away by.</summary>
+    private static (double X, double Y) Facing(EEdgeSide side) => side switch
+    {
+        EEdgeSide.Top => (0, -1),
+        EEdgeSide.Bottom => (0, 1),
+        EEdgeSide.Left => (-1, 0),
+        _ => (1, 0),
+    };
+
     /// <summary>Twenty tables that each point at one parent, which is the busiest single card a picture can make.</summary>
     private static CatalogGraphFixture TwentyToOneParent()
     {
@@ -1560,43 +1592,50 @@ public sealed class GraphLayoutEngineTests
     }
 
     /// <summary>
-    /// Walks every route and asserts it never passes through a card it does not join: each stretch of the
+    /// Walks every curve and asserts it never passes through a card it does not join: each stretch of the
     /// stroke the document paints is sampled, on the same flattened centerline the layout's own hard checks
-    /// read. Violations are collected, so one run names every offending route instead of only the first.
+    /// read. A straight relation is exempt — the cards are painted over the ink, so a chord running behind a
+    /// table is the picture the catalog draws, while a curve is hidden by nothing and may not enter a card.
+    /// Violations are collected, so one run names every offending route instead of only the first.
     /// </summary>
-    private static void AssertNoRouteCrossesACard(CatalogGraphLayout layout, CatalogGraphModel model)
+    private static void AssertNoCurveCrossesACard(CatalogGraphLayout layout, CatalogGraphModel model)
     {
-        var violations = new List<string>();
+        var violations = layout.Edges
+            .Where(route => route.Geometry != EEdgeGeometry.Straight)
+            .SelectMany(route => CardsUnder(layout, model, route)
+                .Distinct()
+                .Select(card => Violation(model.Edges[route.EdgeIndex], route, card)));
 
-        foreach (var route in layout.Edges)
+        violations.Distinct().Should().BeEmpty("a curve is hidden by nothing, so it may not enter a card it does not join");
+    }
+
+    /// <summary>The cards a route's ink enters, the two its own relation joins left out.</summary>
+    private static IReadOnlyList<int> CardsUnder(CatalogGraphLayout layout, CatalogGraphModel model, EdgeRoute route)
+    {
+        var edge = model.Edges[route.EdgeIndex];
+        var others = layout.Nodes
+            .Where(node => node.NodeIndex != edge.ChildIndex && node.NodeIndex != edge.ParentIndex)
+            .ToList();
+        var crossed = new List<int>();
+
+        var points = Stroke(route);
+        for (var index = 0; index + 1 < points.Count; index++)
         {
-            var edge = model.Edges[route.EdgeIndex];
-            var others = layout.Nodes
-                .Where(node => node.NodeIndex != edge.ChildIndex && node.NodeIndex != edge.ParentIndex)
-                .ToList();
+            var from = points[index];
+            var to = points[index + 1];
+            var (dx, dy) = (to.X - from.X, to.Y - from.Y);
+            var steps = Math.Max(1, (int)Math.Ceiling(Math.Sqrt((dx * dx) + (dy * dy))));
 
-            var points = Stroke(route);
-            for (var index = 0; index + 1 < points.Count; index++)
+            for (var step = 0; step <= steps; step++)
             {
-                var from = points[index];
-                var to = points[index + 1];
-                var (dx, dy) = (to.X - from.X, to.Y - from.Y);
-                var steps = Math.Max(1, (int)Math.Ceiling(Math.Sqrt((dx * dx) + (dy * dy))));
+                var share = (double)step / steps;
+                var point = new GraphPoint(from.X + (dx * share), from.Y + (dy * share));
 
-                for (var step = 0; step <= steps; step++)
-                {
-                    var share = (double)step / steps;
-                    var point = new GraphPoint(from.X + (dx * share), from.Y + (dy * share));
-
-                    foreach (var card in others.Where(card => GraphGeometry.Contains(card, point)))
-                    {
-                        violations.Add(Violation(edge, route, card.NodeIndex));
-                    }
-                }
+                crossed.AddRange(others.Where(card => GraphGeometry.Contains(card, point)).Select(card => card.NodeIndex));
             }
         }
 
-        violations.Distinct().Should().BeEmpty("no arrow may be drawn across a card it does not join");
+        return crossed;
     }
 
     /// <summary>
@@ -1693,14 +1732,18 @@ public sealed class GraphLayoutEngineTests
     }
 
     /// <summary>
-    /// Every route read as the ink it draws, then every pair compared: two stretches are one stroke when
+    /// Every curve read as the ink it draws, then every pair compared: two stretches are one stroke when
     /// they head the same way and lie within a mark's gap of one another over a stretch worth drawing —
     /// the case a reader cannot read apart, however the router arrived at it. A crossing is one point of
     /// contact and stays two arrows, so the run has to continue in both directions before it counts.
+    /// Straight relations are read apart at their ends, which sit a port step apart on their own cards'
+    /// borders, and rejoin only behind the cards they pass; a curve has nothing but its ink between it and
+    /// its neighbour, so the rule is about curves.
     /// </summary>
     private static void AssertNoTwoArrowsRunOnOneStroke(CatalogGraphLayout layout)
     {
-        var traces = layout.Edges.Select(route => (route.EdgeIndex, Trace: Trace(route))).ToList();
+        var traces = layout.Edges.Where(route => route.Geometry != EEdgeGeometry.Straight)
+            .Select(route => (route.EdgeIndex, Trace: Trace(route))).ToList();
         var violations = new List<string>();
 
         for (var first = 0; first < traces.Count; first++)
@@ -1718,7 +1761,7 @@ public sealed class GraphLayoutEngineTests
             }
         }
 
-        violations.Distinct().Should().BeEmpty("two arrows drawn on one line read as one arrow joining four tables");
+        violations.Distinct().Should().BeEmpty("two curves drawn on one line read as one arrow joining four tables");
     }
 
     /// <summary>A route written out for a failure message: its shape and every point the document paints.</summary>

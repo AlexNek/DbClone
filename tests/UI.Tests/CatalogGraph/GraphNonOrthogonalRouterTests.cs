@@ -24,16 +24,18 @@ public sealed class GraphNonOrthogonalRouterTests
     }
 
     [Fact]
-    public void A_blocked_relation_becomes_a_smooth_curve_that_clears_the_card()
+    public void A_card_between_two_tables_costs_their_relation_nothing()
     {
+        // The card is painted over the ink, so the relation passes behind it: one straight chord, never a bow
+        // round the card and never a failure.
         var cards = new[] { Card(0, 0, 0), Card(1, 600, 0), Card(2, 250, 0) };
 
         var result = Route(cards, [(0, 1)]);
 
         result.IsComplete.Should().BeTrue();
         var route = result.Routes[0]!;
-        route.Geometry.Should().Be(EEdgeGeometry.Cubic);
-        route.Points.Count.Should().Be(4);
+        route.Geometry.Should().Be(EEdgeGeometry.Straight);
+        route.Points.Should().HaveCount(2);
         AssertValid(cards, [(0, 1)], result);
     }
 
@@ -67,17 +69,20 @@ public sealed class GraphNonOrthogonalRouterTests
     [Fact]
     public void A_relation_with_no_admissible_candidate_is_reported_with_its_blockers_and_never_returned_overlapping()
     {
-        var wall = new NodePlacement(2, new GraphPoint(300, -5000), 60, 10000);
-        var cards = new[] { Card(0, 0, 0), Card(1, 700, 0), wall };
+        // A self-reference is the one relation that still has to dodge: its arcs leave the top border, so a wall
+        // standing on that border leaves every one of them inside a card. An ordinary relation would pass behind
+        // the wall as a chord, which is why the refusal is pinned on the loop.
+        var wall = new NodePlacement(1, new GraphPoint(-500, -1000), 2000, 995);
+        var cards = new[] { Card(0, 0, 0), wall };
 
-        var result = Route(cards, [(0, 1)]);
+        var result = Route(cards, [(0, 0)]);
 
         result.IsComplete.Should().BeFalse();
         result.Routes[0].Should().BeNull();
         var failure = result.Failures.Single();
         failure.EdgeIndex.Should().Be(0);
         failure.Kind.Should().Be(ERouteFailureKind.CardCollision);
-        failure.BlockingCards.Should().Equal(2);
+        failure.BlockingCards.Should().Equal(1);
         failure.Explored.Should().NotBeEmpty();
     }
 
@@ -208,9 +213,9 @@ public sealed class GraphNonOrthogonalRouterTests
     [Fact]
     public void A_relation_the_previous_pass_could_not_route_is_routed_again_even_when_not_named()
     {
-        var wall = new NodePlacement(2, new GraphPoint(300, -5000), 60, 10000);
-        var cards = new[] { Card(0, 0, 0), Card(1, 700, 0), wall };
-        var edges = new (int, int)[] { (0, 1) };
+        var wall = new NodePlacement(1, new GraphPoint(-500, -1000), 2000, 995);
+        var cards = new[] { Card(0, 0, 0), wall };
+        var edges = new (int, int)[] { (0, 0) };
         var profile = GraphLayoutProfile.Create(cards.Select(card => card.Width).ToArray(), edges);
         var ports = GraphPortAssigner.Assign(cards, edges);
         var first = Router.Route(cards, profile, ports);

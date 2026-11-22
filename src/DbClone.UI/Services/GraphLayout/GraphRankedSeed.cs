@@ -4,10 +4,10 @@ namespace DbClone.UI.Services.GraphLayout;
 /// The ranked seed: each component's rank order with barycentre sweeps to cut crossings, laid out as a
 /// tidy forest. Every table stands under the parent it points at, and a rank wider than the page is dealt
 /// into bands no wider than it, so a table a dozen others name is read as a fan of rows under it instead
-/// of one row several screens long. A table that rules a fan is widened to the span its band of children
-/// covers, so those children meet its border and the fan leaves on the one side its relations ask for. A
-/// rank that fits the page is drawn as the one line the forest measured for it. A table that names several
-/// parents stands under the nearest-ranked one and its other relations are routed as curves.
+/// of one row several screens long. A table that rules a fan is widened until one border can deal every
+/// end that meets it. A rank that fits the page is drawn as the one line the forest measured for it. A
+/// table that names several parents stands under the nearest-ranked one and its other relations are drawn
+/// as chords.
 /// </summary>
 internal static class GraphRankedSeed
 {
@@ -50,20 +50,20 @@ internal static class GraphRankedSeed
 
         Sweep(profile, rows);
 
-        var (x, widths) = Forest(profile, rows);
+        // A card draws at its own text, or wider when its fan needs the border; nothing is stretched across
+        // its children, so a band folded on these widths stays the page it was folded to.
+        var widths = FanWidths(profile);
+        var x = Forest(profile, rows, widths);
 
-        // The page is measured on the cards' own text, never on a table stretched across its fan: a bar as
-        // wide as the row it rules would make every row it stands in "fit" and none of them ever fold.
-        var natural = profile.Widths.ToArray();
-        var page = PageWidth(rows, natural);
-        var bands = Bands(rows, natural, x, page);
+        var page = PageWidth(rows, widths);
+        var bands = Bands(rows, widths, x, page);
 
-        // A rank that fits the page is dealt as the one line the tidy forest already gave it, at the columns
-        // that forest measured: only a rank wider than the page is folded, so a catalog that always fitted
-        // is arranged exactly as it was. A folded rank is a rank of its own, packed band by band and centred
-        // under the tables its own tables name.
+        // A rank that fits the page is dealt as the one line the tidy forest measured for it: only a rank
+        // wider than the page is folded, so a catalog that always fitted is arranged exactly as it was.
         if (bands.Count == rows.Count)
         {
+            Refine(profile, rows, x, widths);
+
             var line = new List<int>(nodes.Count);
             var at = new List<double>(nodes.Count);
             var down = new List<double>(nodes.Count);
@@ -80,8 +80,6 @@ internal static class GraphRankedSeed
             return (GraphLocalLayout.FromCentres(line, at, down, widths), widths);
         }
 
-        var ladder = Widen(profile, bands, natural, page);
-
         var order = new List<int>(nodes.Count);
         var centreX = new List<double>(nodes.Count);
         var centreY = new List<double>(nodes.Count);
@@ -94,7 +92,7 @@ internal static class GraphRankedSeed
 
             // A band stands under the tables its own tables name, and the first band of a component has
             // nobody above it: it is carried on from the band before, so a component never leaves a gap.
-            var total = members.Sum(node => ladder[node])
+            var total = members.Sum(node => widths[node])
                 + ((members.Count - 1) * GraphPlacementConstants.ColumnGap);
             var left = (Anchor(profile, members, placed) ?? carried) - (total / 2);
             var cursor = left;
@@ -102,16 +100,16 @@ internal static class GraphRankedSeed
             foreach (var node in members)
             {
                 order.Add(node);
-                centreX.Add(cursor + (ladder[node] / 2));
+                centreX.Add(cursor + (widths[node] / 2));
                 centreY.Add((band * (GraphCard.Height + GraphPlacementConstants.RowGap)) + (GraphCard.Height / 2));
-                placed[node] = cursor + (ladder[node] / 2);
-                cursor += ladder[node] + GraphPlacementConstants.ColumnGap;
+                placed[node] = cursor + (widths[node] / 2);
+                cursor += widths[node] + GraphPlacementConstants.ColumnGap;
             }
 
             carried = left + (total / 2);
         }
 
-        return (GraphLocalLayout.FromCentres(order, centreX, centreY, ladder), ladder);
+        return (GraphLocalLayout.FromCentres(order, centreX, centreY, widths), widths);
     }
 
     /// <summary>
@@ -164,8 +162,7 @@ internal static class GraphRankedSeed
 
     /// <summary>
     /// The widest band a component's tables are folded into: the page the cards' own area asks for, never
-    /// narrower than one card and its gap. A catalog of fifteen cards reaches a page of two screens of
-    /// narrow cards, which is the width a reader can follow without leaving the fan.
+    /// narrower than one card and its gap.
     /// </summary>
     /// <param name="rows">The component's nodes by rank.</param>
     /// <param name="widths">The card widths, by node index.</param>
@@ -182,57 +179,25 @@ internal static class GraphRankedSeed
     }
 
     /// <summary>
-    /// Widens a table that rules a fan to the border its ends need: at least the width one border holds
-    /// them all on, and at most the span its children cover inside one band, so every end of the fan faces
-    /// the border the children stand under and no arrow leaves another side to turn round the table.
-    /// Bounded by the page: a fan folded into bands is a fan of bands, not of screens.
+    /// The width every card draws at: its own text, or the border one side needs to deal the ends that meet
+    /// it — a card a dozen tables name is at least wide enough to give each of them a port.
     /// </summary>
     /// <param name="profile">The graph facts.</param>
-    /// <param name="bands">The component's bands, shallowest rank first.</param>
-    /// <param name="widths">The card widths, by node index.</param>
-    /// <param name="page">The widest band.</param>
     /// <returns>The width every card draws at.</returns>
-    private static double[] Widen(
-        GraphLayoutProfile profile,
-        IReadOnlyList<List<int>> bands,
-        IReadOnlyList<double> widths,
-        double page)
+    private static double[] FanWidths(GraphLayoutProfile profile)
     {
-        var ladder = widths.ToArray();
-        var children = Children(profile);
+        var widths = profile.Widths.ToArray();
         var fan = FanSizes(profile);
-
-        foreach (var band in bands)
+        for (var node = 0; node < widths.Length; node++)
         {
-            var left = new Dictionary<int, double>();
-            var cursor = 0.0;
-            foreach (var node in band)
+            var count = fan.GetValueOrDefault(node);
+            if (count > 1)
             {
-                left[node] = cursor;
-                cursor += widths[node] + GraphPlacementConstants.ColumnGap;
-            }
-
-            foreach (var node in band)
-            {
-                var below = (children.TryGetValue(node, out var list) ? list : []).Where(left.ContainsKey).ToArray();
-                var count = Math.Max(below.Length, fan.GetValueOrDefault(node));
-                if (count < 2)
-                {
-                    continue;
-                }
-
-                // The ends of a fan all meet one border, so a card a dozen tables name is at least wide enough
-                // to deal them: a narrow card leaves the last of them no port at all, whatever the bands do.
-                var span = below.Length == 0
-                    ? 0
-                    : below.Max(child => left[child] + widths[child]) - below.Min(child => left[child]);
-                ladder[node] = Math.Max(
-                    ladder[node],
-                    Math.Min(page, Math.Max(span, GraphPortAssigner.BorderWidth(count))));
+                widths[node] = Math.Max(widths[node], GraphPortAssigner.BorderWidth(count));
             }
         }
 
-        return ladder;
+        return widths;
     }
 
     /// <summary>Where a band wants to stand: the mean of the tables its own tables name, once those are placed.</summary>
@@ -255,39 +220,16 @@ internal static class GraphRankedSeed
         return wanted.Count == 0 ? null : wanted.Average();
     }
 
-    /// <summary>The tables that name each table.</summary>
-    /// <param name="profile">The graph facts.</param>
-    /// <returns>The children of every table, by parent.</returns>
-    private static Dictionary<int, List<int>> Children(GraphLayoutProfile profile)
-    {
-        var children = new Dictionary<int, List<int>>();
-        foreach (var (child, parent) in profile.Edges)
-        {
-            if (child == parent)
-            {
-                continue;
-            }
-
-            if (!children.TryGetValue(parent, out var list))
-            {
-                children[parent] = list = [];
-            }
-
-            list.Add(child);
-        }
-
-        return children;
-    }
-
     /// <summary>
     /// Gives every table the column interval of its subtree. Children stand in their row order under the
     /// parent; the parent is centred over them. Ranks only ever increase from parent to child, so positions
-    /// are settled from the shallowest rank down and widths from the deepest rank up, with no recursion.
+    /// are settled from the shallowest rank down with no recursion.
     /// </summary>
     /// <param name="profile">The graph facts.</param>
     /// <param name="rows">The component's nodes by rank.</param>
-    /// <returns>Each table's centre x and the width it draws at, both by node index.</returns>
-    private static (Dictionary<int, double> X, double[] Widths) Forest(GraphLayoutProfile profile, List<List<int>> rows)
+    /// <param name="widths">The width every card draws at, by node index.</param>
+    /// <returns>Each table's centre x, by node index.</returns>
+    private static Dictionary<int, double> Forest(GraphLayoutProfile profile, List<List<int>> rows, IReadOnlyList<double> widths)
     {
         var position = new Dictionary<int, int>();
         foreach (var row in rows)
@@ -329,7 +271,7 @@ internal static class GraphRankedSeed
         var span = new Dictionary<int, double>();
         foreach (var node in all.OrderByDescending(node => profile.Rank[node]).ThenBy(node => node))
         {
-            var own = profile.Widths[node] + GraphPlacementConstants.ColumnGap;
+            var own = widths[node] + GraphPlacementConstants.ColumnGap;
             span[node] = children.TryGetValue(node, out var below) ? Math.Max(own, below.Sum(child => span[child])) : own;
         }
 
@@ -358,39 +300,7 @@ internal static class GraphRankedSeed
             }
         }
 
-        return (x, Widths(profile, all, children, x));
-    }
-
-    /// <summary>
-    /// Widens a table that stands over a fan to the span its children cover, so every end of the fan meets
-    /// the border it stands under and no arrow leaves another side to turn round the table. Deepest rank
-    /// first, so a widened card is measured by its own final width when its parent is widened. A table that
-    /// stands over one table at most keeps its own width: two cards of one relation already face each other.
-    /// </summary>
-    private static double[] Widths(
-        GraphLayoutProfile profile,
-        IReadOnlyList<int> all,
-        Dictionary<int, List<int>> children,
-        Dictionary<int, double> x)
-    {
-        var widths = profile.Widths.ToArray();
-        var fan = FanSizes(profile);
-        foreach (var node in all.OrderByDescending(node => profile.Rank[node]).ThenBy(node => node))
-        {
-            var below = children.TryGetValue(node, out var under) ? under : [];
-            var count = Math.Max(below.Count, fan.GetValueOrDefault(node));
-            if (count < 2)
-            {
-                continue;
-            }
-
-            var left = below.Count == 0 ? x[node] : below.Min(child => x[child] - (widths[child] / 2));
-            var right = below.Count == 0 ? x[node] : below.Max(child => x[child] + (widths[child] / 2));
-
-            widths[node] = Math.Max(widths[node], right - left);
-        }
-
-        return widths;
+        return x;
     }
 
     /// <summary>
@@ -411,9 +321,14 @@ internal static class GraphRankedSeed
     /// <summary>
     /// Pulls a table that names several parents toward all of them. Each pass moves every row halfway to the
     /// mean of its neighbours above and below, and keeps the row's order and the column gap by averaging the
-    /// left-packed and the right-packed solutions, both of which keep the separation.
+    /// left-packed and the right-packed solutions, both of which keep the separation. The separation is
+    /// measured on the widths the cards draw at, so a table widened across its fan never buries a neighbour.
     /// </summary>
-    private static void Refine(GraphLayoutProfile profile, List<List<int>> rows, Dictionary<int, double> x)
+    /// <param name="profile">The graph facts.</param>
+    /// <param name="rows">The component's nodes by rank, in the settled order.</param>
+    /// <param name="x">Each table's centre x, by node index; refined in place.</param>
+    /// <param name="widths">The width every card draws at, by node index.</param>
+    private static void Refine(GraphLayoutProfile profile, List<List<int>> rows, Dictionary<int, double> x, IReadOnlyList<double> widths)
     {
         for (var pass = 0; pass < RefinePasses; pass++)
         {
@@ -426,7 +341,7 @@ internal static class GraphRankedSeed
                     return near.Length == 0 ? x[node] : (x[node] + near.Average()) / 2;
                 }).ToArray();
 
-                double Separation(int at) => ((profile.Widths[row[at]] + profile.Widths[row[at + 1]]) / 2) + GraphPlacementConstants.ColumnGap;
+                double Separation(int at) => ((widths[row[at]] + widths[row[at + 1]]) / 2) + GraphPlacementConstants.ColumnGap;
 
                 var left = (double[])desired.Clone();
                 for (var at = 1; at < left.Length; at++)

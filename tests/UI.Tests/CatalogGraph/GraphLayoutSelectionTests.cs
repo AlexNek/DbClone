@@ -29,6 +29,14 @@ public sealed class GraphLayoutSelectionTests
     }
 
     [Fact]
+    public void Crossings_are_compared_before_rank_violations()
+    {
+        var spread = Score(crossings: 0, rank: 9);
+        var folded = Score(crossings: 1, rank: 0);
+        spread.CompareTo(folded).Should().BeLessThan(0, "one relation drawn up the page never outweighs a crossing");
+    }
+
+    [Fact]
     public void Length_decides_only_between_equal_crossings_and_rank_and_the_seed_settles_the_rest()
     {
         Score(length: 100).CompareTo(Score(length: 200)).Should().BeLessThan(0);

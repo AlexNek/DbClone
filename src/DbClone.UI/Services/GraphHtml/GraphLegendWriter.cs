@@ -41,9 +41,6 @@ internal static class GraphLegendWriter
     private const string Dashed = "<svg class=\"key\" viewBox=\"0 0 48 16\" aria-hidden=\"true\">"
         + "<path class=\"edge out\" d=\"M 4 8 L 40 8\" marker-end=\"url(#head)\"/></svg>";
 
-    private const string Curve = "<svg class=\"key\" viewBox=\"0 0 48 16\" aria-hidden=\"true\">"
-        + "<path class=\"edge\" d=\"M 4 13 C 16 2, 32 2, 44 13\" marker-end=\"url(#head)\"/></svg>";
-
     private const string Loop = "<svg class=\"key\" viewBox=\"0 0 48 16\" aria-hidden=\"true\">"
         + "<rect x=\"2\" y=\"3\" width=\"9\" height=\"10\" rx=\"2\"/>"
         + "<path class=\"edge\" d=\"M 11 6 C 40 6, 40 13, 11 13\" marker-end=\"url(#head)\"/></svg>";
@@ -70,9 +67,8 @@ internal static class GraphLegendWriter
         Row(html, Bar, "one-to-one (1:1)",
             "each record in the target table can be referenced by at most one record in the source table");
         Row(html, Dashed, "dashed", words.LegendOutside);
-        Row(html, Curve, "curve", "the arrow goes around a table that stands in its way");
-        Row(html, Loop, "loop", "the table points at itself");
-        Row(html, Card, "card", "one table: its name and row count");
+        Row(html, Loop, "loop", "the table points at itself — the one curve the picture draws");
+        Row(html, Card, "card", "one table: its name and row count; the cards are painted over the arrows, so a relation passing one runs behind it");
         Row(html, Collapsed, "collapsed", "a cyclic group as one box; select to expand");
         html.Append("</ul>\n</details>\n");
     }

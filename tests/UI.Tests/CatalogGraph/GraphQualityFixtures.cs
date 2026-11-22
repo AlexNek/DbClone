@@ -1,4 +1,5 @@
 using System.Globalization;
+using DbClone.Application.Relationship;
 using DbClone.UI.Models.CatalogGraph;
 using DbClone.UI.Services.GraphAnalysis;
 using DbClone.UI.Services.GraphLayout;
@@ -25,7 +26,26 @@ internal static class GraphQualityFixtures
     /// </summary>
     public const string Plaza = "plaza";
 
-    public static CatalogGraphModel Model(string name)
+    /// <summary>
+    /// Two catalog-scale settlements of thirty-nine tables each, joined to one another by three relations, with
+    /// one table no relation reaches: neither settlement is a hub, so the arrangement this shape calls for is
+    /// two groups held apart. The counts are pinned by <c>GraphQualityFixturesTests</c>.
+    /// </summary>
+    public const string Clusters = "clusters";
+
+    /// <summary>
+    /// A catalog-scale ring of seventy-eight tables joined around it, one chord across it, and one table no
+    /// relation reaches: the arrangement this shape calls for is the ring. The counts are pinned by
+    /// <c>GraphQualityFixturesTests</c>.
+    /// </summary>
+    public const string Ring = "ring";
+
+    public static CatalogGraphModel Model(string name) => new CatalogGraphAnalyzer().Analyze(View(name));
+
+    /// <summary>The graph a named fixture states, as the reader hands it over, before it is analyzed.</summary>
+    /// <param name="name">The fixture's name.</param>
+    /// <returns>The view the document pipeline starts from.</returns>
+    public static RelationshipGraphView View(string name)
     {
         var fixture = CatalogGraphFixture.Create();
         for (var node = 0; node < Count(name); node++)
@@ -40,7 +60,7 @@ internal static class GraphQualityFixtures
             fixture.Edge(Id(child), Id(parent), "test_fk" + edge.ToString("D4", CultureInfo.InvariantCulture), ["test_parent_id"]);
         }
 
-        return new CatalogGraphAnalyzer().Analyze(fixture.Build());
+        return fixture.Build();
     }
 
     /// <summary>
@@ -107,6 +127,8 @@ internal static class GraphQualityFixtures
         "cycle" => 8,
         "catalog" => 79,
         "plaza" => 12,
+        "clusters" => 79,
+        "ring" => 79,
         "scale" => 1000,
         _ => throw new ArgumentOutOfRangeException(nameof(name)),
     };
@@ -140,6 +162,24 @@ internal static class GraphQualityFixtures
             .. Enumerable.Range(0, 2).Select(cluster => ((cluster * 5) + 4, cluster * 5)),
             .. Enumerable.Range(0, 2).SelectMany(hub => Enumerable.Range(0, 2).Select(target => (10 + hub, (target * 5) + hub))),
             .. Enumerable.Range(0, 2).Select(hub => (10 + hub, 10 + ((hub + 1) % 2))),
+        ],
+        "clusters" =>
+        [
+            .. Enumerable.Range(1, 29).Select(node => (node, 0)),
+            .. Enumerable.Range(31, 8).Select(node => (node, node - 1)),
+            (30, 0),
+            .. Enumerable.Range(40, 29).Select(node => (node, 39)),
+            .. Enumerable.Range(70, 8).Select(node => (node, node - 1)),
+            (69, 39),
+            (39, 0),
+            (10, 39),
+            (20, 40),
+        ],
+        "ring" =>
+        [
+            .. Enumerable.Range(1, 77).Select(node => (node, node - 1)),
+            (0, 77),
+            (0, 39),
         ],
         _ => throw new ArgumentOutOfRangeException(nameof(name)),
     };

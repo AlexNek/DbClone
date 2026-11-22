@@ -459,7 +459,7 @@ public sealed class CatalogGraphHtmlRendererTests
     }
 
     [Fact]
-    public void A_catalog_the_whole_rule_holds_opens_with_nothing_hidden()
+    public void A_catalog_opens_with_nothing_hidden_unless_a_table_was_selected()
     {
         // Arrange
         var rendered = Render(Chain(24));
@@ -474,12 +474,12 @@ public sealed class CatalogGraphHtmlRendererTests
     {
         // The reader's report: a search for a table the picture was not showing selected a card that
         // stayed display:none, so nothing in the picture changed and the search read as broken. A card
-        // is hidden three ways — outside the neighbourhood the picture opened on (`away`), a chip the
-        // reader switched off (`off`), a collapsed cyclic group (`hidden`) — and a hit has to undo the
-        // one it meets before it selects the card (FR13, D8).
-        var rendered = Render(Chain(70));
+        // is hidden three ways — outside the neighbourhood the view opened on from the selected table
+        // (`away`), a chip the reader switched off (`off`), a collapsed cyclic group (`hidden`) — and a hit
+        // has to undo the one it meets before it selects the card (FR13, D8).
+        var rendered = Render(Chain(70), CatalogGraphFixture.TableId("public", "t00"));
 
-        rendered.Model.InitialView.ShowsWholeGraph.Should().BeFalse("the fixture opens on one neighbourhood");
+        rendered.Model.InitialView.ShowsWholeGraph.Should().BeFalse("the fixture opens on the table that was selected");
         rendered.Document.Should().Contain("class=\"node cap away\"");
         rendered.Model.SearchIndex.Should().Contain(
             entry => entry.Text == "t69",
@@ -506,7 +506,7 @@ public sealed class CatalogGraphHtmlRendererTests
         // The same opening view: an arrow was drawn to a position where no card stands, so the picture
         // pointed at nothing and the count line claimed the whole catalog. An arrow whose table is not
         // drawn now carries that table's own `away` class, and is revealed with it (D8a).
-        var rendered = Render(Chain(70));
+        var rendered = Render(Chain(70), CatalogGraphFixture.TableId("public", "t00"));
         var shown = rendered.Model.InitialView.VisibleNodeIndexes;
 
         // Assert
@@ -787,7 +787,7 @@ public sealed class CatalogGraphHtmlRendererTests
         var rendered = Render(Shapes());
 
         Count(rendered.Document, "<ul class=\"legend\">").Should().Be(1);
-        Count(rendered.Document, "<svg class=\"key\"").Should().Be(7, "one drawn sample per row");
+        Count(rendered.Document, "<svg class=\"key\"").Should().Be(6, "one drawn sample per row");
 
         rendered.Document.Should().Contain(
             "<b>many-to-one (N:1)</b> multiple records in the source table can reference the same record in the target table",
@@ -795,12 +795,13 @@ public sealed class CatalogGraphHtmlRendererTests
         rendered.Document.Should().Contain(
             "<b>one-to-one (1:1)</b> each record in the target table can be referenced by at most one record in the source table");
         rendered.Document.Should().Contain("<b>dashed</b> the table it points at is not in this catalog");
-        // A curve is the way an arrow goes round a card, in both arrangements: a lattice carries a
-        // cycle's closing edge over one, rings bow an ordinary edge aside, and a key that promised the
-        // curve meant a cycle would be read wrong by half the pictures it ships under.
-        rendered.Document.Should().Contain("<b>curve</b> the arrow goes around a table that stands in its way");
-        rendered.Document.Should().Contain("<b>loop</b> the table points at itself");
-        rendered.Document.Should().Contain("<b>card</b> one table: its name and row count");
+        // The key has no row for a curve, because the picture bends nothing round a card: every relation is
+        // one straight chord and the cards are painted over the ink, so the only curve a reader can meet is
+        // the loop a table draws to itself — and that has a row of its own.
+        rendered.Document.Should().NotContain("<b>curve</b>", "nothing in the picture goes round a card");
+        rendered.Document.Should().Contain("<b>loop</b> the table points at itself — the one curve the picture draws");
+        rendered.Document.Should().Contain(
+            "<b>card</b> one table: its name and row count; the cards are painted over the arrows, so a relation passing one runs behind it");
         rendered.Document.Should().Contain("<b>collapsed</b> a cyclic group as one box; select to expand");
         rendered.Document.Should().NotContain("many rows to one row", "the abstract cardinality never said which end it was drawn from");
 
@@ -811,7 +812,7 @@ public sealed class CatalogGraphHtmlRendererTests
             .Select(match => (Label: match.Groups[1].Value, Meaning: match.Groups[2].Value))
             .ToList();
 
-        rows.Should().HaveCount(7, "every row states its conclusion in words");
+        rows.Should().HaveCount(6, "every row states its conclusion in words");
         rows.Take(2).Should().OnlyContain(
             row => row.Label.Contains("(N:1)", StringComparison.Ordinal)
                 || row.Label.Contains("(1:1)", StringComparison.Ordinal),
@@ -856,7 +857,7 @@ public sealed class CatalogGraphHtmlRendererTests
         closed.Should().BeGreaterThan(
             document.IndexOf("<b>collapsed</b>", StringComparison.Ordinal),
             "every row folds, not only the first few");
-        Count(document, "<svg class=\"key\"").Should().Be(7, "folding the key removes no row from it");
+        Count(document, "<svg class=\"key\"").Should().Be(6, "folding the key removes no row from it");
     }
 
     [Fact]
@@ -1139,10 +1140,10 @@ public sealed class CatalogGraphHtmlRendererTests
     private static RelationshipColumnView Column(string name, string type, bool isPrimaryKey = false) =>
         new(name, type, false, isPrimaryKey, false, false, null);
 
-    private static Rendered Render(CatalogGraphFixture fixture)
+    private static Rendered Render(CatalogGraphFixture fixture, string? preferredFocusId = null)
     {
         var view = fixture.Build();
-        var model = new CatalogGraphAnalyzer().Analyze(view);
+        var model = new CatalogGraphAnalyzer().Analyze(view, preferredFocusId);
         var layout = new GraphLayoutEngine().Compute(model).Layout!;
         var document = new CatalogGraphHtmlRenderer().Render(view, model, layout, Moment);
         var island = document[
