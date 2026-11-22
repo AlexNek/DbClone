@@ -8,9 +8,10 @@ namespace DbClone.UI.Services.GraphLayout;
 /// weighted cost: a layout with one failure is invalid however short it is.
 /// <para>
 /// A chord — a relation drawn as the one straight segment between its two ports — is held to less than that:
-/// its ends must sit on the borders of the cards it joins, and it must stay finite, but the cards are painted
-/// over its ink. A chord may pass behind a table, leave a border at any angle, and run beside or across
-/// another chord; that is what a catalog of ranks looks like. Every meeting between chords is still counted
+/// its ends must sit on the borders of the cards it joins, it must stay finite, and it must keep the same
+/// clearance from every card it does not join that a curve keeps, because the cards are painted over the ink
+/// and a chord behind a third card is a relation the reader cannot see. It may leave a border at any angle and
+/// run beside or across another chord. Every meeting between chords is still counted
 /// as a crossing, so the score can prefer the arrangement that crosses least. A curve keeps every rule,
 /// because nothing hides it where it wanders.
 /// </para>
@@ -66,6 +67,7 @@ internal sealed class GraphLayoutValidator
             if (flat.IsChord)
             {
                 CheckEnds(flat, nodes[own.ChildNode], nodes[own.ParentNode], failures);
+                CheckCards(flat, nodes, own, cards, failures, chord: true);
             }
             else
             {
@@ -169,6 +171,7 @@ internal sealed class GraphLayoutValidator
         else
         {
             CheckEnds(flat, nodes[own.ChildNode], nodes[own.ParentNode], failures);
+            CheckCards(flat, nodes, own, cards ?? new GraphCardIndex(nodes, GraphGeometryContract.CardCenterlineClearance), failures, chord: true);
         }
 
         var crossings = new List<GraphCrossing>();
@@ -292,7 +295,8 @@ internal sealed class GraphLayoutValidator
         IReadOnlyList<NodePlacement> nodes,
         GraphEdgeEndpoints own,
         GraphCardIndex cards,
-        List<RouteFailure> failures)
+        List<RouteFailure> failures,
+        bool chord = false)
     {
         var blocking = new SortedSet<int>();
         var grow = GraphGeometryContract.CardCenterlineClearance;
@@ -314,7 +318,13 @@ internal sealed class GraphLayoutValidator
                     continue;
                 }
 
-                var clearance = card.NodeIndex == own.ChildNode || card.NodeIndex == own.ParentNode ? -OwnCardInset : grow;
+                var isOwn = card.NodeIndex == own.ChildNode || card.NodeIndex == own.ParentNode;
+                if (isOwn && chord)
+                {
+                    continue;
+                }
+
+                var clearance = isOwn ? -OwnCardInset : grow;
                 if (GraphGeometry.SegmentHitsRect(start, end, card, clearance))
                 {
                     blocking.Add(card.NodeIndex);

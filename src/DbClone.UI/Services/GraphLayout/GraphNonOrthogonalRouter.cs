@@ -300,7 +300,8 @@ internal sealed class GraphNonOrthogonalRouter
 
         // The last phase: a relation with no clear chord and no bow that clears what stands in its way is taken
         // round the cards instead of being reported undrawable. It costs nothing unless everything above failed.
-        if (!exhausted && budget.TrySpend() && GraphDetourRoute.Build(ends.Child, ends.Parent, nodes, (child, parent)) is { } detour)
+        // An ordinary relation is never bent, so only a self-reference may take it.
+        if (child == parent && !exhausted && budget.TrySpend() && GraphDetourRoute.Build(ends.Child, ends.Parent, nodes, (child, parent)) is { } detour)
         {
             explored.Add(candidates.Count);
             var route = new EdgeRoute(edge, shape, EEdgeGeometry.Cubic, detour, detour[0]);
@@ -347,8 +348,8 @@ internal sealed class GraphNonOrthogonalRouter
             return GraphRouteCandidates.ForLoop(ends.Child, ends.Parent);
         }
 
-        // Every relation but a self-reference is its own chord: two ports and the line between them, with the
-        // cards painted over it. There is nothing to dodge, so there is nothing else to try.
+        // Every relation but a self-reference is its own chord: two ports and the line between them. It is never
+        // bent; a chord a card stands on is refused by the validator, and the placement has to clear it.
         return [new GraphRouteCandidate(0, EEdgeGeometry.Straight, [ends.Child.Point, ends.Parent.Point])];
     }
 

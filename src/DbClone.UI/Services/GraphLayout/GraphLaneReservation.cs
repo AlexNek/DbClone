@@ -68,7 +68,7 @@ internal sealed class GraphLaneReservation
         (int Child, int Parent)[] relations)
     {
         ArgumentNullException.ThrowIfNull(nodes);
-        if (relations.Length >= 0)
+        if (relations.Length == 0 || nodes.Count < 3)
         {
             return;
         }

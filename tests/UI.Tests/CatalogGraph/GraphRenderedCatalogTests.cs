@@ -26,6 +26,8 @@ public sealed class GraphRenderedCatalogTests(ITestOutputHelper output)
         document.PaintedCards.Should().Be(79, "the catalog opens whole");
         document.PaintedRelations.Should().Be(96);
         document.HasAway.Should().BeFalse();
+        result.IsRough.Should().BeFalse("a picture the search proved is the one asked for");
+        document.HiddenRelations.Should().Be(0, "no relation may run behind a card it does not join");
         document.HiddenMeetingBusiestTable.Should().Be(0, "the busiest table's fan is whole");
         document.MergedPortMarks.Should().Be(0, "arrows never fuse");
         document.Crossings.Should().BeLessThanOrEqualTo(150);
