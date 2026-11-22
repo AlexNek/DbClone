@@ -19,9 +19,14 @@ public interface IMetadataReader
     /// Resolved platform definition (system/platform schemas). When null, falls back
     /// to hardcoded system schema list.
     /// </param>
+    /// <param name="scope">
+    /// What the caller will do with the model. A scoped request may be answered with more,
+    /// never with less; <see cref="EMetadataScope.Everything"/> is the default.
+    /// </param>
     /// <param name="cancellationToken">Cancellation token.</param>
     Task<DatabaseModel> ReadDatabaseModelAsync(
         bool excludePlatformSchemas = false,
         PlatformResolution? platformResolution = null,
+        EMetadataScope scope = EMetadataScope.Everything,
         CancellationToken cancellationToken = default);
 }

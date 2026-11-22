@@ -68,15 +68,17 @@ public class RelationshipGraphServiceTests
         var model = RelationshipModelFixture.Model(
             RelationshipModelFixture.Table("public", "customers", columns: [RelationshipModelFixture.Column("id", 1)]));
         var sut = CreateService(Substitute.For<IInterchangeService>(), out var metadata, out _);
-        metadata.ReadDatabaseModelAsync(false, Arg.Any<CancellationToken>()).Returns(model);
+        metadata.ReadDatabaseModelAsync(false, Arg.Any<EMetadataScope>(), Arg.Any<CancellationToken>()).Returns(model);
 
         // Act
         var graph = await sut.ReadDatabaseAsync(Connection, ERelationshipRole.Source, CancellationToken.None);
 
         // Assert — `false` is the flag the store's own reader uses (D2); `true` would silently drop
-        // platform-managed schemas and every schema the connected role does not own.
+        // platform-managed schemas and every schema the connected role does not own. `Structure`
+        // asks only for what the picture draws.
         await metadata.Received(1).ReadDatabaseModelAsync(
             excludePlatformSchemas: false,
+            scope: EMetadataScope.Structure,
             ct: Arg.Any<CancellationToken>());
         graph.Tables.Should().ContainSingle();
     }
@@ -86,7 +88,7 @@ public class RelationshipGraphServiceTests
     {
         // Arrange
         var sut = CreateService(Substitute.For<IInterchangeService>(), out var metadata, out _);
-        metadata.ReadDatabaseModelAsync(false, Arg.Any<CancellationToken>())
+        metadata.ReadDatabaseModelAsync(false, Arg.Any<EMetadataScope>(), Arg.Any<CancellationToken>())
             .Returns(RelationshipModelFixture.Model());
 
         // Act
@@ -106,7 +108,7 @@ public class RelationshipGraphServiceTests
     {
         // Arrange
         var sut = CreateService(Substitute.For<IInterchangeService>(), out var metadata, out _);
-        metadata.ReadDatabaseModelAsync(false, Arg.Any<CancellationToken>())
+        metadata.ReadDatabaseModelAsync(false, Arg.Any<EMetadataScope>(), Arg.Any<CancellationToken>())
             .Returns(RelationshipModelFixture.Model());
 
         // Act

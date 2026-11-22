@@ -205,7 +205,7 @@ public sealed class RelationshipViewHandlerTests : IDisposable
         await sut.ShowCatalogAsync(catalog, new WorkflowState());
 
         // Assert
-        _presenter.Notices.Should().ContainSingle();
+        _presenter.Notices.Should().HaveCount(2, "one notice for the read, one for the arrangement");
         _cursor.Calls.Should().BeEmpty();
     }
 
@@ -233,6 +233,25 @@ public sealed class RelationshipViewHandlerTests : IDisposable
         _presenter.Notices[0].Origin.Should().Be(CatalogFolderName);
         _presenter.Notices[0].Headline.Should().Contain("Reading");
         _presenter.Notices[0].IsFailure.Should().BeFalse();
+    }
+
+    [Fact]
+    public async Task The_window_states_the_arrangement_once_the_origin_is_read()
+    {
+        // Arrange — reading and arranging are two waits: once the read answers, the window stops
+        // claiming the origin is still being read.
+        var catalog = CreateCatalog();
+        Reading(View());
+        var sut = CreateHandler();
+
+        // Act
+        await sut.ShowCatalogAsync(catalog, new WorkflowState());
+
+        // Assert
+        _presenter.Notices.Should().HaveCount(2);
+        _presenter.Notices[1].Origin.Should().Be(CatalogFolderName);
+        _presenter.Notices[1].Headline.Should().Contain("Arranging");
+        _presenter.Notices[1].IsFailure.Should().BeFalse();
     }
 
     [Fact]

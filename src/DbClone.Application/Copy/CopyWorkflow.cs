@@ -148,6 +148,7 @@ public sealed class CopyWorkflow : ICopyWorkflow
             // Read metadata to update object counts — BEFORE destination is verified
             var model = await sourceMetadata.ReadDatabaseModelAsync(
                             options.ExcludePlatformSchemas,
+                            EMetadataScope.Everything,
                             cancellationToken);
             var metadata = BuildMetadata(model);
             listener.OnLogMessage($"Source: {metadata.Summary}");

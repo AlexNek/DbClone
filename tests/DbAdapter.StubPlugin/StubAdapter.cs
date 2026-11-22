@@ -181,7 +181,10 @@ public sealed class StubAdapter : IDatabaseAdapter
         public Task<IReadOnlyList<TableSizeInfo>> GetTableSizesAsync(CancellationToken ct) =>
             Task.FromResult<IReadOnlyList<TableSizeInfo>>([]);
 
-        public Task<DatabaseModel> ReadDatabaseModelAsync(bool excludePlatformSchemas = false, CancellationToken ct = default) =>
+        public Task<DatabaseModel> ReadDatabaseModelAsync(
+            bool excludePlatformSchemas = false,
+            EMetadataScope scope = EMetadataScope.Everything,
+            CancellationToken ct = default) =>
             Task.FromResult(EmptyModel());
 
         private static DatabaseModel EmptyModel() => new(

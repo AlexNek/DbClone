@@ -301,7 +301,11 @@ public sealed class ComparisonServiceTests
     private static IMetadataSource Metadata(DatabaseModel model)
     {
         var metadata = Substitute.For<IMetadataSource>();
-        metadata.ReadDatabaseModelAsync(Arg.Any<bool>(), Arg.Any<CancellationToken>()).Returns(model);
+        metadata.ReadDatabaseModelAsync(
+                Arg.Any<bool>(),
+                EMetadataScope.Everything,
+                Arg.Any<CancellationToken>())
+            .Returns(model);
 
         return metadata;
     }

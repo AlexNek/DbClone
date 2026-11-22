@@ -10,8 +10,9 @@ namespace DbClone.UI.Services.Relationship;
 /// progress page and the picture that replaces it.
 /// </summary>
 /// <remarks>
-/// The page is self-contained — no script, no asset, no address — because it is served from memory to
-/// the same viewer the document is, and it must paint before anything else has been read.
+/// The page is self-contained — no asset, no address — because it is served from memory to
+/// the same viewer the document is, and it must paint before anything else has been read. Its one
+/// script only ticks the elapsed counter beside the bar.
 /// </remarks>
 internal static class RelationshipNoticePage
 {
@@ -36,10 +37,15 @@ internal static class RelationshipNoticePage
         html.Append("<p class=\"notice-detail\">").Append(GraphHtmlText.Escape(notice.Detail)).Append("</p>\n");
 
         // The bar moves while the work is under way and disappears when the work has failed: a still bar
-        // beside a failure would say the request is still running.
+        // beside a failure would say the request is still running. The counter beside it states how
+        // long this phase has been waiting, in minutes and seconds.
         if (!notice.IsFailure)
         {
-            html.Append("<div class=\"notice-bar\" role=\"progressbar\" aria-label=\"Arranging the picture\"><span></span></div>\n");
+            html.Append("<div class=\"notice-bar\" role=\"progressbar\" aria-label=\"")
+                .Append(GraphHtmlText.Escape(notice.Headline))
+                .Append("\"><span></span></div>\n");
+            html.Append("<p class=\"notice-elapsed\"><span id=\"notice-elapsed\">0:00</span></p>\n");
+            html.Append("<script>(function(){var e=document.getElementById('notice-elapsed');if(!e)return;var s=Date.now();setInterval(function(){var t=Math.floor((Date.now()-s)/1000);e.textContent=Math.floor(t/60)+':'+('0'+(t%60)).slice(-2);},1000);})();</script>\n");
         }
 
         html.Append("</div></main>\n");
@@ -60,6 +66,7 @@ internal static class RelationshipNoticePage
         .notice-detail{margin:8px 0 0;color:var(--muted);font-size:12px;word-break:break-word}
         .notice-bar{width:260px;height:3px;margin:22px auto 0;border-radius:999px;background:#e3e8ee;overflow:hidden}
         .notice-bar span{display:block;width:40%;height:100%;border-radius:999px;background:var(--hot);animation:notice-slide 1.15s ease-in-out infinite}
+        .notice-elapsed{margin:10px 0 0;font-size:11px;color:var(--muted);font-variant-numeric:tabular-nums}
         @keyframes notice-slide{0%{transform:translateX(-100%)}100%{transform:translateX(350%)}}
         @media (prefers-reduced-motion: reduce){.notice-bar span{animation:none;width:100%;opacity:.45}}
         """;

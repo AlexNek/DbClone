@@ -213,6 +213,10 @@ internal sealed class RelationshipViewHandler : IRelationshipViewHandler
                 return;
             }
 
+            // The read is done and the arrangement is the wait now, so the window stops claiming the
+            // origin is still being read.
+            await AnnounceAsync(Arranging(opening.Origin), cancellationToken).ConfigureAwait(false);
+
             await DrawAsync(view, Refresh(read, state), Redraw(), state, cancellationToken).ConfigureAwait(false);
         }
         finally
@@ -225,8 +229,8 @@ internal sealed class RelationshipViewHandler : IRelationshipViewHandler
     /// One read, one picture: the search works out the arrangement the catalog is drawn with and the reader is
     /// handed it. Nothing is put on screen that the search would replace a moment later — a plain arrangement
     /// drawn first is a picture the reader reads, judges and saves before the answer exists, and a picture that
-    /// arrives in two versions reads as two answers. The window states what is being read while the arrangement
-    /// is worked out, exactly as it does while the origin is read.
+    /// arrives in two versions reads as two answers. The window states the arrangement while it is worked
+    /// out — the read notice has already been replaced, because reading and arranging are two waits.
     /// </summary>
     /// <param name="view">The graph to draw.</param>
     /// <param name="refresh">How the presenter re-reads the origin.</param>
@@ -523,6 +527,10 @@ internal sealed class RelationshipViewHandler : IRelationshipViewHandler
     /// <summary>The page the window opens with: the origin, what is being done to it, and when the picture comes.</summary>
     private static RelationshipNotice Working(string origin, string headline) =>
         new(origin, headline, "The picture opens as soon as it is arranged.");
+
+    /// <summary>The page between the read and the picture: the origin is known and the arrangement is the wait.</summary>
+    private static RelationshipNotice Arranging(string origin) =>
+        new(origin, "Arranging the picture…", "Tables and relations are being placed on the page.");
 
     /// <summary>The page a stopped request leaves behind: the origin, what could not be done, and why.</summary>
     private static RelationshipNotice Stopped(string origin, string headline, string reason) =>

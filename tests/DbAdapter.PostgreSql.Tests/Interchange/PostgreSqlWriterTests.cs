@@ -80,6 +80,7 @@ public class PostgreSqlWriterTests
 
         await _metadata.Received(1).ReadDatabaseModelAsync(
             excludePlatformSchemas: true,
+            scope: EMetadataScope.Everything,
             Arg.Any<CancellationToken>());
     }
 
@@ -1793,7 +1794,7 @@ public class PostgreSqlWriterTests
 
     private void Given(Models.DatabaseModel model) =>
         _metadata
-            .ReadDatabaseModelAsync(Arg.Any<bool>(), Arg.Any<CancellationToken>())
+            .ReadDatabaseModelAsync(Arg.Any<bool>(), EMetadataScope.Everything, Arg.Any<CancellationToken>())
             .Returns(model);
 
     private PostgreSqlWriter CreateWriter() =>

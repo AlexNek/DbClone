@@ -121,7 +121,7 @@ public sealed class TableCatalogService : ITableCatalogService
         CancellationToken ct)
     {
         var metadata = AdapterFor(connection).CreateMetadataSource(_targetFactory.Create(connection));
-        var model = await metadata.ReadDatabaseModelAsync(ct: ct);
+        var model = await metadata.ReadDatabaseModelAsync(scope: EMetadataScope.Everything, ct: ct);
 
         return new DatabaseMetadata(
             Tables: model.Tables.Count,
@@ -144,7 +144,7 @@ public sealed class TableCatalogService : ITableCatalogService
         CancellationToken ct)
     {
         var metadata = AdapterFor(connection).CreateMetadataSource(_targetFactory.Create(connection));
-        return await metadata.ReadDatabaseModelAsync(ct: ct);
+        return await metadata.ReadDatabaseModelAsync(scope: EMetadataScope.Everything, ct: ct);
     }
 
     /// <inheritdoc />

@@ -241,7 +241,10 @@ public sealed class PostgreSqlReader : IDatabaseReader
     /// pass describe the same database and must not disagree about it.
     /// </summary>
     private async Task<Models.DatabaseModel> EnsureModelAsync(CancellationToken ct) =>
-        _model ??= await _metadataSource.ReadDatabaseModelAsync(excludePlatformSchemas: false, ct);
+        _model ??= await _metadataSource.ReadDatabaseModelAsync(
+            excludePlatformSchemas: false,
+            scope: EMetadataScope.Everything,
+            ct: ct);
 
     /// <summary>
     /// Opens the read connection and the transaction that holds the export's cursors.

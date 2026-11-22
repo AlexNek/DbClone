@@ -74,6 +74,7 @@ public class PostgreSqlReaderTests
 
         await _metadata.Received(1).ReadDatabaseModelAsync(
             Arg.Any<bool>(),
+            EMetadataScope.Everything,
             Arg.Any<CancellationToken>());
     }
 
@@ -103,7 +104,7 @@ public class PostgreSqlReaderTests
 
     private void GivenFullModel() =>
         _metadata
-            .ReadDatabaseModelAsync(Arg.Any<bool>(), Arg.Any<CancellationToken>())
+            .ReadDatabaseModelAsync(Arg.Any<bool>(), EMetadataScope.Everything, Arg.Any<CancellationToken>())
             .Returns(InterchangeTestModel.Full());
 
     private PostgreSqlReader CreateReader() =>

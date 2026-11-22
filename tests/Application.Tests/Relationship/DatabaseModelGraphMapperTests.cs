@@ -1,3 +1,6 @@
+using CanonicalModel.Enums;
+using CanonicalModel.Models;
+
 using DbClone.Application.Relationship;
 
 using FluentAssertions;
@@ -423,6 +426,133 @@ public class DatabaseModelGraphMapperTests
         view.Schemas.Should().BeEmpty();
         view.UnrelatedTableCount.Should().Be(0);
         view.HasData.Should().BeFalse();
+    }
+
+    [Fact]
+    public void Map_StructureScopeModel_ProducesTheSameViewAsTheFullModel()
+    {
+        // Arrange — the full model carries every collection a Structure read skips, populated
+        // with entries related to the fixture tables where the model allows it. Emptying only
+        // those collections is what the scoped read returns for the same database.
+        var tables = new[]
+        {
+            RelationshipModelFixture.Table(
+                "public",
+                "customers",
+                columns: [RelationshipModelFixture.Column("id", 1)],
+                indexes: [RelationshipModelFixture.PrimaryIndex("id")]),
+            RelationshipModelFixture.Table(
+                "public",
+                "orders",
+                columns:
+                [
+                    RelationshipModelFixture.Column("id", 1),
+                    RelationshipModelFixture.Column("customer_id", 2),
+                    RelationshipModelFixture.Column("state", 3, dataType: "public.order_state"),
+                ],
+                indexes: [RelationshipModelFixture.PrimaryIndex("id")],
+                foreignKeys:
+                [
+                    RelationshipModelFixture.ForeignKey(
+                        "orders_customer_id_fkey", "public", "customers", ["customer_id"], ["id"]),
+                ],
+                checks: [RelationshipModelFixture.Check("orders_state_known", "state IN ('new', 'shipped')")],
+                uniqueConstraints: [RelationshipModelFixture.Unique("orders_customer_state_key", "customer_id", "state")]),
+        };
+
+        var full = new DatabaseModel(
+            DatabaseName: "testdb",
+            ServerVersion: "16.0",
+            Schemas: [new SchemaDefinition("public", "test_user")],
+            Tables: tables,
+            Views:
+            [
+                new ViewDefinition(
+                    "public", "open_orders", "SELECT * FROM public.orders WHERE state = 'new'",
+                    null, ["public.orders"]),
+            ],
+            MaterializedViews:
+            [
+                new MaterializedViewDefinition(
+                    "public", "order_totals", "SELECT customer_id, count(*) FROM public.orders GROUP BY 1",
+                    null, ["customer_id", "count"], null),
+            ],
+            Sequences:
+            [
+                new SequenceDefinition(
+                    "public", "orders_id_seq", 1, 1, 1, null, 1, false, "bigint", null,
+                    OwnerTable: "public.orders", OwnerColumn: "id"),
+            ],
+            Enums: [new EnumDefinition("public", "order_state", ["new", "shipped"], null)],
+            Domains: [new DomainDefinition("public", "positive_int", "integer", null, "VALUE > 0", true, null)],
+            CompositeTypes:
+            [
+                new CompositeTypeDefinition(
+                    "public", "order_pair",
+                    [RelationshipModelFixture.Column("left_id", 1), RelationshipModelFixture.Column("right_id", 2)],
+                    null),
+            ],
+            Functions:
+            [
+                new FunctionDefinition(
+                    "public", "next_order_number", "plpgsql", "integer",
+                    "CREATE FUNCTION public.next_order_number() RETURNS integer AS $$ BEGIN RETURN 1; END $$ LANGUAGE plpgsql",
+                    [], EFunctionVolatility.Volatile, false, false, null, false),
+            ],
+            Triggers:
+            [
+                new TriggerDefinition(
+                    "public", "orders_touch", "orders", "BEFORE", ["UPDATE"],
+                    "public", "touch_updated_at", true, true, null, null),
+            ],
+            Policies:
+            [
+                new PolicyDefinition(
+                    "public", "orders_tenant_isolation", "orders", "ALL", true, ["public"],
+                    "tenant_id = current_setting('app.tenant')::int", null),
+            ],
+            Publications: [new PublicationDefinition("order_pub", false, ["public.orders"], null)],
+            Subscriptions:
+            [
+                new SubscriptionDefinition("order_sub", "host=test.example.com dbname=testdb", "order_pub", true, null),
+            ],
+            Extensions: [new ExtensionDefinition("pgcrypto", "extensions", "1.3", null)]);
+
+        var scoped = full with
+        {
+            Views = [],
+            MaterializedViews = [],
+            Sequences = [],
+            Enums = [],
+            Domains = [],
+            CompositeTypes = [],
+            Functions = [],
+            Triggers = [],
+            Policies = [],
+            Publications = [],
+            Subscriptions = [],
+        };
+
+        // Act
+        var fullView = DatabaseModelGraphMapper.Map(full, Origin);
+        var scopedView = DatabaseModelGraphMapper.Map(scoped, Origin);
+
+        // Assert — non-vacuous: the skipped collections really were populated.
+        full.Views.Should().NotBeEmpty();
+        full.MaterializedViews.Should().NotBeEmpty();
+        full.Sequences.Should().NotBeEmpty();
+        full.Enums.Should().NotBeEmpty();
+        full.Domains.Should().NotBeEmpty();
+        full.CompositeTypes.Should().NotBeEmpty();
+        full.Functions.Should().NotBeEmpty();
+        full.Triggers.Should().NotBeEmpty();
+        full.Policies.Should().NotBeEmpty();
+        full.Publications.Should().NotBeEmpty();
+        full.Subscriptions.Should().NotBeEmpty();
+
+        // Every member, recursively, in strict collection order: the picture a Structure read
+        // produces is element for element the picture the full read produces.
+        scopedView.Should().BeEquivalentTo(fullView, options => options.WithStrictOrdering());
     }
 
     [Fact]

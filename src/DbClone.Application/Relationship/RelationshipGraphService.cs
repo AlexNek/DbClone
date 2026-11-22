@@ -1,5 +1,7 @@
 using System.Globalization;
 
+using DbAdapter.Definitions;
+
 using DbClone.Application.DTOs;
 using DbClone.Application.Interchange;
 using DbClone.Application.Targets;
@@ -16,7 +18,8 @@ namespace DbClone.Application.Relationship;
 /// The live read is the same one Compare performs for its destination — resolve the adapter from the
 /// connection's engine, create the metadata source for the target, read the model — with
 /// <c>excludePlatformSchemas: false</c> so a view of a database and the catalog stored from it list the
-/// same tables.
+/// same tables, and <see cref="EMetadataScope.Structure"/> so the read fetches only what the picture
+/// draws — a copy's read keeps <see cref="EMetadataScope.Everything"/>.
 /// </remarks>
 public sealed class RelationshipGraphService : IRelationshipGraphService
 {
@@ -71,7 +74,10 @@ public sealed class RelationshipGraphService : IRelationshipGraphService
 
         var metadata = adapter.CreateMetadataSource(target);
         var model = await metadata
-            .ReadDatabaseModelAsync(excludePlatformSchemas: false, ct: ct)
+            .ReadDatabaseModelAsync(
+                excludePlatformSchemas: false,
+                scope: EMetadataScope.Structure,
+                ct: ct)
             .ConfigureAwait(false);
 
         var origin = new GraphViewOrigin(

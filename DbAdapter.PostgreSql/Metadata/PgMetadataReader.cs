@@ -2,6 +2,7 @@ using DbAdapter.Definitions;
 using DbAdapter.PostgreSql.Execution;
 
 using System.Data.Common;
+using System.Diagnostics;
 
 using Microsoft.Extensions.Logging;
 using CanonicalModel.Models;
@@ -68,10 +69,14 @@ public sealed class PgMetadataReader : IMetadataReader
     public async Task<DatabaseModel> ReadDatabaseModelAsync(
         bool excludePlatformSchemas = false,
         PlatformResolution? platformResolution = null,
+        EMetadataScope scope = EMetadataScope.Everything,
         CancellationToken cancellationToken = default)
     {
+        var started = Stopwatch.GetTimestamp();
+
         _logger.LogInformation(
-            "Reading database model (excludePlatformSchemas={Filter}, platform={Platform})",
+            "Reading database model (scope={Scope}, excludePlatformSchemas={Filter}, platform={Platform})",
+            scope,
             excludePlatformSchemas,
             platformResolution?.DetectedPlatform ?? "base");
 
@@ -84,13 +89,18 @@ public sealed class PgMetadataReader : IMetadataReader
         // Platform schemas and ownership heuristic are conditional.
         await BuildSchemaFilterAsync(platformResolution, excludePlatformSchemas, cancellationToken);
 
-        var serverVersion = await _executor.ExecuteScalarAsync<string>(
-                                "SHOW server_version",
-                                cancellationToken);
-
-        var dbName = await _executor.ExecuteScalarAsync<string>(
-                         "SELECT current_database()",
-                         cancellationToken);
+        var (serverVersion, dbName) = await MeasureStageAsync(
+            EPgMetadataSection.ServerFacts,
+            async () =>
+                {
+                    var version = await _executor.ExecuteScalarAsync<string>(
+                                       "SHOW server_version",
+                                       cancellationToken);
+                    var name = await _executor.ExecuteScalarAsync<string>(
+                                   "SELECT current_database()",
+                                   cancellationToken);
+                    return (version, name);
+                });
 
         // Read extensions FIRST so we can widen search_path before reading columns.
         // pg_get_expr() uses the session search_path to decide whether to schema-qualify
@@ -98,22 +108,44 @@ public sealed class PgMetadataReader : IMetadataReader
         // extensions.uuid_generate_v4()). By including extension schemas in search_path
         // we ensure defaults are stored unqualified — matching what the destination will
         // produce after CreateExtensionsStage sets the same search_path.
-        var extensions = await ReadExtensionsAsync(cancellationToken);
-        await WidenSearchPathForExtensionsAsync(extensions, cancellationToken);
+        // The same widening keeps the picture's wording faithful under every scope:
+        // format_type prints a type qualified unless it is on the search path, and
+        // pg_get_constraintdef prints check expressions the same way — the relationship
+        // panel prints both, so an extension-owned type must still read unqualified.
+        var extensions = await MeasureStageAsync(
+            EPgMetadataSection.Extensions,
+            async () =>
+                {
+                    var read = await ReadExtensionsAsync(cancellationToken);
+                    await WidenSearchPathForExtensionsAsync(read, cancellationToken);
+                    return read;
+                });
 
-        var schemas = await ReadSchemasAsync(cancellationToken);
-        var enums = await ReadEnumsAsync(cancellationToken);
-        var domains = await ReadDomainsAsync(cancellationToken);
-        var compositeTypes = await ReadCompositeTypesAsync(cancellationToken);
-        var sequences = await ReadSequencesAsync(cancellationToken);
-        var tables = await ReadTablesAsync(cancellationToken);
-        var views = await ReadViewsAsync(cancellationToken);
-        var materializedViews = await ReadMaterializedViewsAsync(cancellationToken);
-        var functions = await ReadFunctionsAsync(cancellationToken);
-        var triggers = await ReadTriggersAsync(cancellationToken);
-        var policies = await ReadPoliciesAsync(cancellationToken);
-        var publications = await ReadPublicationsAsync(cancellationToken);
-        var subscriptions = await ReadSubscriptionsAsync(cancellationToken);
+        var schemas = await ReadSectionAsync(
+            scope, EPgMetadataSection.Schemas, () => ReadSchemasAsync(cancellationToken));
+        var enums = await ReadSectionAsync(
+            scope, EPgMetadataSection.Enums, () => ReadEnumsAsync(cancellationToken));
+        var domains = await ReadSectionAsync(
+            scope, EPgMetadataSection.Domains, () => ReadDomainsAsync(cancellationToken));
+        var compositeTypes = await ReadSectionAsync(
+            scope, EPgMetadataSection.CompositeTypes, () => ReadCompositeTypesAsync(cancellationToken));
+        var sequences = await ReadSectionAsync(
+            scope, EPgMetadataSection.Sequences, () => ReadSequencesAsync(cancellationToken));
+        var tables = await ReadTablesAsync(scope, cancellationToken);
+        var views = await ReadSectionAsync(
+            scope, EPgMetadataSection.Views, () => ReadViewsAsync(cancellationToken));
+        var materializedViews = await ReadSectionAsync(
+            scope, EPgMetadataSection.MaterializedViews, () => ReadMaterializedViewsAsync(cancellationToken));
+        var functions = await ReadSectionAsync(
+            scope, EPgMetadataSection.Functions, () => ReadFunctionsAsync(cancellationToken));
+        var triggers = await ReadSectionAsync(
+            scope, EPgMetadataSection.Triggers, () => ReadTriggersAsync(cancellationToken));
+        var policies = await ReadSectionAsync(
+            scope, EPgMetadataSection.Policies, () => ReadPoliciesAsync(cancellationToken));
+        var publications = await ReadSectionAsync(
+            scope, EPgMetadataSection.Publications, () => ReadPublicationsAsync(cancellationToken));
+        var subscriptions = await ReadSectionAsync(
+            scope, EPgMetadataSection.Subscriptions, () => ReadSubscriptionsAsync(cancellationToken));
 
         var model = new DatabaseModel(
             DatabaseName: dbName,
@@ -134,13 +166,68 @@ public sealed class PgMetadataReader : IMetadataReader
             Extensions: extensions);
 
         _logger.LogInformation(
-            "Read {TableCount} tables, {ViewCount} views, {FunctionCount} functions, {SchemaCount} schemas",
+            "Read {TableCount} tables, {ViewCount} views, {FunctionCount} functions, {SchemaCount} schemas (scope={Scope}, elapsed={ElapsedMilliseconds} ms)",
             tables.Count,
             views.Count,
             functions.Count,
-            schemas.Count);
+            schemas.Count,
+            scope,
+            Stopwatch.GetElapsedTime(started).TotalMilliseconds);
 
         return model;
+    }
+
+    /// <summary>
+    /// Runs one gated read stage: a section the scope does not read yields an empty list without
+    /// its statement being sent; a section it does read is timed and logged at Debug.
+    /// </summary>
+    private async Task<IReadOnlyList<TItem>> ReadSectionAsync<TItem>(
+        EMetadataScope scope,
+        EPgMetadataSection section,
+        Func<Task<IReadOnlyList<TItem>>> read)
+    {
+        if (!PgMetadataSectionPlan.Reads(scope, section))
+        {
+            _logger.LogDebug("Metadata stage {Section}: skipped (scope={Scope})", section, scope);
+            return [];
+        }
+
+        return await MeasureStageAsync(section, read);
+    }
+
+    /// <summary>The dictionary-returning counterpart of the list-returning section read.</summary>
+    private async Task<Dictionary<string, IReadOnlyList<TItem>>> ReadSectionAsync<TItem>(
+        EMetadataScope scope,
+        EPgMetadataSection section,
+        Func<Task<Dictionary<string, IReadOnlyList<TItem>>>> read)
+    {
+        if (!PgMetadataSectionPlan.Reads(scope, section))
+        {
+            _logger.LogDebug("Metadata stage {Section}: skipped (scope={Scope})", section, scope);
+            return new();
+        }
+
+        return await MeasureStageAsync(section, read);
+    }
+
+    /// <summary>
+    /// Times one read stage unconditionally — for the preparation stages every scope keeps —
+    /// and logs its duration at Debug.
+    /// </summary>
+    private async Task<T> MeasureStageAsync<T>(EPgMetadataSection section, Func<Task<T>> read)
+    {
+        var stopwatch = Stopwatch.StartNew();
+        try
+        {
+            return await read();
+        }
+        finally
+        {
+            _logger.LogDebug(
+                "Metadata stage {Section}: {ElapsedMilliseconds} ms",
+                section,
+                stopwatch.ElapsedMilliseconds);
+        }
     }
 
     /// <summary>
@@ -1084,11 +1171,13 @@ public sealed class PgMetadataReader : IMetadataReader
         }
     }
 
-    private async Task<IReadOnlyList<TableDefinition>> ReadTablesAsync(CancellationToken ct)
+    /// <summary>
+    /// Reads basic table info, including partition hierarchy:
+    /// - parent schema/name via pg_inherits (for child partitions)
+    /// - partition bound via pg_get_expr(relpartbound) e.g. "FOR VALUES FROM (...) TO (...)" or "DEFAULT"
+    /// </summary>
+    private async Task<IReadOnlyList<TableDefinition>> ReadTableRowsAsync(CancellationToken ct)
     {
-        // Read basic table info, including partition hierarchy:
-        // - parent schema/name via pg_inherits (for child partitions)
-        // - partition bound via pg_get_expr(relpartbound) e.g. "FOR VALUES FROM (...) TO (...)" or "DEFAULT"
         var sql = $@"
             SELECT n.nspname AS schema, c.relname AS name,
                    CASE c.relkind WHEN '{PgRelKind.PartitionedTable}' THEN true ELSE false END AS is_partitioned,
@@ -1107,46 +1196,59 @@ public sealed class PgMetadataReader : IMetadataReader
               AND NOT EXISTS (SELECT 1 FROM pg_depend d WHERE d.objid = c.oid AND d.deptype = 'e')
             ORDER BY n.nspname, c.relname";
 
-        var tables = await _executor.QueryAsync(
-                         sql,
-                         r =>
-                             {
-                                 var schema = r.GetString(0);
-                                 var name = r.GetString(1);
-                                 var parentSchema = r.IsDBNull(5) ? null : r.GetString(5);
-                                 var parentName = r.IsDBNull(6) ? null : r.GetString(6);
-                                 return new TableDefinition(
-                                     SchemaName: schema,
-                                     Name: name,
-                                     Columns: [],
-                                     Indexes: [],
-                                     ForeignKeys: [],
-                                     CheckConstraints: [],
-                                     UniqueConstraints: [],
-                                     Comment: r.IsDBNull(4) ? null : r.GetString(4),
-                                     IsPartitioned: r.GetBoolean(2),
-                                     PartitionStrategy: r.IsDBNull(3) ? null : r.GetString(3),
-                                     ParentTable: parentSchema is null || parentName is null
-                                                      ? null
-                                                      : $"{parentSchema}.{parentName}",
-                                     PartitionBound: r.IsDBNull(7) ? null : r.GetString(7));
-                             },
-                         ct);
+        return await _executor.QueryAsync(
+                   sql,
+                   r =>
+                       {
+                           var schema = r.GetString(0);
+                           var name = r.GetString(1);
+                           var parentSchema = r.IsDBNull(5) ? null : r.GetString(5);
+                           var parentName = r.IsDBNull(6) ? null : r.GetString(6);
+                           return new TableDefinition(
+                               SchemaName: schema,
+                               Name: name,
+                               Columns: [],
+                               Indexes: [],
+                               ForeignKeys: [],
+                               CheckConstraints: [],
+                               UniqueConstraints: [],
+                               Comment: r.IsDBNull(4) ? null : r.GetString(4),
+                               IsPartitioned: r.GetBoolean(2),
+                               PartitionStrategy: r.IsDBNull(3) ? null : r.GetString(3),
+                               ParentTable: parentSchema is null || parentName is null
+                                                ? null
+                                                : $"{parentSchema}.{parentName}",
+                               PartitionBound: r.IsDBNull(7) ? null : r.GetString(7));
+                       },
+                   ct);
+    }
+
+    private async Task<IReadOnlyList<TableDefinition>> ReadTablesAsync(
+        EMetadataScope scope,
+        CancellationToken ct)
+    {
+        var tables = await ReadSectionAsync(
+            scope, EPgMetadataSection.Tables, () => ReadTableRowsAsync(ct));
 
         // Read columns for all tables
-        var columnsByTable = await ReadColumnsAsync(ct);
+        var columnsByTable = await ReadSectionAsync(
+            scope, EPgMetadataSection.Columns, () => ReadColumnsAsync(ct));
 
         // Read indexes for all tables
-        var indexesByTable = await ReadIndexesAsync(ct);
+        var indexesByTable = await ReadSectionAsync(
+            scope, EPgMetadataSection.Indexes, () => ReadIndexesAsync(ct));
 
         // Read foreign keys
-        var fksByTable = await ReadForeignKeysAsync(ct);
+        var fksByTable = await ReadSectionAsync(
+            scope, EPgMetadataSection.ForeignKeys, () => ReadForeignKeysAsync(ct));
 
         // Read check constraints
-        var checksByTable = await ReadCheckConstraintsAsync(ct);
+        var checksByTable = await ReadSectionAsync(
+            scope, EPgMetadataSection.Checks, () => ReadCheckConstraintsAsync(ct));
 
         // Read unique constraints
-        var uniquesByTable = await ReadUniqueConstraintsAsync(ct);
+        var uniquesByTable = await ReadSectionAsync(
+            scope, EPgMetadataSection.UniqueKeys, () => ReadUniqueConstraintsAsync(ct));
 
         // Assemble tables with their children
         return tables.Select(t =>

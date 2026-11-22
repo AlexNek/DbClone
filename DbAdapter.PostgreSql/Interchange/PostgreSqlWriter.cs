@@ -102,7 +102,10 @@ public sealed class PostgreSqlWriter : IDatabaseWriter
         ObjectDisposedException.ThrowIf(_disposed, this);
         _logger.LogInformation("Ensuring target database is empty");
 
-        var model = await _metadataSource.ReadDatabaseModelAsync(excludePlatformSchemas: true, ct);
+        var model = await _metadataSource.ReadDatabaseModelAsync(
+            excludePlatformSchemas: true,
+            scope: EMetadataScope.Everything,
+            ct: ct);
         var findings = DescribeUserContent(model);
 
         if (findings.Count > 0)
@@ -362,7 +365,10 @@ public sealed class PostgreSqlWriter : IDatabaseWriter
         // asks for that this cannot answer is reported as unchecked rather than left out of the
         // report, because a green summary that stands for a check that never ran is the failure the
         // format's rules name.
-        var model = await _metadataSource.ReadDatabaseModelAsync(excludePlatformSchemas: true, ct);
+        var model = await _metadataSource.ReadDatabaseModelAsync(
+            excludePlatformSchemas: true,
+            scope: EMetadataScope.Everything,
+            ct: ct);
         var countedObjects = new Dictionary<EObjectKind, int>(
             CountTargetObjects(model, expectation.SchemaNames));
 

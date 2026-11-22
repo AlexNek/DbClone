@@ -91,6 +91,7 @@ public sealed class ComparisonService : IComparisonService
             $"Reading database model from source ({source.Host}:{source.Port}/{source.DatabaseName})...");
         var sourceModel = await metadata.ReadDatabaseModelAsync(
                               excludePlatformSchemas,
+                              EMetadataScope.Everything,
                               ct);
         log(ELogLevel.Info, $"Source: {ModelSummary(sourceModel)}");
 
@@ -109,6 +110,7 @@ public sealed class ComparisonService : IComparisonService
 
         var destModel = await destMetadata.ReadDatabaseModelAsync(
                             excludePlatformSchemas: false,
+                            scope: EMetadataScope.Everything,
                             ct: ct);
 
         if (excludePlatformSchemas)
