@@ -4,10 +4,12 @@ namespace DbClone.UI.Services.GraphLayout;
 internal sealed class GraphEvaluationBudget
 {
     /// <summary>Creates a budget.</summary>
-    /// <param name="limit">The most evaluations allowed.</param>
+    /// <param name="limit">The most evaluations allowed; never negative.</param>
     /// <param name="metrics">Request observations shared by child budgets.</param>
     public GraphEvaluationBudget(int limit, GraphSearchMetrics? metrics = null)
     {
+        ArgumentOutOfRangeException.ThrowIfNegative(limit);
+
         Limit = limit;
         Metrics = metrics ?? new GraphSearchMetrics();
     }

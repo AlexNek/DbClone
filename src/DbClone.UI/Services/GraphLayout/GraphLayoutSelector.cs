@@ -16,7 +16,11 @@ namespace DbClone.UI.Services.GraphLayout;
 /// </summary>
 internal sealed class GraphLayoutSelector
 {
-    private const int ProbeBaseBudget = 200;
+    /// <summary>
+    /// What one probe may spend before the search proper: the clustered seed's per-cluster floor is the
+    /// same number, so the floor and the probe can never drift apart (Refactor 18, D2).
+    /// </summary>
+    internal const int ProbeBaseBudget = 200;
 
     /// <summary>
     /// What one probe may spend per relation: one candidate, the one the shape itself offers. A probe asks
@@ -47,6 +51,14 @@ internal sealed class GraphLayoutSelector
     private static readonly TimeSpan MaximumRefineTime = TimeSpan.FromSeconds(2);
 
     /// <summary>
+    /// The most clock the post-selection beauty pass may take from one component's request. It runs once, after
+    /// the contest has chosen the arrangement, so it is given a wider tip than a seed's refine — enough for a
+    /// long crossing descent on a big catalog — yet still half of what the picture left over and capped, so it
+    /// never stretches a request that already has its answer toward the watchdog.
+    /// </summary>
+    private static readonly TimeSpan MaximumBeautifyTime = TimeSpan.FromSeconds(6);
+
+    /// <summary>
     /// How many candidate routes the cheap path's repair of one seed may check, however many relations it holds.
     /// The watchdog has already spent the search's time when this path is reached, so the repair is capped by an
     /// operation count instead of by the clock that put it here.
@@ -73,12 +85,17 @@ internal sealed class GraphLayoutSelector
     /// search, not the answer: past it no seed is refined and every component still gets its cheapest complete
     /// layout, so a limit of zero returns the plain seed arrangement instead of nothing.
     /// </param>
+    /// <param name="clustering">
+    /// Whether the clustered seed is generated. The nested per-cluster contest passes <c>false</c> to avoid
+    /// infinite recursion; the top-level call leaves it at the default <c>true</c>.
+    /// </param>
     /// <returns>The chosen layout and one report per seed of every component.</returns>
     public GraphSelectionOutcome Select(
         GraphLayoutProfile profile,
         GraphEvaluationBudget? budget = null,
         CancellationToken cancellation = default,
-        TimeSpan? timeLimit = null)
+        TimeSpan? timeLimit = null,
+        bool clustering = true)
     {
         ArgumentNullException.ThrowIfNull(profile);
 
@@ -118,7 +135,7 @@ internal sealed class GraphLayoutSelector
                 GraphLayoutCandidate? best;
                 try
                 {
-                    best = SolveComponent(sub, component, budget, reports, progress, degraded ? cancellation : watchdog.Token, !degraded, Left(watch, limit));
+                    best = SolveComponent(sub, component, budget, reports, progress, degraded ? cancellation : watchdog.Token, !degraded, Left(watch, limit), clustering);
                 }
                 catch (OperationCanceledException) when (!cancellation.IsCancellationRequested)
                 {
@@ -127,7 +144,7 @@ internal sealed class GraphLayoutSelector
                     // keeps every table instead of losing the component it was working on.
                     degraded = true;
                     reports.RemoveAll(report => report.Component == component);
-                    best = SolveComponent(sub, component, budget, reports, progress, cancellation, refine: false, TimeSpan.Zero);
+                    best = SolveComponent(sub, component, budget, reports, progress, cancellation, refine: false, TimeSpan.Zero, clustering);
                 }
 
                 if (progress.NearestFailures < nearestFailures)
@@ -163,9 +180,12 @@ internal sealed class GraphLayoutSelector
             // many tables name — so the warning is beside the picture the search believed in most.
             // A component's seeds are its own; the last-resort picture covers the whole graph, so the shape is
             // asked for from the whole graph by the place the seed holds in the fixed seed order.
-            var plain = nearest < 0
+            // The clustered draft (ordinal 5) cannot be reconstructed cheaply, so the rough fallback uses
+            // the plain graph-wide placement when it is nearest; otherwise the seed shape is rebuilt without clustering.
+            const int clusteredOrdinal = GraphSearchBudget.MaximumDraftSeeds - 1;
+            var plain = nearest < 0 || nearest == clusteredOrdinal
                 ? GraphRoughLayout.Of(profile)
-                : GraphRoughLayout.Of(profile, GraphDraftSeeds.Generate(profile, default, nearest + 1)[nearest]);
+                : GraphRoughLayout.Of(profile, GraphDraftSeeds.Generate(profile, default, nearest + 1, clustering: false)[nearest]);
 
             return new GraphSelectionOutcome(plain, reports, budget.Used, false, degraded, IsRough: true);
         }
@@ -190,7 +210,8 @@ internal sealed class GraphLayoutSelector
         GraphComponentProgress progress,
         CancellationToken cancellation,
         bool refine,
-        TimeSpan left)
+        TimeSpan left,
+        bool clustering)
     {
         var profile = sub.Profile;
 
@@ -198,7 +219,9 @@ internal sealed class GraphLayoutSelector
         {
             // The refining search compares the whole seed set; the cheap path has nothing left to compare with,
             // so it makes the plain ranked arrangement alone — the one seed that costs no force iteration.
-            var generated = GraphDraftSeeds.Generate(profile, cancellation, refine ? GraphSearchBudget.MaximumDraftSeeds : 1);
+            var generated = GraphDraftSeeds.Generate(
+                profile, cancellation, refine ? GraphSearchBudget.MaximumDraftSeeds : 1,
+                budget, () => left, clustering);
 
             // One card has one arrangement: the other seeds would draw the same thing four more times.
             progress.Seeds.AddRange(profile.NodeCount == 1 ? generated.Take(1) : generated);
@@ -254,6 +277,7 @@ internal sealed class GraphLayoutSelector
 
         var best = progress.Best;
         var bestScore = progress.BestScore;
+        var bestOrdinal = -1;
         var found = new List<(int Ordinal, GraphSeedReport Report)>();
 
         foreach (var (ordinal, first, probeSpent) in probed.OrderBy(item => Rank(item.Ordinal)))
@@ -322,8 +346,43 @@ internal sealed class GraphLayoutSelector
             found.Add((ordinal, new GraphSeedReport(seeds[ordinal].Name, score, [], [], spent, component)));
         }
 
-        // The report is one entry per seed in seed order, whatever order the repairs were tried in.
+        // The report is one entry per seed in seed order, whatever order the repairs were tried in. The one
+        // the component's contest actually took carries the flag the facts count clustered wins by (D5).
+        if (bestOrdinal >= 0)
+        {
+            var winner = found.FirstOrDefault(item => item.Ordinal == bestOrdinal);
+            if (winner.Report is { } winnerReport)
+            {
+                found.RemoveAll(item => item.Ordinal == bestOrdinal);
+                found.Add((bestOrdinal, winnerReport with { Won = true }));
+            }
+        }
+
         reports.AddRange(found.OrderBy(item => item.Ordinal).Select(item => item.Report));
+
+        // The winner is eased at sub-card steps only now that the contest is over. A table can then be nudged
+        // along an overlap the way a reader drags it, guarded to stay inside the ring of its own neighbours, and
+        // because selection has finished this pass can sharpen the chosen picture without ever swapping it for a
+        // flatter arrangement that merely happens to cross fewer routes.
+        if (refine && best is { CrossingCount: > 0 })
+        {
+            var beautifyBudget = Child(budget, 4 * (RefineBaseBudget + (RefineBudgetPerEdge * profile.Edges.Count)));
+            using var slice = CancellationTokenSource.CreateLinkedTokenSource(cancellation);
+            slice.CancelAfter(BeautifySlice(left));
+            try
+            {
+                best = _repair.BeautifyCrossings(best, profile, beautifyBudget, slice.Token);
+                progress.Best = best;
+            }
+            catch (OperationCanceledException) when (!cancellation.IsCancellationRequested)
+            {
+                // The beauty pass was cut by its own slice, not by the caller: the chosen arrangement stands.
+            }
+            finally
+            {
+                budget.Add(beautifyBudget.Used);
+            }
+        }
 
         return best;
 
@@ -332,7 +391,8 @@ internal sealed class GraphLayoutSelector
         int Rank(int ordinal) => repairs.TryGetValue(ordinal, out var rank) ? rank : repairs.Count;
 
         // Scores a candidate and takes it when it beats what the search has, keeping the progress in step with
-        // the local best so an interrupted pass resumes where it stopped.
+        // the local best so an interrupted pass resumes where it stopped. The comparison is the selector's own
+        // (strictly better only), so the ordinal of the winner is the one whose report carries the flag.
         GraphLayoutScore Consider(GraphLayoutCandidate candidate, int ordinal)
         {
             var score = GraphLayoutScore.Of(candidate, profile, ordinal);
@@ -340,6 +400,7 @@ internal sealed class GraphLayoutSelector
             {
                 (best, bestScore) = (candidate, score);
                 (progress.Best, progress.BestScore) = (candidate, score);
+                bestOrdinal = ordinal;
             }
 
             return score;
@@ -364,6 +425,12 @@ internal sealed class GraphLayoutSelector
         left <= TimeSpan.Zero ? TimeSpan.Zero
             : left / 4 <= MaximumRefineTime ? left / 4
             : MaximumRefineTime;
+
+    /// <summary>The beauty pass's share of the time left: half of it, never larger than <see cref="MaximumBeautifyTime"/>.</summary>
+    private static TimeSpan BeautifySlice(TimeSpan left) =>
+        left <= TimeSpan.Zero ? TimeSpan.Zero
+            : left / 2 <= MaximumBeautifyTime ? left / 2
+            : MaximumBeautifyTime;
 
     /// <summary>A failure expressed in the whole graph's node and edge indexes.</summary>
     private static RouteFailure Global(RouteFailure failure, GraphSubgraph sub) =>

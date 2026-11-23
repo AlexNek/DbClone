@@ -37,6 +37,22 @@ public sealed class GraphLayoutSelectionTests
     }
 
     [Fact]
+    public void A_relation_drawn_over_a_foreign_card_loses_to_one_in_clear_ground_at_equal_rank()
+    {
+        var clear = Score(rank: 2, blocked: 0);
+        var over = Score(rank: 2, blocked: 3);
+        clear.CompareTo(over).Should().BeLessThan(0, "a reader cannot tell which table a line running through another belongs to");
+    }
+
+    [Fact]
+    public void Clear_ground_never_buys_a_relation_drawn_up_the_page()
+    {
+        var upward = Score(rank: 1, blocked: 40);
+        var ordered = Score(rank: 0, blocked: 41);
+        ordered.CompareTo(upward).Should().BeLessThan(0, "the picture still climbs down the page first");
+    }
+
+    [Fact]
     public void Length_decides_only_between_equal_crossings_and_rank_and_the_seed_settles_the_rest()
     {
         Score(length: 100).CompareTo(Score(length: 200)).Should().BeLessThan(0);
@@ -103,7 +119,7 @@ public sealed class GraphLayoutSelectionTests
         var score = GraphLayoutScore.Of(best, profile, 0);
         score.Crossings.Should().Be(0);
         score.RankViolations.Should().Be(0);
-        outcome.Reports.Should().HaveCount(GraphSearchBudget.MaximumDraftSeeds);
+        outcome.Reports.Should().HaveCount(5);
         AssertValid(best, profile);
     }
 
@@ -312,8 +328,8 @@ public sealed class GraphLayoutSelectionTests
         Signature(limited).Should().Be(Signature(open), "the watchdog must not choose a different candidate");
     }
 
-    private static GraphLayoutScore Score(int crossings = 0, int rank = 0, double length = 100, int seed = 0) =>
-        new(crossings, rank, length, length, 0, 1000, 5000, 100, seed);
+    private static GraphLayoutScore Score(int crossings = 0, int rank = 0, int blocked = 0, double overlap = 0, double length = 100, int seed = 0) =>
+        new(crossings, rank, blocked, overlap, length, length, 0, 1000, 5000, 100, seed);
 
     private static EdgeRoute Cubic(int edge, GraphEdgeEnds ends, double lift) =>
         new(

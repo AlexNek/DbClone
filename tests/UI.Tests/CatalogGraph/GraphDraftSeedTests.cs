@@ -9,6 +9,13 @@ public sealed class GraphDraftSeedTests
 {
     public static TheoryData<string> Fixtures => new() { "chain", "hub", "cycle", "components", "dense" };
 
+    // The component clears MinimumClusteredComponent and its modularity clears MinimumClusterModularity, so the
+    // clustered seed joins the five plain drafts; every other fixture is laid out exactly as before refactor 18.
+    private static string[] ExpectedNames(string fixture) =>
+        fixture is "chain" or "dense"
+            ? ["ranked", "radial", "force", "force-wide", "force-transposed", "clustered"]
+            : ["ranked", "radial", "force", "force-wide", "force-transposed"];
+
     [Theory]
     [MemberData(nameof(Fixtures))]
     public void Every_seed_places_every_card_finite_and_apart_inside_its_canvas(string fixture)
@@ -17,7 +24,7 @@ public sealed class GraphDraftSeedTests
 
         var drafts = GraphDraftSeeds.Generate(profile);
 
-        drafts.Select(draft => draft.Name).Should().Equal("ranked", "radial", "force", "force-wide", "force-transposed");
+        drafts.Select(draft => draft.Name).Should().Equal(ExpectedNames(fixture));
         foreach (var draft in drafts)
         {
             draft.Nodes.Should().HaveCount(profile.NodeCount, draft.Name);
@@ -82,7 +89,9 @@ public sealed class GraphDraftSeedTests
 
         var drafts = GraphDraftSeeds.Generate(GraphLayoutProfile.Create(widths, edges));
 
-        drafts.Should().HaveCount(GraphSearchBudget.MaximumDraftSeeds);
+        // A 1000-table chain splits into 31 clusters (Phase 0), inside MaximumClusteredClusters, so the clustered
+        // seed is generated: six drafts, not five.
+        drafts.Should().HaveCount(6);
         drafts.All(draft => Overlaps(draft).Count == 0).Should().BeTrue();
     }
 

@@ -17,4 +17,11 @@ internal sealed record GraphSeedReport(
 {
     /// <summary>Gets whether the seed produced a complete valid layout.</summary>
     public bool IsValid => Score is not null;
+
+    /// <summary>
+    /// Gets whether this component's contest took this seed: the report of the winner, flagged by the
+    /// selector with the same comparison it chose by. The facts count clustered wins by this, not by
+    /// validity — a valid seed that lost is not a drawn cluster.
+    /// </summary>
+    public bool Won { get; init; }
 }

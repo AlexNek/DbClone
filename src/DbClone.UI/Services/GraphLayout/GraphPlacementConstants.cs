@@ -23,4 +23,11 @@ internal static class GraphPlacementConstants
 
     /// <summary>How much wider than tall a picture aims to be; a page is wider than tall too.</summary>
     public const double Aspect = 1.6;
+
+    /// <summary>
+    /// The clear space kept between two cluster boxes — twice <see cref="ComponentGap"/>. The ring gap is
+    /// the one place a cross-cluster route is allowed to be long, so it must be wide enough for a lane
+    /// without forcing every route into a staircase.
+    /// </summary>
+    public const double ClusterGap = 2 * ComponentGap;
 }

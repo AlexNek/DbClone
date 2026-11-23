@@ -13,6 +13,23 @@ internal sealed class GraphLayoutRepair
 {
     private static readonly double[] ExpansionFactors = [1.3, 1.6, 2.0, 2.6];
 
+    /// <summary>
+    /// The one whole-card step a seed's crossing nudge takes while seeds still compete. Finer steps here would
+    /// let one seed reach fewer crossings than another and change which arrangement the contest picks, so the
+    /// contest keeps the coarse step and only a finished winner is eased further.
+    /// </summary>
+    private static readonly double[] ContestCrossingSteps = [1.0];
+
+    /// <summary>
+    /// The nudge lengths tried on a component's finished winner: a half-card inch, then a whole-card hop. The
+    /// finer length lets a table be eased along an overlap the way a reader drags it by hand, while the
+    /// neighbourhood-centroid guard keeps those small steps from pulling a hub out of the ring of tables it names.
+    /// </summary>
+    private static readonly double[] BeautifyCrossingSteps = [0.5, 1.0];
+
+    /// <summary>The distance under which two card centres still count as standing on the same line.</summary>
+    private const double Tolerance = 1e-6;
+
     private readonly GraphNonOrthogonalRouter _router = new();
     private readonly GraphConflictResolver _resolver = new();
     private readonly GraphLayoutValidator _validator = new();
@@ -156,7 +173,46 @@ internal sealed class GraphLayoutRepair
         GraphLayoutCandidate candidate,
         GraphLayoutProfile profile,
         GraphEvaluationBudget budget,
-        CancellationToken cancellation = default)
+        CancellationToken cancellation = default) =>
+        ReduceCrossingsByMoving(
+            candidate, profile, budget, cancellation, ContestCrossingSteps,
+            GraphSearchBudget.MaximumCrossingMoves, GraphSearchBudget.MaximumCrossingsPerMoveRound, int.MaxValue, false);
+
+    /// <summary>
+    /// Eases a finished winner's crossings at sub-card steps over a long descent: a table is nudged along the
+    /// overlap the way a reader drags it, and each move is kept only when it crosses strictly fewer routes,
+    /// leaves the card inside the ring of its own neighbours and keeps every relation climbing the page no
+    /// worse than it found them. Selection has already chosen the arrangement, so this pass can sharpen the
+    /// picture it picked, never swap it for a flatter but less readable one, and the wider move/crossing caps
+    /// let it reach the crossings a contest's few moves leave standing. The neighbourhood guard belongs to the
+    /// fine steps alone: a whole-card contest hop is already the shape's own move, and guarding it would refuse
+    /// the jumps the seeds compete on.
+    /// </summary>
+    /// <param name="candidate">A complete valid layout with crossings.</param>
+    /// <param name="profile">The graph facts.</param>
+    /// <param name="budget">The shared evaluation budget.</param>
+    /// <param name="cancellation">Checked between trials.</param>
+    /// <returns>The layout with fewer crossings, or the input when no nudge helped.</returns>
+    public GraphLayoutCandidate BeautifyCrossings(
+        GraphLayoutCandidate candidate,
+        GraphLayoutProfile profile,
+        GraphEvaluationBudget budget,
+        CancellationToken cancellation = default) =>
+        ReduceCrossingsByMoving(
+            candidate, profile, budget, cancellation, BeautifyCrossingSteps,
+            GraphSearchBudget.MaximumBeautifyCrossingMoves, GraphSearchBudget.MaximumBeautifyCrossingsPerRound,
+            GraphLayoutScore.MeasureRankViolations(profile, candidate.Layout.Nodes), true);
+
+    private GraphLayoutCandidate ReduceCrossingsByMoving(
+        GraphLayoutCandidate candidate,
+        GraphLayoutProfile profile,
+        GraphEvaluationBudget budget,
+        CancellationToken cancellation,
+        double[] stepFractions,
+        int maximumMoves,
+        int maximumCrossingsPerRound,
+        int maximumRankViolations,
+        bool guardsNeighbourhood)
     {
         ArgumentNullException.ThrowIfNull(candidate);
         ArgumentNullException.ThrowIfNull(profile);
@@ -164,15 +220,19 @@ internal sealed class GraphLayoutRepair
 
         var removal = new GraphCrossingRemoval();
         var origin = GraphPlacementState.From(candidate.Layout, profile);
+        var star = candidate.Name == "clustered" ? GraphClusterStarLayout.Detect(profile) : null;
         var best = candidate;
         var state = origin.Clone();
         var visited = new HashSet<string>(StringComparer.Ordinal) { state.Signature() };
 
-        for (var accepted = 0; accepted < GraphSearchBudget.MaximumCrossingMoves && best.CrossingCount > 0 && !budget.IsExhausted; accepted++)
+        for (var accepted = 0; accepted < maximumMoves && best.CrossingCount > 0 && !budget.IsExhausted; accepted++)
         {
             (GraphPlacementState State, GraphLayoutCandidate Candidate, double Displacement)? found = null;
+            var clusteredScore = best.Name == "clustered" ? GraphLayoutScore.Of(best, profile, 0) : (GraphLayoutScore?)null;
+            var hiddenBefore = clusteredScore is not null
+                ? GraphLayoutScore.MeasureHiddenRelations(profile, best.Layout.Nodes, best.Routes) : 0;
 
-            foreach (var move in CrossingMoves(state, best))
+            foreach (var move in CrossingMoves(state, best, stepFractions, maximumCrossingsPerRound))
             {
                 cancellation.ThrowIfCancellationRequested();
                 if (budget.IsExhausted)
@@ -183,7 +243,8 @@ internal sealed class GraphLayoutRepair
                 var trial = state.Clone();
                 trial.Move(move.Node, move.Dx, move.Dy);
                 trial.Settle(profile.Component[move.Node]);
-                if (!visited.Add(trial.Signature()))
+                if ((guardsNeighbourhood && !StaysInItsNeighbourhood(origin, trial, move.Node, profile))
+                    || !visited.Add(trial.Signature()))
                 {
                     continue;
                 }
@@ -195,6 +256,27 @@ internal sealed class GraphLayoutRepair
                 }
 
                 var next = removal.Substitute(Success(best.Name, evaluation, 0, best.Moves, best.Expansions).Candidate!, profile, budget, cancellation);
+                if (star is null && GraphLayoutScore.MeasureRankViolations(profile, next.Layout.Nodes) > maximumRankViolations)
+                {
+                    continue;
+                }
+
+                if (clusteredScore is { } before)
+                {
+                    var after = GraphLayoutScore.Of(next, profile, 0);
+                    if (GraphLayoutScore.MeasureClusterOverlap(profile, next.Layout.Nodes, GraphPlacementConstants.ClusterGap) > Tolerance
+                        || GraphLayoutScore.MeasureHiddenRelations(profile, next.Layout.Nodes, next.Routes) > hiddenBefore
+                        || after.BlockedRelations > before.BlockedRelations
+                        || (star is null && after.RankViolations > before.RankViolations)
+                        || (star is { } spokes && !GraphClusterStarLayout.Preserves(
+                            candidate.Layout.Nodes, next.Layout.Nodes, spokes.Clusters, spokes.Hub))
+                        || after.TotalLength > before.TotalLength + Tolerance
+                        || after.MaximumLength > before.MaximumLength + Tolerance)
+                    {
+                        continue;
+                    }
+                }
+
                 var displacement = trial.DisplacementFrom(origin);
                 if (next.CrossingCount < (found?.Candidate.CrossingCount ?? best.CrossingCount)
                     || (found is not null && next.CrossingCount == found.Value.Candidate.CrossingCount && displacement < found.Value.Displacement))
@@ -215,8 +297,12 @@ internal sealed class GraphLayoutRepair
         return best;
     }
 
-    /// <summary>Trial moves for the endpoint cards of the first few crossings: away from the crossing and across each relation.</summary>
-    private static IEnumerable<GraphRepairMove> CrossingMoves(GraphPlacementState state, GraphLayoutCandidate candidate)
+    /// <summary>Trial moves for the endpoint cards of the first few crossings: away from the crossing and across each relation, at each nudge length.</summary>
+    private static IEnumerable<GraphRepairMove> CrossingMoves(
+        GraphPlacementState state,
+        GraphLayoutCandidate candidate,
+        double[] stepFractions,
+        int maximumCrossingsPerRound)
     {
         var step = GraphCard.Height + GraphPlacementConstants.CardGap;
         var ordinal = 0;
@@ -225,7 +311,7 @@ internal sealed class GraphLayoutRepair
         foreach (var crossing in candidate.Crossings.Where(item => item.IsAdmissible)
             .OrderBy(item => item.FirstEdge).ThenBy(item => item.SecondEdge).ThenBy(item => item.Point.X).ThenBy(item => item.Point.Y))
         {
-            if (!seen.Add((crossing.FirstEdge, crossing.SecondEdge)) || seen.Count > GraphSearchBudget.MaximumCrossingsPerMoveRound)
+            if (!seen.Add((crossing.FirstEdge, crossing.SecondEdge)) || seen.Count > maximumCrossingsPerRound)
             {
                 continue;
             }
@@ -237,18 +323,51 @@ internal sealed class GraphLayoutRepair
             foreach (var node in nodes)
             {
                 var away = Unit(state.CentreX[node] - crossing.Point.X, state.CentreY[node] - crossing.Point.Y);
-                foreach (var (x, y) in new[] { (away.X, away.Y), (-away.Y, away.X), (away.Y, -away.X) })
+                foreach (var fraction in stepFractions)
                 {
-                    if (x != 0 || y != 0)
+                    var length = step * fraction;
+                    foreach (var (x, y) in new[] { (away.X, away.Y), (-away.Y, away.X), (away.Y, -away.X) })
                     {
-                        yield return new GraphRepairMove(node, x * step, y * step, ordinal);
-                    }
+                        if (x != 0 || y != 0)
+                        {
+                            yield return new GraphRepairMove(node, x * length, y * length, ordinal);
+                        }
 
-                    ordinal++;
+                        ordinal++;
+                    }
                 }
             }
         }
     }
+    /// <summary>
+    /// Whether a trial move keeps its card no farther from the centre of the neighbourhood it shares relations
+    /// with than the placement it started from. A crossing nudge may slide a card around the ring of tables
+    /// around it, but must never pull a hub out of the children it names — the trade the crossing count alone
+    /// would make. The neighbourhood centre is taken from the origin, so accepted moves cannot add up into a
+    /// drift away from where the ring began.
+    /// </summary>
+    private static bool StaysInItsNeighbourhood(
+        GraphPlacementState origin,
+        GraphPlacementState trial,
+        int node,
+        GraphLayoutProfile profile)
+    {
+        var neighbours = profile.Neighbours[node];
+        if (neighbours.Count == 0)
+        {
+            return true;
+        }
+
+        var centreX = neighbours.Average(item => origin.CentreX[item]);
+        var centreY = neighbours.Average(item => origin.CentreY[item]);
+        var was = Distance(origin.CentreX[node], origin.CentreY[node], centreX, centreY);
+        var now = Distance(trial.CentreX[node], trial.CentreY[node], centreX, centreY);
+
+        return now <= was + GraphPlacementConstants.CardGap;
+    }
+
+    private static double Distance(double x1, double y1, double x2, double y2) => Math.Sqrt(((x1 - x2) * (x1 - x2)) + ((y1 - y2) * (y1 - y2)));
+
     /// <summary>
     /// Assigns ports, routes, resolves conflicts and validates one placement. With a warm-up the move is
     /// re-routed locally along the relations it can have invalidated (§9) instead of the whole component.
@@ -416,6 +535,7 @@ internal sealed class GraphLayoutRepair
         CancellationToken cancellation,
         bool hunt)
     {
+        var star = name == "clustered" ? GraphClusterStarLayout.Detect(state.Profile) : null;
         foreach (var failure in current.Routing.Failures.OrderBy(failure => failure.EdgeIndex))
         {
             if (stuck.Contains(failure.EdgeIndex))
@@ -441,6 +561,14 @@ internal sealed class GraphLayoutRepair
                 }
 
                 var evaluation = Evaluate(trial, name, budget, cancellation, hunt: hunt, warm: Warmup(current, state));
+                if (name == "clustered" && (GraphLayoutScore.MeasureClusterOverlap(
+                    state.Profile, evaluation.Layout.Nodes, GraphPlacementConstants.ClusterGap) > Tolerance
+                    || (star is { } spokes && !GraphClusterStarLayout.Preserves(
+                        current.Layout.Nodes, evaluation.Layout.Nodes, spokes.Clusters, spokes.Hub))))
+                {
+                    continue;
+                }
+
                 if (evaluation.Objective.CompareTo(current.Objective) < 0)
                 {
                     chosen = (trial, evaluation, component);

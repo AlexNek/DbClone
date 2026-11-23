@@ -8,12 +8,12 @@ namespace DbClone.UI.Services.GraphLayout;
 /// weighted cost: a layout with one failure is invalid however short it is.
 /// <para>
 /// A chord — a relation drawn as the one straight segment between its two ports — is held to less than that:
-/// its ends must sit on the borders of the cards it joins, it must stay finite, and it must keep the same
-/// clearance from every card it does not join that a curve keeps, because the cards are painted over the ink
-/// and a chord behind a third card is a relation the reader cannot see. It may leave a border at any angle and
-/// run beside or across another chord. Every meeting between chords is still counted
-/// as a crossing, so the score can prefer the arrangement that crosses least. A curve keeps every rule,
-/// because nothing hides it where it wanders.
+/// its ends must sit on the borders of the cards it joins and it must stay finite. It may leave a border at any
+/// angle, run beside or across another chord, and run behind a card it does not join: the cards are painted
+/// over the ink, so a straight segment is hidden for a moment behind a table rather than forcing the whole
+/// picture to grow to clear it — which is what keeps a dense catalog compact. Every meeting between chords is
+/// still counted as a crossing, so the score can prefer the arrangement that crosses least. A curve keeps every
+/// rule, because nothing hides it where it wanders.
 /// </para>
 /// </summary>
 internal sealed class GraphLayoutValidator
@@ -284,9 +284,11 @@ internal sealed class GraphLayoutValidator
     }
 
     /// <summary>
-    /// No flattened segment may enter a card. A card the relation does not join is grown by the card clearance;
+    /// No curve segment may enter a card: a card the relation does not join is grown by the card clearance, and
     /// a card it does join is shrunk instead, because the port is on its border and the stroke has to start
     /// there — a route that runs over its own card enters deeper than that and is a collision like any other.
+    /// A chord keeps none of that: its ends are checked to sit on the borders elsewhere, and the cards are
+    /// painted over the ink, so a chord may run behind a card it does not join rather than bend the picture.
     /// Each stretch asks the card index for the cards its own box can reach, so a long route across a large
     /// picture costs the cards beside it instead of every card drawn.
     /// </summary>
@@ -319,8 +321,11 @@ internal sealed class GraphLayoutValidator
                 }
 
                 var isOwn = card.NodeIndex == own.ChildNode || card.NodeIndex == own.ParentNode;
-                if (isOwn && chord)
+                if (chord)
                 {
+                    // A chord is the straight segment between its own two ports; only a curve, which nothing
+                    // hides, must keep every card clear. Letting a chord run behind a third card is what keeps
+                    // a blocked relation a compact chord instead of dodging or growing the whole picture.
                     continue;
                 }
 

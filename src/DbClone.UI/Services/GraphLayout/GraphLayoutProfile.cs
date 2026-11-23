@@ -9,6 +9,8 @@ namespace DbClone.UI.Services.GraphLayout;
 /// </summary>
 internal sealed class GraphLayoutProfile
 {
+    private IReadOnlyList<IReadOnlyList<int>>? _clusterGroups;
+
     private GraphLayoutProfile(
         IReadOnlyList<double> widths,
         IReadOnlyList<(int Child, int Parent)> edges,
@@ -55,6 +57,15 @@ internal sealed class GraphLayoutProfile
 
     /// <summary>Gets each node's distinct neighbours, either direction, ascending, never the node itself.</summary>
     public IReadOnlyList<IReadOnlyList<int>> Neighbours { get; }
+
+    /// <summary>
+    /// Gets every community the components split into, each as its member node indexes in ascending order,
+    /// flattened across all components. A component the clustering guards reject contributes nothing, so the
+    /// list only holds groups the layout could actually draw as separated boxes. Computed once and cached: it
+    /// depends only on the edges, never on a candidate's coordinates, so every layout of this profile competes
+    /// against the same partition.
+    /// </summary>
+    public IReadOnlyList<IReadOnlyList<int>> ClusterGroups => _clusterGroups ??= DetectAllClusters();
 
     /// <summary>One connected component as a graph of its own.</summary>
     /// <param name="component">The component number.</param>
@@ -108,6 +119,30 @@ internal sealed class GraphLayoutProfile
         }
 
         return new GraphLayoutProfile(widths, edges, component, componentNodes, group, groupSize, Ranks(count, edges, group), neighbours);
+    }
+
+    /// <summary>Detects the communities of every component, mapping each cluster's members back to global node indexes.</summary>
+    private IReadOnlyList<IReadOnlyList<int>> DetectAllClusters()
+    {
+        var groups = new List<IReadOnlyList<int>>();
+        for (var component = 0; component < ComponentNodes.Count; component++)
+        {
+            var sub = Subgraph(component);
+            var localNodes = Enumerable.Range(0, sub.Nodes.Count).ToArray();
+            var localEdges = Enumerable.Range(0, sub.Edges.Count).ToArray();
+            var clustering = GraphClusterDetector.Detect(sub.Profile, localNodes, localEdges);
+            if (clustering is null)
+            {
+                continue;
+            }
+
+            foreach (var members in clustering.Members)
+            {
+                groups.Add(members.Select(local => sub.Nodes[local]).OrderBy(node => node).ToArray());
+            }
+        }
+
+        return groups;
     }
 
     private static IReadOnlyList<int>[] Neighbourhoods(int count, IReadOnlyList<(int Child, int Parent)> edges)

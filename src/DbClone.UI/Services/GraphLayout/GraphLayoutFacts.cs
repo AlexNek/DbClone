@@ -18,6 +18,8 @@ namespace DbClone.UI.Services.GraphLayout;
 /// <param name="Busiest">The table the most relations meet, qualified by its schema.</param>
 /// <param name="BusiestRelations">How many relation ends meet that table.</param>
 /// <param name="Seeds">What every seed of every component did, in one line.</param>
+/// <param name="ClusteredComponents">How many components used the clustered seed; 0 when none did.</param>
+/// <param name="Clusters">The total number of clusters drawn across all clustered components.</param>
 internal sealed record GraphLayoutFacts(
     string Arrangement,
     int Tables,
@@ -28,7 +30,9 @@ internal sealed record GraphLayoutFacts(
     double Height,
     string Busiest,
     int BusiestRelations,
-    string Seeds)
+    string Seeds,
+    int ClusteredComponents,
+    int Clusters)
 {
     /// <summary>Takes the facts of a chosen layout from the search that chose it.</summary>
     /// <param name="chosen">The layout the search picked.</param>
@@ -63,6 +67,7 @@ internal sealed record GraphLayoutFacts(
         }
 
         var table = model.Nodes[busiest];
+        var (clusteredComponents, totalClusters) = MeasureClusters(profile, outcome.Reports);
 
         return new GraphLayoutFacts(
             chosen.Name,
@@ -74,7 +79,37 @@ internal sealed record GraphLayoutFacts(
             chosen.Layout.Height,
             $"{table.Schema}.{table.Table}",
             ends[busiest],
-            SeedLine(outcome.Reports));
+            SeedLine(outcome.Reports),
+            clusteredComponents,
+            totalClusters);
+    }
+
+    private static (int ClusteredComponents, int Clusters) MeasureClusters(
+        GraphLayoutProfile profile,
+        IReadOnlyList<GraphSeedReport> reports)
+    {
+        var clusteredComponents = 0;
+        var totalClusters = 0;
+
+        var won = reports
+            .Where(report => report.Name == "clustered" && report.Won)
+            .Select(report => report.Component)
+            .Distinct();
+
+        foreach (var component in won)
+        {
+            var subgraph = profile.Subgraph(component);
+            var localIndexes = Enumerable.Range(0, subgraph.Nodes.Count).ToArray();
+            var localEdges = Enumerable.Range(0, subgraph.Edges.Count).ToArray();
+            var clustering = GraphClusterDetector.Detect(subgraph.Profile, localIndexes, localEdges);
+            if (clustering is not null)
+            {
+                clusteredComponents++;
+                totalClusters += clustering.Members.Count;
+            }
+        }
+
+        return (clusteredComponents, totalClusters);
     }
 
     /// <summary>

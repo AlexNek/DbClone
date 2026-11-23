@@ -490,10 +490,14 @@ internal sealed class RelationshipViewHandler : IRelationshipViewHandler
             return;
         }
 
+        var clusterSuffix = facts.ClusteredComponents > 0
+            ? $", {facts.Clusters} clusters in {facts.ClusteredComponents} component(s)"
+            : string.Empty;
+
         _logger.LogInformation(
             "Relationship picture: {Arrangement} arrangement, {Tables} tables / {Relations} relations, "
             + "{Crossings} crossings, {RankViolations} rank violations, {Width:0}x{Height:0}, "
-            + "busiest {Busiest} ({BusiestRelations} ends){Flags}",
+            + "busiest {Busiest} ({BusiestRelations} ends){Clusters}{Flags}",
             facts.Arrangement,
             facts.Tables,
             facts.Relations,
@@ -503,6 +507,7 @@ internal sealed class RelationshipViewHandler : IRelationshipViewHandler
             facts.Height,
             facts.Busiest,
             facts.BusiestRelations,
+            clusterSuffix,
             (built.IsDegraded ? ", degraded" : string.Empty) + (built.IsRough ? ", plain" : string.Empty));
 
         _logger.LogInformation("Relationship picture seeds: {Seeds}", facts.Seeds);

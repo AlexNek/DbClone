@@ -8,17 +8,18 @@ internal static class GraphRadialSeed
 {
     /// <summary>Places every component.</summary>
     /// <param name="profile">The graph facts.</param>
+    /// <param name="hub">An explicit topology-selected hub; other components retain their usual core.</param>
     /// <returns>The draft.</returns>
-    public static GraphDraftLayout Place(GraphLayoutProfile profile)
+    public static GraphDraftLayout Place(GraphLayoutProfile profile, int? hub = null)
     {
         ArgumentNullException.ThrowIfNull(profile);
 
-        return GraphComponentPacker.Pack("radial", profile, profile.ComponentNodes.Select(nodes => Component(profile, nodes)).ToArray());
+        return GraphComponentPacker.Pack("radial", profile, profile.ComponentNodes.Select(nodes => Component(profile, nodes, hub)).ToArray());
     }
 
-    private static GraphLocalLayout Component(GraphLayoutProfile profile, IReadOnlyList<int> nodes)
+    private static GraphLocalLayout Component(GraphLayoutProfile profile, IReadOnlyList<int> nodes, int? hub)
     {
-        var core = Core(profile, nodes);
+        var core = hub is { } root && nodes.Contains(root) ? new List<int> { root } : Core(profile, nodes);
         var distance = Distances(profile, core);
         var settlement = Settlements(profile, nodes, core);
         var angleOf = new Dictionary<int, double>();
@@ -31,6 +32,9 @@ internal static class GraphRadialSeed
         for (var ring = 0; ring <= distance.Values.Max(); ring++)
         {
             var facing = Facing(profile, nodes, distance, ring, angleOf);
+            // A central point has no direction to face. Its first ring uses the whole circle, not one semicircle.
+            if (hub is { } pinned && core.Count == 1 && core[0] == pinned && ring == 1)
+                foreach (var node in facing.Keys.ToArray()) facing[node] = double.MaxValue;
             var members = Ring(nodes, distance, ring, facing, settlement);
             if (members.Count == 0)
             {
