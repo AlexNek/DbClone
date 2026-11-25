@@ -49,6 +49,8 @@ The dropdown above the two panels selects a [connection group](../connections/ma
 | **Edit…** (next to Tables) | Opens the table selection dialog |
 | Summary line | Host and database of the selected connection |
 | **Store** button (below the panel) | Writes this database into a catalog folder — see [Store & Restore](../store-restore.md) |
+| **View relationships** (below the panel) | Draws this database's tables and foreign keys as one picture, read live from its metadata; nothing is written back and no rows are counted |
+| The **folder** button next to it | Opens the relationship view of a catalog folder already on disk, with no connection at all — see [Relationship View](../relationship-view.md) |
 
 ## Destination Panel
 
@@ -58,6 +60,7 @@ The dropdown above the two panels selects a [connection group](../connections/ma
 | **New... / Edit...** | Opens the Connection Manager |
 | **Tables** row | Shows `All Tables`, a table count, and **View…** — opens the read-only [Table Overview](../connections/table-overview.md) of the output database |
 | **Restore** button (below the panel) | Applies a catalog folder to this database — see [Store & Restore](../store-restore.md) |
+| **View relationships** (below the panel) | Draws this database's tables and foreign keys as one picture, read live from its metadata — see [Relationship View](../relationship-view.md) |
 
 If the destination connection has no database name, the row shows `(no database)` — you can pick one from the Table Overview dialog.
 

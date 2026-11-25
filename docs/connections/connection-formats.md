@@ -63,6 +63,30 @@ Host=hostname;Port=5432;Database=mydb;Username=user;Password=p@ss#word;SSL Mode=
 
 No encoding needed — semicolons delimit fields, and the password is taken as-is.
 
+## What the Import Fills In and Reports
+
+An incomplete string is still importable — **Import** works for any text a recognised format understands, not only a complete one. Where the text omits something the connection needs, DbClone takes the value from the engine's own platform data (the same source that fills the **Connection Type** defaults) and **tells you which value it assumed** instead of filling it in silently:
+
+```
+Port is not specified; the default 5432 will be used.
+```
+
+This is the common case with managed providers: the string a Neon or Supabase dashboard publishes often carries no port at all.
+
+Every assumption and every oddity is listed as a note under the preview in the **Import Connection** dialog, and as a status line when you import a backup in the Connection Manager. The notes do not block the import — the values land in the form and you can change any of them before saving.
+
+| What you see | What happened |
+|--------------|-------------|
+| `Port is not specified; the default 5432 will be used.` | The text carried no port; the engine's default was taken from its platform data |
+| `Port 99159 is outside the range 1-65535.` | A port the text **did** supply, kept exactly as written and flagged — nothing is silently corrected, you decide what to do with it |
+| `Unrecognized parameter ignored: sslmode2` | A key no format understands was dropped rather than passed through to the driver |
+| `Password is missing.` | The text named no password |
+| `Database name is not specified.` | No database in the text — fine for a server-only connection (Backup, Restore into a new database, Table Overview), see [Managing Connections](managing-connections.md) |
+| `SSL is disabled.` | The text asked for `sslmode=disable` |
+
+!!! note
+    A text no registered format recognises is reported as such — there is no guess-and-save fallback. Percent-encoded values are decoded once, so a pre-encoded URI and a raw one produce the same fields.
+
 ## Platform-Specific URIs
 
 DbClone recognizes connection strings from popular managed platforms:
