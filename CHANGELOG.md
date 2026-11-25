@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.5.0] - 25.11.2026
+
 ### Added
 - Database engines are loaded as plugins from a `plugins` folder next to the application and are no longer compiled into it; adding a new engine means dropping its adapter into that folder — no code change in the application or UI
 - **Store / Restore** — write a connected database into a portable `.rdbx` catalog folder, and restore a catalog into a connected database. **Store** sits on the source connection panel and **Restore** on the destination (Ctrl+Shift+S and Ctrl+Shift+R), with Pause and Stop live in the toolbar during a run. Progress, log, status bar and banner follow the operation's own stages and objects and end on its own reason — *Complete*, *Failed* or *Cancelled*, with the sentence the log carries — which stays on screen until Copy or Compare starts or a connection changes
@@ -38,6 +40,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Security
 - Auto-update verifies the downloaded installer against the SHA-256 the release publishes for it — the asset digest GitHub records, or a `.sha256` file beside the installer — and refuses to launch a download that does not match
+
+## [1.4.0] - Skiped
+## [1.3.0] - Skiped
+## [1.2.0] - Skiped
 
 ## [1.1.1] - 2026-08-12
 
