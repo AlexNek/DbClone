@@ -177,6 +177,86 @@ public sealed class GraphLayoutRepairTests
         }
     }
 
+    [Fact]
+    public void Star_beautification_clears_a_hidden_spoke_without_requiring_an_existing_crossing()
+    {
+        // Arrange: one central leaf hides another leaf's chord; the three triangular communities stand apart.
+        var (profile, candidate) = ObscuredStar();
+        var star = GraphClusterStarLayout.Detect(profile)!.Value;
+        candidate.CrossingCount.Should().Be(0);
+        GraphLayoutScore.MeasureHiddenRelations(profile, candidate.Layout.Nodes, candidate.Routes).Should().Be(1);
+
+        // Act
+        var after = new GraphLayoutRepair().BeautifyCrossings(candidate, profile, new GraphEvaluationBudget(2000));
+
+        // Assert
+        GraphLayoutScore.MeasureHiddenRelations(profile, after.Layout.Nodes, after.Routes).Should().Be(0);
+        after.CrossingCount.Should().BeLessThanOrEqualTo(candidate.CrossingCount);
+        GraphClusterStarLayout.Preserves(candidate.Layout.Nodes, after.Layout.Nodes, star.Clusters, star.Hub).Should().BeTrue();
+        GraphLayoutScore.MeasureClusterOverlap(profile, after.Layout.Nodes, GraphPlacementConstants.ClusterGap)
+            .Should().BeApproximately(0, 1e-6);
+        after.Routes.Should().HaveCount(profile.Edges.Count).And.OnlyContain(route => route.Geometry == EEdgeGeometry.Straight);
+        AssertValid(after.Layout.Nodes, profile, after.Routes);
+    }
+
+    [Fact]
+    public void Star_beautification_can_clear_several_blockers_of_the_same_chord()
+    {
+        // Arrange
+        var (profile, candidate) = ObscuredStar(several: true);
+        GraphLayoutScore.MeasureHiddenRelations(profile, candidate.Layout.Nodes, candidate.Routes).Should().Be(2);
+
+        // Act
+        var after = new GraphLayoutRepair().BeautifyCrossings(candidate, profile, new GraphEvaluationBudget(2000));
+
+        // Assert
+        GraphLayoutScore.MeasureHiddenRelations(profile, after.Layout.Nodes, after.Routes).Should().Be(0);
+        after.CrossingCount.Should().BeLessThanOrEqualTo(candidate.CrossingCount);
+        AssertValid(after.Layout.Nodes, profile, after.Routes);
+    }
+
+    [Fact]
+    public void A_complete_improvement_is_reported_before_cancellation_interrupts_the_next_trial()
+    {
+        // Arrange
+        var (profile, candidate) = ObscuredStar();
+        using var stop = new CancellationTokenSource();
+        GraphLayoutCandidate? retained = null;
+
+        // Act: cancellation is deterministic, triggered by the first validated improvement, not a timer.
+        Action action = () => new GraphLayoutRepair().BeautifyCrossings(candidate, profile, new GraphEvaluationBudget(2000),
+            stop.Token, improved => { retained = improved; stop.Cancel(); });
+
+        // Assert: the search still honors cancellation, while its owner can retain the complete progress.
+        action.Should().Throw<OperationCanceledException>();
+        retained.Should().NotBeNull();
+        retained!.Routes.Should().HaveCount(profile.Edges.Count);
+        GraphLayoutScore.MeasureHiddenRelations(profile, retained.Layout.Nodes, retained.Routes).Should().Be(0);
+        AssertValid(retained.Layout.Nodes, profile, retained.Routes);
+        GraphLayoutScore.MeasureHiddenRelations(profile, candidate.Layout.Nodes, candidate.Routes).Should().Be(1);
+    }
+
+    private static (GraphLayoutProfile Profile, GraphLayoutCandidate Candidate) ObscuredStar(bool several = false)
+    {
+        var edges = new List<(int Child, int Parent)> { (1, 0), (2, 0), (3, 0), (4, 0) };
+        foreach (var first in new[] { 5, 8, 11 })
+        {
+            edges.Add((first, 0));
+            edges.Add((first + 1, first));
+            edges.Add((first + 2, first));
+            edges.Add((first + 2, first + 1));
+        }
+        var profile = GraphLayoutProfile.Create(Enumerable.Repeat(140d, 14).ToArray(), edges);
+        GraphClusterStarLayout.Detect(profile).Should().NotBeNull();
+        GraphPoint[] points = [new(2000, 2000), new(2000, 2300), new(2000, 2600), new(1400, 1900), new(2600, 1900),
+            new(1200, 900), new(1000, 700), new(1400, 700), new(800, 3100), new(600, 3300), new(1000, 3300),
+            new(3400, 2100), new(3600, 1900), new(3600, 2300)];
+        if (several) points[3] = new(2000, 2450);
+        var cards = points.Select((point, node) => new NodePlacement(node, point, 140, Height)).ToArray();
+        var draft = new GraphDraftLayout("clustered", cards, 4000, 3600);
+        return (profile, new GraphLayoutRepair(0).Repair(draft, profile, new GraphEvaluationBudget(2000), hunt: false).Candidate!);
+    }
+
     private static GraphEvaluationBudget NewBudget() => new(GraphSearchBudget.MaximumGeometryEvaluations);
 
     private static EdgeRoute Bent(int edge, GraphEdgeEnds ends, double lift) =>

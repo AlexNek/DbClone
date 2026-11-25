@@ -6,7 +6,7 @@ internal static class GraphClusterStarLayout
     /// <summary>A hub must reach at least three other communities; a chain retains its ranked arrangement.</summary>
     internal static int? FindHub(GraphLayoutProfile profile, GraphClusterSet clusters)
     {
-        var connected = Enumerable.Range(0, profile.NodeCount)
+        var connected = clusters.Members.SelectMany(group => group)
             .Select(node => new
             {
                 Node = node,
@@ -107,27 +107,31 @@ internal static class GraphClusterStarLayout
         var dx = origin.Select((card, node) => trial[node].Centre.X - card.Centre.X).Order().ToArray();
         var dy = origin.Select((card, node) => trial[node].Centre.Y - card.Centre.Y).Order().ToArray();
         var shift = new GraphPoint(dx[dx.Length / 2], dy[dy.Length / 2]);
-        if (Math.Abs(trial[hub].Centre.X - origin[hub].Centre.X - shift.X) > 1e-6
-            || Math.Abs(trial[hub].Centre.Y - origin[hub].Centre.Y - shift.Y) > 1e-6)
+        var hubShift = new GraphPoint(trial[hub].Centre.X - origin[hub].Centre.X, trial[hub].Centre.Y - origin[hub].Centre.Y);
+        if ((Math.Abs(hubShift.X) > 1e-6 || Math.Abs(hubShift.Y) > 1e-6)
+            && (Math.Abs(hubShift.X - shift.X) > 1e-6 || Math.Abs(hubShift.Y - shift.Y) > 1e-6))
             return false;
-        foreach (var members in clusters.Members.Where(group => !group.Contains(hub)))
+        var satellites = clusters.Members.Where(group => !group.Contains(hub)).ToArray();
+        if (Surrounds(satellites.Select(group => Centre(origin, group)), origin[hub].Centre)
+            && !Surrounds(satellites.Select(group => Centre(trial, group)), trial[hub].Centre))
+            return false;
+        // Preserve the family's spread as a whole, not each card's initial angle. A leaf may change sectors.
+        var family = clusters.Members[clusters.ClusterOf[hub]].Where(node => node != hub).ToArray();
+        return !Surrounds(family.Select(node => origin[node].Centre), origin[hub].Centre)
+            || Surrounds(family.Select(node => trial[node].Centre), trial[hub].Centre);
+    }
+
+    private static GraphPoint Centre(IReadOnlyList<NodePlacement> cards, IReadOnlyList<int> members) =>
+        new(members.Average(node => cards[node].Centre.X), members.Average(node => cards[node].Centre.Y));
+
+    private static bool Surrounds(IEnumerable<GraphPoint> points, GraphPoint hub)
+    {
+        var angles = points.Select(point => Math.Atan2(point.Y - hub.Y, point.X - hub.X)).Order().ToArray();
+        if (angles.Length < 3) return false;
+        for (var at = 0; at < angles.Length; at++)
         {
-            var before = new GraphPoint(members.Average(node => origin[node].Centre.X) - origin[hub].Centre.X,
-                members.Average(node => origin[node].Centre.Y) - origin[hub].Centre.Y);
-            var after = new GraphPoint(members.Average(node => trial[node].Centre.X) - trial[hub].Centre.X,
-                members.Average(node => trial[node].Centre.Y) - trial[hub].Centre.Y);
-            var product = Math.Sqrt((before.X * before.X + before.Y * before.Y) * (after.X * after.X + after.Y * after.Y));
-            if (product < 1e-6 || (before.X * after.X + before.Y * after.Y) < Math.Cos(Math.PI / 6) * product)
-                return false;
-        }
-        // The central family's cards also keep a spread around the hub rather than collecting in one rank.
-        foreach (var node in clusters.Members[clusters.ClusterOf[hub]].Where(node => node != hub))
-        {
-            var before = new GraphPoint(origin[node].Centre.X - origin[hub].Centre.X, origin[node].Centre.Y - origin[hub].Centre.Y);
-            var after = new GraphPoint(trial[node].Centre.X - trial[hub].Centre.X, trial[node].Centre.Y - trial[hub].Centre.Y);
-            var product = Math.Sqrt((before.X * before.X + before.Y * before.Y) * (after.X * after.X + after.Y * after.Y));
-            if (product > 1e-6 && (before.X * after.X + before.Y * after.Y) < Math.Cos(Math.PI / 3) * product)
-                return false;
+            var next = at + 1 == angles.Length ? angles[0] + 2 * Math.PI : angles[at + 1];
+            if (next - angles[at] >= Math.PI - 1e-6) return false;
         }
         return true;
     }

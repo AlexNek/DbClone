@@ -135,6 +135,66 @@ public sealed class GraphClusterPlacementOptimizerTests
             .BeLessThanOrEqualTo(GraphLayoutScore.Of(before, profile, 0).TotalLength + 1e-6);
     }
 
+    [Fact]
+    public void Independent_branches_exclude_the_hub_and_external_community_members()
+    {
+        var profile = GraphLayoutProfile.Create(Enumerable.Repeat(100d, 8).ToArray(),
+            [(1, 0), (2, 1), (3, 0), (4, 3), (5, 0), (6, 0), (6, 6), (2, 7)]);
+        var groups = new GraphClusterSet([0, 0, 0, 0, 0, 0, 0, 1],
+            new IReadOnlyList<int>[] { new[] { 0, 1, 2, 3, 4, 5, 6 }, new[] { 7 } }, 0);
+
+        var branches = GraphStarPlacementMoves.Branches(profile, groups, 0);
+
+        branches.Should().HaveCount(4);
+        branches[0].Should().Equal(1, 2);
+        branches[1].Should().Equal(3, 4);
+        branches[2].Should().Equal(5);
+        branches[3].Should().Equal(6);
+        branches.SelectMany(branch => branch).Should().OnlyHaveUniqueItems().And.NotContain(0).And.NotContain(7);
+    }
+
+    [Fact]
+    public void Geometric_blocker_sidesteps_can_clear_a_stroke_even_when_the_incident_arrow_gets_longer()
+    {
+        var profile = GraphLayoutProfile.Create([100d, 100d, 100d], [(1, 0), (2, 0)]);
+        GraphPoint[] points = [new(0, 0), new(0, 300), new(0, 600)];
+        var cards = Cards(profile, points);
+        var before = Drawn(profile, cards);
+        before.Hidden.Should().Be(1);
+
+        var moves = GraphStarPlacementMoves.Clearances(profile, cards, 1).ToArray();
+
+        moves.Should().NotBeEmpty();
+        moves.Any(delta =>
+        {
+            var trial = cards.ToArray();
+            trial[1] = trial[1] with { TopLeft = new GraphPoint(points[1].X + delta.X, points[1].Y + delta.Y) };
+            var after = Drawn(profile, trial);
+            return after.Hidden == 0 && after.Crossings <= before.Crossings && after.Length > before.Length;
+        }).Should().BeTrue();
+        cards[1].TopLeft.Should().Be(points[1]);
+    }
+
+    [Fact]
+    public void Several_cards_blocking_one_star_spoke_can_be_cleared_without_moving_the_hub()
+    {
+        var profile = GraphLayoutProfile.Create([100d, 100d, 100d, 100d], [(1, 0), (2, 0), (3, 0)]);
+        var groups = new GraphClusterSet([0, 0, 0, 0], new IReadOnlyList<int>[] { new[] { 0, 1, 2, 3 } }, 0);
+        GraphPoint[] points = [new(0, 0), new(0, 200), new(0, 400), new(0, 800)];
+        var before = Drawn(profile, Cards(profile, points));
+        before.Hidden.Should().Be(2);
+
+        var result = GraphClusterPlacementOptimizer.Improve(profile, groups, points, hub: 0);
+        var after = Drawn(profile, Cards(profile, result));
+
+        result[0].Should().Be(points[0]);
+        after.Hidden.Should().Be(0);
+        after.Crossings.Should().BeLessThanOrEqualTo(before.Crossings);
+        GraphClusterPlacementOptimizer.Improve(profile, groups, points, hub: 0).Should().Equal(result);
+        GraphPortAssigner.Assign(Cards(profile, result), profile.Edges).Ends
+            .Select(end => end!.Parent.Point).Should().OnlyHaveUniqueItems();
+    }
+
     private static (int Hidden, int Crossings, double Length, double Longest) Drawn(
         GraphLayoutProfile profile, IReadOnlyList<NodePlacement> cards)
     {

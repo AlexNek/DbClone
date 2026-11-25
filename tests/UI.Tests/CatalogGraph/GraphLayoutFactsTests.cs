@@ -1,4 +1,5 @@
 using DbClone.Application.Relationship;
+using DbClone.UI.Models.CatalogGraph;
 using DbClone.UI.Services.GraphAnalysis;
 using DbClone.UI.Services.GraphLayout;
 using FluentAssertions;
@@ -77,6 +78,63 @@ public sealed class GraphLayoutFactsTests
             @"(ranked|radial|force|force-wide|force-transposed) (\d+/\d+|refused)",
             "a seed is named by the cost it reached or by the failure that refused it");
     }
+
+    [Fact]
+    public void A_clustered_picture_reports_the_components_and_clusters_it_drew()
+    {
+        // The two 6-table cliques joined by one relation: the smallest graph the guards admit, split into 2.
+        var facts = new GraphLayoutEngine().Compute(ModelOfTwoCliques()).Facts!;
+
+        facts.ClusteredComponents.Should().Be(1, "one component was drawn as clusters");
+        facts.Clusters.Should().Be(2, "the two-clique graph splits into two clusters");
+    }
+
+    [Fact]
+    public void APictureNoGuardAdmitsForClusteringReportsNoClusters()
+    {
+        // A 15-table star: over the size guard but under the modularity guard, so it stays whole.
+        var fixture = CatalogGraphFixture.Create().Table("test_schema", Name(0), 0);
+        for (var node = 1; node < 15; node++)
+        {
+            fixture.Table("test_schema", Name(node), 0);
+            fixture.Edge(Id(node), Id(0), $"fk_{node}", ["test_parent_id"]);
+        }
+
+        var facts = new GraphLayoutEngine().Compute(new CatalogGraphAnalyzer().Analyze(fixture.Build())).Facts!;
+
+        facts.ClusteredComponents.Should().Be(0);
+        facts.Clusters.Should().Be(0);
+    }
+
+    private static CatalogGraphModel ModelOfTwoCliques()
+    {
+        var fixture = CatalogGraphFixture.Create();
+        for (var node = 0; node < 12; node++)
+        {
+            fixture.Table("test_schema", Name(node), 0);
+        }
+
+        var relation = 0;
+        void Clique(int offset)
+        {
+            for (var a = 0; a < 6; a++)
+            {
+                for (var b = a + 1; b < 6; b++)
+                {
+                    fixture.Edge(Id(offset + a), Id(offset + b), $"fk_{relation++}", ["test_parent_id"]);
+                }
+            }
+        }
+
+        Clique(0);
+        Clique(6);
+        fixture.Edge(Id(0), Id(6), $"fk_{relation}", ["test_parent_id"]);
+        return new CatalogGraphAnalyzer().Analyze(fixture.Build());
+    }
+
+    private static string Name(int node) => "test_table" + node.ToString("D4");
+
+    private static string Id(int node) => CatalogGraphFixture.TableId("test_schema", Name(node));
 
     private static RelationshipColumnView Column(string name) =>
         new(name, "integer", false, true, false, false, null);

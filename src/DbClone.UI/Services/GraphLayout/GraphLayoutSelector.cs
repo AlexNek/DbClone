@@ -217,11 +217,14 @@ internal sealed class GraphLayoutSelector
 
         if (progress.Seeds.Count == 0)
         {
-            // The refining search compares the whole seed set; the cheap path has nothing left to compare with,
-            // so it makes the plain ranked arrangement alone — the one seed that costs no force iteration.
+            // The refining search compares the whole seed set including the clustered draft; the cheap path
+            // generates the base seeds without clustering so a component that ranked alone cannot route still
+            // has radial and the force variants available for the cheap probe and repair. The clustered seed
+            // is excluded on the degraded path because its placement cost triggered the watchdog in the first
+            // place; including it again would repeat the timeout without adding a viable fallback.
             var generated = GraphDraftSeeds.Generate(
-                profile, cancellation, refine ? GraphSearchBudget.MaximumDraftSeeds : 1,
-                budget, () => left, clustering);
+                profile, cancellation, GraphSearchBudget.MaximumDraftSeeds,
+                budget, () => left, refine && clustering);
 
             // One card has one arrangement: the other seeds would draw the same thing four more times.
             progress.Seeds.AddRange(profile.NodeCount == 1 ? generated.Take(1) : generated);
@@ -277,7 +280,7 @@ internal sealed class GraphLayoutSelector
 
         var best = progress.Best;
         var bestScore = progress.BestScore;
-        var bestOrdinal = -1;
+        var bestOrdinal = progress.BestScore?.SeedOrdinal ?? -1;
         var found = new List<(int Ordinal, GraphSeedReport Report)>();
 
         foreach (var (ordinal, first, probeSpent) in probed.OrderBy(item => Rank(item.Ordinal)))
@@ -325,14 +328,15 @@ internal sealed class GraphLayoutSelector
                 slice.CancelAfter(RefineSlice(left));
                 try
                 {
-                    chosen = Refine(chosen, profile, refineBudget, slice.Token);
+                    chosen = Refine(chosen, profile, refineBudget, slice.Token, improvement =>
+                    {
+                        chosen = improvement;
+                        Consider(improvement, ordinal);
+                    });
                 }
                 catch (OperationCanceledException) when (!cancellation.IsCancellationRequested)
                 {
-                    // The beauty pass was cut by its own slice, not by the caller: the complete arrangement it
-                    // started from is the answer, so the picture keeps its validity and the request says nothing
-                    // it has to apologise for. Crossings are a reading cost; a relation drawn through a card is
-                    // a lost relation, and only the repair may decide that.
+                    // Keep every complete improvement already reported, even when a later trial was interrupted.
                 }
                 finally
                 {
@@ -364,19 +368,19 @@ internal sealed class GraphLayoutSelector
         // along an overlap the way a reader drags it, guarded to stay inside the ring of its own neighbours, and
         // because selection has finished this pass can sharpen the chosen picture without ever swapping it for a
         // flatter arrangement that merely happens to cross fewer routes.
-        if (refine && best is { CrossingCount: > 0 })
+        if (refine && best is not null && (best.CrossingCount > 0
+            || (best.Name == "clustered" && GraphLayoutScore.MeasureHiddenRelations(profile, best.Layout.Nodes, best.Routes) > 0)))
         {
             var beautifyBudget = Child(budget, 4 * (RefineBaseBudget + (RefineBudgetPerEdge * profile.Edges.Count)));
             using var slice = CancellationTokenSource.CreateLinkedTokenSource(cancellation);
             slice.CancelAfter(BeautifySlice(left));
             try
             {
-                best = _repair.BeautifyCrossings(best, profile, beautifyBudget, slice.Token);
-                progress.Best = best;
+                RememberBeauty(_repair.BeautifyCrossings(best, profile, beautifyBudget, slice.Token, RememberBeauty));
             }
             catch (OperationCanceledException) when (!cancellation.IsCancellationRequested)
             {
-                // The beauty pass was cut by its own slice, not by the caller: the chosen arrangement stands.
+                // A later interrupted trial cannot discard a complete, guarded improvement.
             }
             finally
             {
@@ -384,7 +388,18 @@ internal sealed class GraphLayoutSelector
             }
         }
 
+        if (bestOrdinal >= 0 && progress.BestScore is { } finalScore)
+            for (var index = 0; index < reports.Count; index++)
+                if (reports[index].Component == component && reports[index].Won)
+                    reports[index] = reports[index] with { Score = finalScore };
         return best;
+
+        void RememberBeauty(GraphLayoutCandidate candidate)
+        {
+            best = candidate;
+            bestScore = GraphLayoutScore.Of(candidate, profile, bestOrdinal);
+            (progress.Best, progress.BestScore) = (best, bestScore);
+        }
 
         // Where a seed stands in the repair order; the seeds that are not repaired are visited last, after the
         // ones the order names, so a complete seed is scored as soon as the clock would allow it.
@@ -442,10 +457,12 @@ internal sealed class GraphLayoutSelector
             failure.ExploredCandidates);
 
     /// <summary>Reduces the crossings of a valid layout: by substitution, then by moving a table.</summary>
-    private GraphLayoutCandidate Refine(GraphLayoutCandidate candidate, GraphLayoutProfile profile, GraphEvaluationBudget budget, CancellationToken cancellation)
+    private GraphLayoutCandidate Refine(GraphLayoutCandidate candidate, GraphLayoutProfile profile, GraphEvaluationBudget budget,
+        CancellationToken cancellation, Action<GraphLayoutCandidate> improved)
     {
         var current = _removal.Substitute(candidate, profile, budget, cancellation);
+        if (current != candidate) improved(current);
 
-        return current.CrossingCount == 0 ? current : _repair.ReduceCrossingsByMoving(current, profile, budget, cancellation);
+        return current.CrossingCount == 0 ? current : _repair.ReduceCrossingsByMoving(current, profile, budget, cancellation, improved);
     }
 }

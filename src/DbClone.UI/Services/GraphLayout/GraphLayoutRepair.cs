@@ -168,40 +168,43 @@ internal sealed class GraphLayoutRepair
     /// <param name="profile">The graph facts.</param>
     /// <param name="budget">The shared evaluation budget.</param>
     /// <param name="cancellation">Checked between trials.</param>
+    /// <param name="improved">Receives complete improvements before further trials can be interrupted.</param>
     /// <returns>The layout with fewer crossings, or the input when no move helped.</returns>
     public GraphLayoutCandidate ReduceCrossingsByMoving(
         GraphLayoutCandidate candidate,
         GraphLayoutProfile profile,
         GraphEvaluationBudget budget,
-        CancellationToken cancellation = default) =>
+        CancellationToken cancellation = default,
+        Action<GraphLayoutCandidate>? improved = null) =>
         ReduceCrossingsByMoving(
             candidate, profile, budget, cancellation, ContestCrossingSteps,
-            GraphSearchBudget.MaximumCrossingMoves, GraphSearchBudget.MaximumCrossingsPerMoveRound, int.MaxValue, false);
+            GraphSearchBudget.MaximumCrossingMoves, GraphSearchBudget.MaximumCrossingsPerMoveRound, int.MaxValue, false, improved);
 
     /// <summary>
-    /// Eases a finished winner's crossings at sub-card steps over a long descent: a table is nudged along the
-    /// overlap the way a reader drags it, and each move is kept only when it crosses strictly fewer routes,
-    /// leaves the card inside the ring of its own neighbours and keeps every relation climbing the page no
-    /// worse than it found them. Selection has already chosen the arrangement, so this pass can sharpen the
-    /// picture it picked, never swap it for a flatter but less readable one, and the wider move/crossing caps
-    /// let it reach the crossings a contest's few moves leave standing. The neighbourhood guard belongs to the
-    /// fine steps alone: a whole-card contest hop is already the shape's own move, and guarding it would refuse
-    /// the jumps the seeds compete on.
+    /// Eases a finished winner's crossings at sub-card steps. Ranked placements retain their neighbourhood,
+    /// rank and length guards. Stars also try geometric endpoint and blocker sidesteps, including changes of
+    /// sector about an attachment, and can clear one of several obstructions without needing an existing
+    /// crossing. Every accepted star move keeps the hub central, the communities separated and the hidden
+    /// relation count nonincreasing. Complete improvements are reported before further search, so a bounded
+    /// slice cannot lose the better picture it already found. Selection has already chosen the arrangement;
+    /// this pass sharpens it without substituting another seed.
     /// </summary>
     /// <param name="candidate">A complete valid layout with crossings.</param>
     /// <param name="profile">The graph facts.</param>
     /// <param name="budget">The shared evaluation budget.</param>
     /// <param name="cancellation">Checked between trials.</param>
-    /// <returns>The layout with fewer crossings, or the input when no nudge helped.</returns>
+    /// <param name="improved">Receives complete improvements before further trials can be interrupted.</param>
+    /// <returns>The layout with fewer crossings or fewer hidden star chords, or the input when no nudge helped.</returns>
     public GraphLayoutCandidate BeautifyCrossings(
         GraphLayoutCandidate candidate,
         GraphLayoutProfile profile,
         GraphEvaluationBudget budget,
-        CancellationToken cancellation = default) =>
+        CancellationToken cancellation = default,
+        Action<GraphLayoutCandidate>? improved = null) =>
         ReduceCrossingsByMoving(
             candidate, profile, budget, cancellation, BeautifyCrossingSteps,
             GraphSearchBudget.MaximumBeautifyCrossingMoves, GraphSearchBudget.MaximumBeautifyCrossingsPerRound,
-            GraphLayoutScore.MeasureRankViolations(profile, candidate.Layout.Nodes), true);
+            GraphLayoutScore.MeasureRankViolations(profile, candidate.Layout.Nodes), true, improved);
 
     private GraphLayoutCandidate ReduceCrossingsByMoving(
         GraphLayoutCandidate candidate,
@@ -212,7 +215,8 @@ internal sealed class GraphLayoutRepair
         int maximumMoves,
         int maximumCrossingsPerRound,
         int maximumRankViolations,
-        bool guardsNeighbourhood)
+        bool guardsNeighbourhood,
+        Action<GraphLayoutCandidate>? improved)
     {
         ArgumentNullException.ThrowIfNull(candidate);
         ArgumentNullException.ThrowIfNull(profile);
@@ -225,14 +229,22 @@ internal sealed class GraphLayoutRepair
         var state = origin.Clone();
         var visited = new HashSet<string>(StringComparer.Ordinal) { state.Signature() };
 
-        for (var accepted = 0; accepted < maximumMoves && best.CrossingCount > 0 && !budget.IsExhausted; accepted++)
+        var clearsStar = guardsNeighbourhood && star is not null;
+        for (var accepted = 0; accepted < maximumMoves && !budget.IsExhausted; accepted++)
         {
-            (GraphPlacementState State, GraphLayoutCandidate Candidate, double Displacement)? found = null;
+            if (best.CrossingCount == 0 && (!clearsStar || GraphLayoutScore.MeasureHiddenRelations(profile, best.Layout.Nodes, best.Routes) == 0))
+                break;
+            (GraphPlacementState State, GraphLayoutCandidate Candidate, int Hidden, int Obstructions, double Displacement)? found = null;
             var clusteredScore = best.Name == "clustered" ? GraphLayoutScore.Of(best, profile, 0) : (GraphLayoutScore?)null;
             var hiddenBefore = clusteredScore is not null
                 ? GraphLayoutScore.MeasureHiddenRelations(profile, best.Layout.Nodes, best.Routes) : 0;
+            var obstructionsBefore = clearsStar ? CountObstructions(profile, best) : 0;
+            var chordsOnly = best.Routes.All(route => profile.Edges[route.EdgeIndex].Child == profile.Edges[route.EdgeIndex].Parent
+                || route.Geometry == EEdgeGeometry.Straight);
 
-            foreach (var move in CrossingMoves(state, best, stepFractions, maximumCrossingsPerRound))
+            var moves = CrossingMoves(state, best, stepFractions, maximumCrossingsPerRound);
+            if (clearsStar) moves = StarClearanceMoves(best, profile, star!.Value.Hub).Concat(moves);
+            foreach (var move in moves.DistinctBy(move => (move.Node, move.Dx, move.Dy)))
             {
                 cancellation.ThrowIfCancellationRequested();
                 if (budget.IsExhausted)
@@ -243,10 +255,19 @@ internal sealed class GraphLayoutRepair
                 var trial = state.Clone();
                 trial.Move(move.Node, move.Dx, move.Dy);
                 trial.Settle(profile.Component[move.Node]);
-                if ((guardsNeighbourhood && !StaysInItsNeighbourhood(origin, trial, move.Node, profile))
+                if ((guardsNeighbourhood && star is null && !StaysInItsNeighbourhood(origin, trial, move.Node, profile))
                     || !visited.Add(trial.Signature()))
                 {
                     continue;
+                }
+
+                if (clearsStar)
+                {
+                    var placed = trial.Assemble(best.Name).Nodes;
+                    if (GraphLayoutScore.MeasureClusterOverlap(profile, placed, GraphPlacementConstants.ClusterGap) > Tolerance
+                        || !GraphClusterStarLayout.Preserves(candidate.Layout.Nodes, placed, star!.Value.Clusters, star.Value.Hub)
+                        || (chordsOnly && !CanImproveChords(profile, placed, best.CrossingCount, hiddenBefore, obstructionsBefore)))
+                        continue;
                 }
 
                 var evaluation = Evaluate(trial, best.Name, budget, cancellation, warm: Warmup(best, state));
@@ -266,22 +287,28 @@ internal sealed class GraphLayoutRepair
                     var after = GraphLayoutScore.Of(next, profile, 0);
                     if (GraphLayoutScore.MeasureClusterOverlap(profile, next.Layout.Nodes, GraphPlacementConstants.ClusterGap) > Tolerance
                         || GraphLayoutScore.MeasureHiddenRelations(profile, next.Layout.Nodes, next.Routes) > hiddenBefore
-                        || after.BlockedRelations > before.BlockedRelations
+                        || (star is null && after.BlockedRelations > before.BlockedRelations)
                         || (star is null && after.RankViolations > before.RankViolations)
                         || (star is { } spokes && !GraphClusterStarLayout.Preserves(
                             candidate.Layout.Nodes, next.Layout.Nodes, spokes.Clusters, spokes.Hub))
-                        || after.TotalLength > before.TotalLength + Tolerance
-                        || after.MaximumLength > before.MaximumLength + Tolerance)
+                        || (star is null && after.TotalLength > before.TotalLength + Tolerance)
+                        || (star is null && after.MaximumLength > before.MaximumLength + Tolerance))
                     {
                         continue;
                     }
                 }
 
+                var hidden = clearsStar ? GraphLayoutScore.MeasureHiddenRelations(profile, next.Layout.Nodes, next.Routes) : 0;
+                var obstructions = clearsStar ? CountObstructions(profile, next) : 0;
+                var quality = (next.CrossingCount, hidden, obstructions);
+                var target = (found?.Candidate.CrossingCount ?? best.CrossingCount, found?.Hidden ?? (clearsStar ? hiddenBefore : 0),
+                    found?.Obstructions ?? obstructionsBefore);
                 var displacement = trial.DisplacementFrom(origin);
-                if (next.CrossingCount < (found?.Candidate.CrossingCount ?? best.CrossingCount)
-                    || (found is not null && next.CrossingCount == found.Value.Candidate.CrossingCount && displacement < found.Value.Displacement))
+                if (quality.CompareTo(target) < 0
+                    || (found is not null && quality == target && displacement < found.Value.Displacement))
                 {
-                    found = (trial, next, displacement);
+                    found = (trial, next, hidden, obstructions, displacement);
+                    improved?.Invoke(next);
                 }
             }
 
@@ -295,6 +322,68 @@ internal sealed class GraphLayoutRepair
         }
 
         return best;
+    }
+
+    /// <summary>Rejects unhelpful straight-chord trials before spending routing work on the self-loops.</summary>
+    private static bool CanImproveChords(GraphLayoutProfile profile, IReadOnlyList<NodePlacement> cards,
+        int crossingLimit, int hiddenLimit, int obstructionLimit)
+    {
+        var ports = GraphPortAssigner.Assign(cards, profile.Edges);
+        if (!ports.IsComplete) return false;
+        var edges = Enumerable.Range(0, profile.Edges.Count)
+            .Where(edge => profile.Edges[edge].Child != profile.Edges[edge].Parent).ToArray();
+        var crossings = 0;
+        var hidden = 0;
+        var obstructions = 0;
+        for (var at = 0; at < edges.Length; at++)
+        {
+            var edge = profile.Edges[edges[at]];
+            var ends = ports.Ends[edges[at]]!;
+            var blockers = cards.Count(card => card.NodeIndex != edge.Child && card.NodeIndex != edge.Parent
+                && GraphGeometry.SegmentHitsCardEnvelope(ends.Child.Point, ends.Parent.Point, card));
+            obstructions += blockers;
+            if (blockers > 0) hidden++;
+            if (hidden > hiddenLimit) return false;
+            for (var next = at + 1; next < edges.Length; next++)
+            {
+                var other = ports.Ends[edges[next]]!;
+                if (GraphGeometry.SegmentsCross(ends.Child.Point, ends.Parent.Point, other.Child.Point, other.Parent.Point)) crossings++;
+                if (crossings > crossingLimit) return false;
+            }
+        }
+        return crossings < crossingLimit || hidden < hiddenLimit || obstructions < obstructionLimit;
+    }
+
+    private int CountObstructions(GraphLayoutProfile profile, GraphLayoutCandidate candidate) =>
+        candidate.Routes.Sum(route =>
+        {
+            var edge = profile.Edges[route.EdgeIndex];
+            if (edge.Child == edge.Parent) return 0;
+            var line = _validator.Flatten(route)!.Points;
+            return candidate.Layout.Nodes.Count(card => card.NodeIndex != edge.Child && card.NodeIndex != edge.Parent
+                && Enumerable.Range(1, line.Count - 1).Any(at => GraphGeometry.SegmentHitsCardEnvelope(line[at - 1], line[at], card)));
+        });
+
+    /// <summary>Geometric sidesteps for hidden chords and crossing endpoints, without moving the shared hub.</summary>
+    private static IEnumerable<GraphRepairMove> StarClearanceMoves(GraphLayoutCandidate candidate, GraphLayoutProfile profile, int hub)
+    {
+        var cards = candidate.Layout.Nodes;
+        var ordinal = 0;
+        foreach (var node in Enumerable.Range(0, cards.Count).Where(node => node != hub))
+        {
+            var clearances = GraphStarPlacementMoves.Clearances(profile, cards, node).ToArray();
+            foreach (var delta in clearances)
+                yield return new GraphRepairMove(node, delta.X, delta.Y, ordinal++);
+            if (clearances.Length == 0 || profile.Neighbours[node].Count == 0) continue;
+            var family = profile.ClusterGroups.First(group => group.Contains(node));
+            var attachment = profile.Neighbours[node].OrderByDescending(family.Contains)
+                .ThenByDescending(peer => profile.Neighbours[peer].Count).ThenBy(peer => peer).First();
+            foreach (var delta in GraphStarPlacementMoves.Orbit(cards, new[] { node }, attachment))
+                yield return new GraphRepairMove(node, delta.X, delta.Y, ordinal++);
+        }
+        foreach (var node in Enumerable.Range(0, cards.Count).Where(node => node != hub))
+            foreach (var delta in GraphStarPlacementMoves.Endpoints(profile, cards, node))
+                yield return new GraphRepairMove(node, delta.X, delta.Y, ordinal++);
     }
 
     /// <summary>Trial moves for the endpoint cards of the first few crossings: away from the crossing and across each relation, at each nudge length.</summary>

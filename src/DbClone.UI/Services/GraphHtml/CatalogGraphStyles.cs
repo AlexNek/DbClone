@@ -64,7 +64,7 @@ main{flex:1 1 auto;min-width:0;min-height:0;display:flex;flex-direction:column}
 .node.moving{opacity:.85}
 .edge{fill:none;stroke:#8b949e;stroke-width:1.3}
 .edge.out{stroke-dasharray:5 4;stroke:#b08850}
-.edge.hot{stroke:var(--hot);stroke-width:2.6}
+.edge.hot{stroke:var(--hot)}
 .edge.dim{opacity:.18}
 .edge.pick{stroke:transparent;stroke-width:10px;stroke-dasharray:none;pointer-events:stroke;cursor:pointer}
 .node.dim{opacity:.4}

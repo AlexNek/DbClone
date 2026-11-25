@@ -100,6 +100,24 @@ public sealed class CatalogGraphHtmlRendererTests
     }
 
     [Fact]
+    public void A_selected_constraint_prints_no_wider_than_the_gap_it_was_drawn_to_keep()
+    {
+        // Selecting a table turns its arrows blue, and that is all it may do: a stroke drawn wider than
+        // the stylesheet's own width eats the white space the geometry promises between the closest pair
+        // of centerlines the validator admits, so two constraints joining one pair read as one thick line
+        // — the second constraint disappears exactly when the reader asked for it (D4).
+        var document = Render(Chain(70)).Document;
+
+        var plain = StrokeWidth(document, ".edge");
+        var hot = StrokeWidth(document, ".edge.hot");
+
+        hot.Should().BeLessThanOrEqualTo(plain, "selection states a colour, never a wider stroke");
+        (GraphGeometryContract.MinimumCenterlineDistance - hot).Should().BeGreaterThanOrEqualTo(
+            GraphGeometryContract.MinimumVisibleStrokeGap,
+            "two selected arrows at the closest admissible distance would print as one line");
+    }
+
+    [Fact]
     public void A_cluster_switched_off_takes_its_supernode_with_it()
     {
         // Arrange
@@ -956,6 +974,18 @@ public sealed class CatalogGraphHtmlRendererTests
             CultureInfo.InvariantCulture);
 
         return width * stroke;
+    }
+
+    /// <summary>The stroke width a rule prints with, falling back to the base relation rule when it states none.</summary>
+    private static double StrokeWidth(string document, string selector)
+    {
+        var rule = Regex.Match(document, Regex.Escape(selector) + @"\{[^}]*\}").Value;
+        var stated = Regex.Match(rule, "stroke-width:([0-9.]+)");
+        var value = stated.Success
+            ? stated.Groups[1].Value
+            : Regex.Match(document, @"\.edge\{[^}]*stroke-width:([0-9.]+)").Groups[1].Value;
+
+        return double.Parse(value, CultureInfo.InvariantCulture);
     }
 
     private static List<JsonElement> Edges(string island) =>

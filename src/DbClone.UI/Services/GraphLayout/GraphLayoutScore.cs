@@ -201,7 +201,7 @@ internal readonly record struct GraphLayoutScore(
     /// </summary>
     internal static double MeasureClusterOverlap(GraphLayoutProfile profile, IReadOnlyList<NodePlacement> nodes, double gap = 0)
     {
-        var groups = profile.ClusterGroups;
+        var groups = profile.ClusterRegions;
         if (groups.Count < 2)
         {
             return 0;
@@ -211,7 +211,7 @@ internal readonly record struct GraphLayoutScore(
         var component = new int[groups.Count];
         for (var at = 0; at < groups.Count; at++)
         {
-            var members = groups[at];
+            var members = groups[at].Members;
             envelopes[at] = (
                 members.Min(node => nodes[node].TopLeft.X),
                 members.Min(node => nodes[node].TopLeft.Y),
@@ -225,7 +225,7 @@ internal readonly record struct GraphLayoutScore(
         {
             for (var second = first + 1; second < groups.Count; second++)
             {
-                if (component[first] != component[second])
+                if (component[first] != component[second] || groups[first].Community == groups[second].Community)
                 {
                     continue;
                 }

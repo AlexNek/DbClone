@@ -105,7 +105,7 @@ internal sealed class GraphCrossingRemoval
                         continue;
                     }
 
-                    routes[edge] = route with { LabelPoint = GraphGeometry.ArcPoint(check.Flat!.Points, 0.5) };
+                    routes[edge] = route with { LabelPoint = GraphGeometry.ArcPoint(check.Flat!.Points, GraphNonOrthogonalRouter.LabelAt(family[edge])) };
                     reserved.Replace(check.Flat);
 
                     return true;

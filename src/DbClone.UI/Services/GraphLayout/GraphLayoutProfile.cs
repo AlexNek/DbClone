@@ -10,6 +10,7 @@ namespace DbClone.UI.Services.GraphLayout;
 internal sealed class GraphLayoutProfile
 {
     private IReadOnlyList<IReadOnlyList<int>>? _clusterGroups;
+    private IReadOnlyList<(int Community, IReadOnlyList<int> Members)>? _clusterRegions;
 
     private GraphLayoutProfile(
         IReadOnlyList<double> widths,
@@ -66,6 +67,10 @@ internal sealed class GraphLayoutProfile
     /// against the same partition.
     /// </summary>
     public IReadOnlyList<IReadOnlyList<int>> ClusterGroups => _clusterGroups ??= DetectAllClusters();
+
+    /// <summary>Gets occupied regions of the same fixed partition, splitting only independent central-star branches.</summary>
+    public IReadOnlyList<(int Community, IReadOnlyList<int> Members)> ClusterRegions =>
+        _clusterRegions ??= GraphClusterRegions.Detect(this);
 
     /// <summary>One connected component as a graph of its own.</summary>
     /// <param name="component">The component number.</param>

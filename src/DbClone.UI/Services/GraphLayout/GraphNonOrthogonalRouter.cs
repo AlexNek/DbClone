@@ -293,7 +293,7 @@ internal sealed class GraphNonOrthogonalRouter
 
         if (best is { } found)
         {
-            var label = GraphGeometry.ArcPoint(found.Check.Flat!.Points, 0.5);
+            var label = GraphGeometry.ArcPoint(found.Check.Flat!.Points, LabelAt(family));
 
             return (found.Route with { LabelPoint = label }, found.Check, null);
         }
@@ -309,7 +309,7 @@ internal sealed class GraphNonOrthogonalRouter
 
             if (check.IsAdmissible)
             {
-                return (route with { LabelPoint = GraphGeometry.ArcPoint(check.Flat!.Points, 0.5) }, check, null);
+                return (route with { LabelPoint = GraphGeometry.ArcPoint(check.Flat!.Points, LabelAt(family)) }, check, null);
             }
 
             foreach (var failure in check.Failures)
@@ -410,4 +410,14 @@ internal sealed class GraphNonOrthogonalRouter
 
         return result;
     }
+
+    /// <summary>
+    /// Where on its own route a relation states its columns: the middle of a route that joins its two
+    /// tables alone, and its own share of the route when other constraints join the same pair. Two labels
+    /// printed at one midpoint overprint each other, which is a second constraint the reader cannot see.
+    /// </summary>
+    /// <param name="family">The relation's ordinal within, and the size of, the family joining its pair.</param>
+    /// <returns>The fraction of the route the label stands at, always strictly inside it.</returns>
+    internal static double LabelAt((int Ordinal, int Count) family) =>
+        (family.Ordinal + 1.0) / (family.Count + 1.0);
 }

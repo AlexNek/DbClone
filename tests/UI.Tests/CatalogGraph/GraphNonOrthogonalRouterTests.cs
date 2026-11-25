@@ -53,6 +53,30 @@ public sealed class GraphNonOrthogonalRouterTests
     }
 
     [Fact]
+    public void Two_constraints_joining_one_pair_state_their_columns_at_different_points()
+    {
+        // The pair shares one road, so both labels used to stand at its middle and one printed over the
+        // other: two constraints read as one with a garbled name. Each states its columns on its own
+        // share of its own route instead (D4).
+        var cards = new[] { Card(0, 0, 0, 200), Card(1, 500, 0, 200) };
+        var edges = new (int, int)[] { (0, 1), (0, 1) };
+
+        var result = Route(cards, edges);
+
+        result.IsComplete.Should().BeTrue();
+        var first = result.Routes[0]!;
+        var second = result.Routes[1]!;
+        var span = Distance(first.Points[0], first.Points[^1]);
+
+        Distance(first.LabelPoint, second.LabelPoint).Should().BeGreaterThan(
+            span / 4,
+            "two labels printed at one midpoint read as one constraint");
+        first.LabelPoint.X.Should().BeInRange(first.Points.Min(point => point.X), first.Points.Max(point => point.X));
+        first.LabelPoint.Y.Should().BeInRange(first.Points.Min(point => point.Y), first.Points.Max(point => point.Y));
+        AssertValid(cards, edges, result);
+    }
+
+    [Fact]
     public void A_self_reference_is_a_valid_loop_clear_of_every_other_stroke()
     {
         var cards = new[] { Card(0, 0, 0, 200), Card(1, 500, 0, 200) };
