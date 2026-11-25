@@ -19,6 +19,9 @@ internal static class CatalogGraphScript
   var svg = document.getElementById("pic");
   var view = document.getElementById("viewport");
   var panel = document.getElementById("panel");
+  // The sentence the panel opens with belongs to the document's own markup, so it is read back from
+  // there rather than written a second time here: losing a selection gives it back as it was stated.
+  var panelOpening = panel.textContent;
   var hits = document.getElementById("matches");
   var counts = document.getElementById("counts");
   var nodes = Array.prototype.slice.call(document.querySelectorAll("#viewport .node"));
@@ -140,6 +143,10 @@ internal static class CatalogGraphScript
     Array.prototype.forEach.call(document.querySelectorAll(".register tbody tr"), function (row) {
       row.classList.remove("hot");
     });
+    // Nothing is selected, so nothing is described: a panel left stating a table nobody is pointing at
+    // reads as a selection the reader cannot find on the picture.
+    panel.textContent = "";
+    panel.appendChild(element("p", "meta", panelOpening));
   }
 
   function highlightEdge(index) {
@@ -261,7 +268,10 @@ internal static class CatalogGraphScript
     if (!detail) return;
     panel.textContent = "";
     panel.appendChild(element("h2", null, titleOf(detail, cardOf.get(index))));
-    panel.appendChild(element("p", "meta", detail.cap ? rowsPhrase(detail.rows) : data.outsideNote));
+    // The line the card prints travels here too, so an origin that states no figure for a table says
+    // nothing in both places instead of leaving an empty line in each.
+    var rowLine = detail.cap ? rowsPhrase(detail.rows) : data.outsideNote;
+    if (rowLine) panel.appendChild(element("p", "meta", rowLine));
     if (detail.g !== null && detail.g !== undefined) {
       panel.appendChild(element("p", "meta",
         "cyclic group " + detail.g + ": " + detail.members.length + " tables, this one points back into it"));
@@ -805,7 +815,11 @@ internal static class CatalogGraphScript
     var node = target.closest ? target.closest(".node") : null;
     if (node) { focusNode(Number(node.getAttribute("data-n"))); return; }
     var edge = target.closest ? target.closest(".edge") : null;
-    if (edge) highlightEdge(Number(edge.getAttribute("data-e")));
+    if (edge) { highlightEdge(Number(edge.getAttribute("data-e"))); return; }
+    // A press on the empty canvas that went nowhere and named no card, no constraint and no collapsed
+    // group is the reader asking for none of them. The picture used to keep the last table lit here,
+    // leaving the selection with no way back out of it short of choosing another table.
+    clearSelection();
   });
 
   // The collapsed group's box is reachable with Tab — it states role="button" and tabindex="0" — so

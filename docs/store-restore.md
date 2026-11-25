@@ -192,20 +192,20 @@ On a machine without the runtime the picture opens in your browser instead, and 
 !!! info "Why the store's picture sits in the catalog folder"
     The picture a store draws is named after the catalog folder and written **inside** it — `my_app_db_2026-11-10_16-10/my_app_db_2026-11-10_16-10.html` — so a catalog and the picture of it travel together and the store folder stays clean. Like `summary.md`, the picture is not part of the catalog's content: it is not listed in `manifest.json`, not hashed, not verified and never restored, so deleting it or editing it cannot break a catalog. Every store rewrites the file when it finishes; viewing a catalog reads the folder and leaves that file alone. A picture that cannot be written never makes a store a failure, because the catalog is already complete — the log states the reason instead.
 
-### The card: the name and the count, inside
+### The card: the name, and the count the origin states
 
-Every table is one card, and both facts about it are printed **inside** it, on two lines: the table's name, and what the origin states about its rows — the count a store captured, or the fact that a live read did not count them. The card is exactly as wide as the longer of those two lines, so `ai_chat_provider_configuration` gets a wider card than `orders` — and no name is ever cut, wrapped or pushed outside the shape.
+Every table is one card, and its facts are printed **inside** it: the table's name on the first line, and on the second what the origin states about that table's rows — the count a store captured, or that the store captured no rows. A live read counted no rows for any table, so it prints no second line: the card is sized by its name alone and the header states once, for the whole picture, that rows are not counted. A card never prints a figure its origin did not measure, and never leaves an empty line where one would sit. The card is exactly as wide as the longer of its lines, so `ai_chat_provider_configuration` gets a wider card than `orders` — and no name is ever cut, wrapped or pushed outside the shape.
 
-No dimension states a figure. Every card has the same height and a width that follows its own text, so a larger shape never means "a larger table": what the origin states about rows is read in words inside the card, not off its size, and no colour carries a number either.
+No dimension states a figure. Every card has the same height and a width that follows its own text, so a larger shape never means "a larger table": any figure the origin states is read in words inside the card, not off its size, and no colour carries a number either.
 
 | Printed on the card | Meaning |
 |---------------------|---------|
 | `1 240 rows` | The row count the store captured |
 | `0 rows` | A real table that was captured empty |
 | `no data captured` | The structure was captured but not the rows — table data was switched off |
-| `rows are not counted here` | A live view: counting every table is a scan nobody asked for, so no figure is stated |
 | `not in this catalog` | A constraint points at this table and the store did not capture it |
 | `not in this view` | A live view: a constraint points at a table the read did not return |
+| nothing under the name | A live view: the read measured no row count, and the header says so once |
 
 ### What the arrows say
 
@@ -245,6 +245,7 @@ Direction is carried by the arrowhead, never by where a table sits. Every catalo
 |---------|---------------|
 | **Search** | Matches a table, a column, a constraint or a comment. The result list names the field each row matched — every table in the catalog, not only the ones on screen — and selecting a row shows that table: a table the picture was not showing is revealed, switched back on and brought into view, then selected with its panel open |
 | **Direction** | While a table is selected: **both ways**, **references** (the arrows leaving it) or **referenced by** (the arrows arriving). The arrows outside the chosen direction fade rather than disappear |
+| A click on empty ground | Puts the selection down: the card, its arrows and its register row are released and the panel returns to the words it opened with. A drag that moved the picture never counts as one, so panning across the background keeps what you had selected |
 | The bar of chips | One chip per schema, per cyclic group and for the tables in no relationship. A click hides a cluster, alt-click (or shift-click) shows only it. Each group of chips filters on its own, so switching a schema off hides every table of that schema even when a cyclic group also claims it, and the box standing over a collapsed group leaves with the tables it stands over. A chip changes what is drawn, never where you are looking: the picture keeps the zoom and the position you left it at, and so does **Refresh**. A catalog with a single schema states the schema instead of offering a switch whose other state is "hide everything" |
 | **−** / **+** / **Fit** / **100%** | Zoom. Drag to pan, wheel to zoom. **100%** draws the picture at its own size and **Fit** fits the tables that are on screen into the window; a picture that fits the window is centred in it, and one larger than the window starts at its own top-left corner rather than in the empty middle of the canvas |
 | The panel on the right | The selected table itself: its row count, its columns with their types and key marks, its primary key, its unique constraints, its indexes — each named by the key columns the store captured, so a reader never has to read a SQL statement to find out what an index covers, with the engine's own statement printed only for an index whose columns the folder does not state — and its check constraints with their expressions. Then both lists of constraints, each row naming the constraint, the columns it joins, its `on delete`/`on update` action, and how many child rows may name a parent — `exactly one`, `at most one`, or whether a child row may have no parent at all — so two constraints joining the same columns are told apart by name and rule, never printed as duplicates |
@@ -254,7 +255,7 @@ Nothing is removed by narrowing: focus, direction, the chips and the search chan
 
 ### What the picture does not state
 
-The header names the origin — `catalog <folder>` for a stored catalog, `live database <host:port/database>` for a database read — how many tables and relations the picture holds, the catalog's format version when there is one, the dialect, and when the picture was generated (a catalog) or read (a live database). Two things it deliberately does not state:
+The header names the origin — `catalog <folder>` for a stored catalog, `live database <host:port/database>` for a database read — how many tables and relations the picture holds, the catalog's format version when there is one, the dialect, and when the picture was generated (a catalog) or read (a live database). It also carries the one sentence about rows that is true of the whole origin: a store that captured no table data says `no row data was captured`, and a live read says `rows are not counted here`. Two things it deliberately does not state:
 
 - **Per-table storage bytes.** The catalog's byte figures are totals for the whole folder; it records a table's rows and chunk files, not a byte figure per table.
 - **When the catalog was stored.** The picture is stamped with the moment it was generated. The catalog's own write time is in `export.json`.

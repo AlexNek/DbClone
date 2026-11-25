@@ -49,7 +49,10 @@ internal sealed class GraphOriginWords
     /// <summary>Gets the header's whole missing-data clause, separator included, or an empty string when the header stays silent.</summary>
     internal string HeaderNoData { get; }
 
-    /// <summary>Gets the panel's and the card's line for a table the origin states no row count for.</summary>
+    /// <summary>
+    /// Gets the panel's and the card's line for a table the origin states no row count for, or an empty
+    /// string when the origin says nothing about rows table by table and the header carries the reason.
+    /// </summary>
     internal string RowsNote { get; }
 
     /// <summary>Gets the panel's and the card's line for a table the origin does not hold.</summary>
@@ -89,8 +92,10 @@ internal sealed class GraphOriginWords
         EGraphOriginKind.LiveDatabase,
         headerLead: "live database",
         timestampWord: "read",
-        headerNoData: string.Empty,
-        rowsNote: "rows are not counted here",
+        // A live read counts no rows for any table, so the reason is a fact about the origin and is
+        // stated once in the header — a card prints nothing it did not measure (plan D1, D2).
+        headerNoData: " \u00b7 rows are not counted here",
+        rowsNote: string.Empty,
         outsideNote: "not in this view",
         unnamedReference: "a table the database does not name",
         outsideRule: "outside this view",

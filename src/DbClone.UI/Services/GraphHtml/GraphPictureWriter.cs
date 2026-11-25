@@ -206,9 +206,16 @@ internal sealed class GraphPictureWriter
             html.Append("<text class=\"name\" x=\"").Append(GraphHtmlText.Num(textX))
                 .Append("\" y=\"").Append(GraphHtmlText.Num(place.TopLeft.Y + GraphCard.NameBaseline)).Append("\">")
                 .Append(GraphHtmlText.Escape(node.DisplayName)).Append("</text>\n");
-            html.Append("<text class=\"count\" x=\"").Append(GraphHtmlText.Num(textX))
-                .Append("\" y=\"").Append(GraphHtmlText.Num(place.TopLeft.Y + GraphCard.FactBaseline)).Append("\">")
-                .Append(GraphHtmlText.Escape(GraphFactText.NodeFacts(node, _words))).Append("</text>\n");
+
+            // The second line is the figure the origin states about this one table. An origin that states
+            // none leaves the card with its name and no empty text node (plan D3).
+            var facts = GraphFactText.NodeFacts(node, _words);
+            if (facts.Length > 0)
+            {
+                html.Append("<text class=\"count\" x=\"").Append(GraphHtmlText.Num(textX))
+                    .Append("\" y=\"").Append(GraphHtmlText.Num(place.TopLeft.Y + GraphCard.FactBaseline))
+                    .Append("\">").Append(GraphHtmlText.Escape(facts)).Append("</text>\n");
+            }
 
             html.Append("</g>\n");
         }

@@ -243,6 +243,29 @@ public sealed class CatalogGraphHtmlRendererTests
     }
 
     [Fact]
+    public void A_click_on_the_empty_canvas_leaves_no_selection()
+    {
+        // A selection has to be as easy to put down as it is to take up: pointing at nothing is the
+        // reader asking for no table, so the lit card, the dimmed arrows and the highlighted register
+        // row are released and the panel returns to the words it opened with. The gesture counts only
+        // when the pointer did not travel, so a pan across the background keeps what was selected.
+        var rendered = Render(Chain(12));
+
+        // Assert — the click handler ends on a branch that names nothing, and clearing reaches the panel.
+        rendered.Document.Should().Contain("var panelOpening = panel.textContent;")
+            .And.Contain("panel.appendChild(element(\"p\", \"meta\", panelOpening));")
+            .And.Contain("if (edge) { highlightEdge(Number(edge.getAttribute(\"data-e\"))); return; }")
+            .And.Contain("clearSelection();");
+
+        // The opening sentence is stated once, by the markup the document starts with: the script hands
+        // it back rather than carrying a second copy that could drift away from the first.
+        Count(rendered.Document, "Select a table to see its columns").Should().Be(1);
+
+        // And the reader is told the canvas answers a click.
+        rendered.Document.Should().Contain("click it to deselect");
+    }
+
+    [Fact]
     public void A_catalog_with_a_middle_is_drawn_the_one_arrangement_and_the_page_keeps_the_arrowheads_apart()
     {
         // One arrangement per catalog and never a second one handed to the reader to switch between:
@@ -949,8 +972,14 @@ public sealed class CatalogGraphHtmlRendererTests
         rendered.Document.Should().NotContain("format version");
 
         // Assert — the live words, and not one catalog literal anywhere in the document.
-        rendered.Document.Should().Contain("rows are not counted here");
-        rendered.Document.Should().Contain("not in this view");
+        // A live read counted no rows for any table, which is a fact about the origin: the header states
+        // it once and no card repeats it (plan D1, D2).
+        rendered.Document.Should().Contain("postgresql \u00b7 read 2026-11-10 16:00 \u00b7 rows are not counted here</p>");
+        Count(rendered.Document, "rows are not counted here").Should().Be(1);
+        // The line a card does carry is the per-table one: which tables the read did not return (D4). One
+        // count line is printed in this document, and it is the outside table's.
+        Count(rendered.Document, "class=\"count\" x=").Should().Be(1);
+        rendered.Document.Should().Contain(">not in this view</text>");
         rendered.Document.Should().Contain("outside this view");
         rendered.Document.Should().Contain("the table it points at is not in this view");
         rendered.Document.Should().Contain("aria-label=\"Search this view\"");
@@ -961,6 +990,34 @@ public sealed class CatalogGraphHtmlRendererTests
         rendered.Document.Should().NotContain("the table it points at is not in this catalog");
         rendered.Document.Should().NotContain("Search the catalog");
         rendered.Document.Should().NotContain("a table the catalog does not name");
+    }
+
+    [Fact]
+    public void A_live_card_prints_no_second_line_and_is_measured_by_its_name()
+    {
+        // Arrange — the shape the live read of an auth schema drew: names of 14 to 23 characters, none of
+        // them a table whose rows were counted.
+        var rendered = Render(CatalogGraphFixture.Create()
+            .Live("testdb", "test.example.com:5432/testdb")
+            .Table("public", "orders", columns: Column("id", "bigint", isPrimaryKey: true))
+            .Table("public", "customers", columns: Column("id", "bigint", isPrimaryKey: true)));
+        var document = rendered.Document;
+
+        // Assert — nothing is printed where a figure would be, and nothing is printed as whitespace.
+        Count(document, "class=\"count\"").Should().Be(0, "a live card states no figure about its rows");
+        document.Should().NotContain("<text class=\"count\"></text>", "an origin that says nothing writes no node");
+        document.Should().NotContain("\u2014 \u2014", "the tooltip leaves no empty place between two separators");
+
+        // Assert — the card is as wide as its name, not as wide as the sentence the header now carries.
+        var card = document[document.IndexOf("<g class=\"node", StringComparison.Ordinal)..];
+        var box = Regex.Match(card, "<rect x=\"(?<x>[0-9.]+)\" y=\"(?<y>[0-9.]+)\" width=\"(?<w>[0-9.]+)\"");
+        var name = Regex.Match(card, "<text class=\"name\"[^>]*>(?<text>[^<]*)</text>");
+
+        box.Success.Should().BeTrue("a table is drawn as a rectangle");
+        name.Success.Should().BeTrue("the table's name is on the picture");
+        Number(box, "w").Should().Be(
+            GraphCard.Width(name.Groups["text"].Value, string.Empty),
+            "the card is measured by the only line it prints");
     }
 
     /// <summary>How wide one mark is drawn in the picture, in pixels, ink and all.</summary>

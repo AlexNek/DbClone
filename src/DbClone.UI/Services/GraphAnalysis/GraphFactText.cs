@@ -42,11 +42,12 @@ internal static class GraphFactText
     /// <summary>
     /// The card's second line: the row count, the absence of data, or the fact that the catalog does
     /// not hold the table at all. A table the catalog does not hold is never given a figure it does not
-    /// have (FR4, D7).
+    /// have (FR4, D7). An origin that states no row figure at all returns an empty line, which the
+    /// writer prints nowhere rather than as whitespace (plan D1, D3).
     /// </summary>
     /// <param name="node">The table.</param>
     /// <param name="words">The origin's words.</param>
-    /// <returns>The one line printed under the table's name.</returns>
+    /// <returns>The one line printed under the table's name, or an empty string when there is none.</returns>
     internal static string NodeFacts(CatalogGraphNode node, GraphOriginWords words)
     {
         if (!node.IsCaptured)
@@ -65,16 +66,23 @@ internal static class GraphFactText
     /// <summary>
     /// The card's tooltip: the name, the facts, both direction counts, which are never merged into one
     /// figure (FR12, D7), and the words that name a link table, marked as the inference it is (D14.3).
+    /// A fact the origin states nowhere is left out of the sentence rather than printed as an empty
+    /// place between two separators.
     /// </summary>
     /// <param name="node">The table.</param>
     /// <param name="words">The origin's words.</param>
     /// <returns>The tooltip text.</returns>
     internal static string NodeTitle(CatalogGraphNode node, GraphOriginWords words)
     {
-        var state = node.IsCaptured ? NodeFacts(node, words) : words.OutsideNote;
+        var facts = NodeFacts(node, words);
         var join = node.JoinTableBetween is null ? string.Empty : $" \u2014 {node.JoinTableBetween} (inferred)";
-        return $"{node.DisplayName} \u2014 {state} \u2014 references {node.DegreeOut}, referenced by {node.DegreeIn}{join}";
+        return $"{node.DisplayName}{Segment(facts)} \u2014 references {node.DegreeOut}, referenced by {node.DegreeIn}{join}";
     }
+
+    /// <summary>Opens a tooltip segment with its separator, or says nothing when the segment is empty.</summary>
+    /// <param name="value">The words the origin states, if it states any.</param>
+    /// <returns>The segment with its leading separator, or an empty string.</returns>
+    private static string Segment(string value) => value.Length == 0 ? string.Empty : $" \u2014 {value}";
 
     /// <summary>
     /// The register's rule column: a self reference, a reference that leaves the catalog, or the

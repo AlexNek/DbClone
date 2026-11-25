@@ -128,7 +128,7 @@ internal sealed class CatalogGraphFixture
 
     /// <summary>
     /// Makes the view one read from a live database: the origin states no format version and no row count
-    /// is measured, so every card says so in the live words (D8, D9).
+    /// is measured, so the header says why and the cards print no figure (D8, D9, plan D1, D2).
     /// </summary>
     public CatalogGraphFixture Live(string database, string location, string dialect = "postgresql")
     {
