@@ -49,7 +49,14 @@ public partial class AboutDialog : Window
         }
 
         UpdateStatusText.Visibility = Visibility.Visible;
-        if (result.IsUpdateAvailable)
+        if (result.ErrorMessage is { Length: > 0 } errorMessage)
+        {
+            // A check that never reached the feed is not an up-to-date app.
+            UpdateStatusText.Text = $"Could not check for updates: {errorMessage}";
+            CheckForUpdatesButton.Visibility = Visibility.Visible;
+            UpdateNowButton.Visibility = Visibility.Collapsed;
+        }
+        else if (result.IsUpdateAvailable)
         {
             UpdateStatusText.Text = result.Version is { } version
                                         ? $"A new version ({version}) is available."

@@ -23,6 +23,8 @@ public sealed class ValidateStage : ICopyStage
     /// <inheritdoc />
     public int Order => 150;
 
+    public bool IsCritical => false;
+
     /// <summary>Initializes a new instance.</summary>
     public ValidateStage(IPgExecutorFactory executorFactory, ILoggerFactory loggerFactory)
     {

@@ -181,7 +181,7 @@
                                     Margin="0,0,0,4"
                                     Content="Platform Schemas"
                                     IsChecked="{Binding Settings.CopyPlatformSchemas}"
-                                    ToolTip="Include platform-managed schemas (e.g. Supabase auth, storage, realtime) in copy and comparison. Uncheck to exclude schemas owned by non-login service roles. System schemas (pg_catalog, information_schema) are always excluded." />
+                                    ToolTip="Include schemas owned by platform service roles in copy and comparison. Uncheck to exclude every schema owned by a non-login service role. The server's own system schemas are always excluded." />
                                 <TextBlock
                                     Margin="0,12,0,8"
                                     FontWeight="SemiBold"
@@ -368,8 +368,8 @@
             <!--  ═══ Store/Restore controls (always visible, enabled when running) ═══  -->
             <ui:Button
                 AutomationProperties.Name="Pause Store/Restore"
-                Command="{Binding StoreRestore.PauseCommand}"
-                IsEnabled="{Binding StoreRestore.IsRunning}"
+                Command="{Binding DataContext.PauseActiveOperationCommand, RelativeSource={RelativeSource AncestorType=Window}}"
+                IsEnabled="{Binding DataContext.IsStoreRunning, RelativeSource={RelativeSource AncestorType=Window}}"
                 Style="{StaticResource CommandBarButtonStyle}"
                 ToolTip="Pause/Resume Store/Restore (Ctrl+P)">
                 <ui:Button.Icon>
@@ -378,8 +378,8 @@
             </ui:Button>
             <ui:Button
                 AutomationProperties.Name="Stop Store/Restore"
-                Command="{Binding StoreRestore.StopCommand}"
-                IsEnabled="{Binding StoreRestore.IsRunning}"
+                Command="{Binding DataContext.StopActiveOperationCommand, RelativeSource={RelativeSource AncestorType=Window}}"
+                IsEnabled="{Binding DataContext.IsStoreRunning, RelativeSource={RelativeSource AncestorType=Window}}"
                 Style="{StaticResource CommandBarButtonStyle}"
                 ToolTip="Stop Store/Restore (Escape)">
                 <ui:Button.Icon>
@@ -433,10 +433,22 @@
                                 Foreground="{ui:ThemeResource TextFillColorSecondaryBrush}"
                                 Text="Root folder for all catalogs. Subfolders are auto-created per operation."
                                 TextWrapping="Wrap" />
-                            <TextBox
-                                Margin="0,0,0,8"
-                                Text="{Binding Settings.StoreRestore.DefaultCatalogDirectory, UpdateSourceTrigger=PropertyChanged}"
-                                ToolTip="Root catalog directory" />
+                            <Grid Margin="0,0,0,8">
+                                <Grid.ColumnDefinitions>
+                                    <ColumnDefinition Width="*" />
+                                    <ColumnDefinition Width="Auto" />
+                                </Grid.ColumnDefinitions>
+                                <TextBox
+                                    Grid.Column="0"
+                                    Text="{Binding Settings.StoreRestore.DefaultCatalogDirectory, UpdateSourceTrigger=PropertyChanged}"
+                                    ToolTip="Root catalog directory" />
+                                <Button
+                                    Grid.Column="1"
+                                    Margin="4,0,0,0"
+                                    Command="{Binding BrowseCatalogDirectoryCommand}"
+                                    Content="Browse..."
+                                    ToolTip="Select catalog directory" />
+                            </Grid>
                             <TextBlock
                                 Margin="0,0,0,4"
                                 FontWeight="SemiBold"
@@ -445,7 +457,7 @@
                                 Margin="0,0,0,4"
                                 FontSize="11"
                                 Foreground="{ui:ThemeResource TextFillColorSecondaryBrush}"
-                                Text="Placeholders: {Database} = source database name, {timestamp} = YYYY-MM-DD_HH-mm"
+                                Text="Placeholders: {Connection} = saved connection name, {Database} = source database name, {timestamp} = YYYY-MM-DD_HH-mm"
                                 TextWrapping="Wrap" />
                             <TextBox
                                 Margin="0,0,0,12"
@@ -461,8 +473,34 @@
                                 IsChecked="{Binding Settings.StoreRestore.IncludeData}" />
                             <CheckBox
                                 Margin="0,0,0,4"
-                                Content="Pack catalog after store (.rdbx.zip)"
-                                IsChecked="{Binding Settings.StoreRestore.PackAfterStore}" />
+                                Content="Write summary.md (statistics and relations)"
+                                IsChecked="{Binding Settings.StoreRestore.WriteSummaryMarkdown}"
+                                ToolTip="Write the human-readable summary file into the catalog folder" />
+                            <CheckBox
+                                Margin="0,0,0,4"
+                                Content="Write SQL scripts (schema and data)"
+                                IsChecked="{Binding Settings.StoreRestore.SqlScripts}"
+                                ToolTip="Write the catalog's own SQL scripts beside it, ready to run in any client" />
+                            <Grid Margin="0,2,0,6">
+                                <Grid.ColumnDefinitions>
+                                    <ColumnDefinition Width="*" />
+                                    <ColumnDefinition Width="88" />
+                                </Grid.ColumnDefinitions>
+                                <TextBlock
+                                    Grid.Column="0"
+                                    VerticalAlignment="Center"
+                                    FontSize="11"
+                                    Foreground="{ui:ThemeResource TextFillColorSecondaryBrush}"
+                                    Text="Largest data script file (MB), 0 = one file"
+                                    TextWrapping="Wrap" />
+                                <ui:NumberBox
+                                    Grid.Column="1"
+                                    Margin="6,0,0,0"
+                                    Minimum="0"
+                                    SmallChange="1"
+                                    Value="{Binding Settings.StoreRestore.SqlScriptsMaxFileMb, UpdateSourceTrigger=PropertyChanged}"
+                                    ToolTip="The budget only sets how many files the rows are written into; 0 keeps one file." />
+                            </Grid>
                             <TextBlock
                                 Margin="0,8,0,4"
                                 FontSize="11"

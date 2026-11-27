@@ -1,11 +1,13 @@
 using System.IO;
 
 using DbAdapter.Definitions;
+using DbAdapter.PostgreSql.Capabilities;
 using DbAdapter.PostgreSql.Compare;
 using DbAdapter.PostgreSql.Ddl;
 using DbAdapter.PostgreSql.DependencyAnalysis;
 using DbAdapter.PostgreSql.Execution;
 using DbAdapter.PostgreSql.Formats;
+using DbAdapter.PostgreSql.Interchange;
 using DbAdapter.PostgreSql.Pipeline;
 using DbAdapter.PostgreSql.Platforms;
 using DbAdapter.PostgreSql.Providers;
@@ -23,7 +25,7 @@ namespace DbAdapter.PostgreSql.Adapters;
 /// factory and the folder it was loaded from, and it builds its own executor,
 /// stage repository, platform resolver and definition loader over that folder —
 /// no container, so a block installable into <c>plugins/&lt;dialect&gt;</c> needs
-/// nothing the host must know about (refactors/09 P3/P10).
+/// nothing the host must know about.
 /// </para>
 /// </summary>
 public sealed class PostgreSqlAdapter : IDatabaseAdapter
@@ -45,6 +47,9 @@ public sealed class PostgreSqlAdapter : IDatabaseAdapter
 
     /// <inheritdoc />
     public IPlatformResolver Platform { get; }
+
+    /// <inheritdoc />
+    public IDatabaseCapabilities Capabilities { get; }
 
     /// <summary>
     /// Composition entry point used by the plugin catalog. Builds the whole engine object
@@ -70,6 +75,7 @@ public sealed class PostgreSqlAdapter : IDatabaseAdapter
                             ?? "0.0.0");
         Syntax = new ConnectionStringSyntaxAdapter(graph.ConnectionStringService, graph.Formats);
         Platform = new PlatformResolverAdapter(graph.PlatformResolver);
+        Capabilities = new PostgreSqlCapabilities();
     }
 
     /// <inheritdoc />
@@ -99,6 +105,35 @@ public sealed class PostgreSqlAdapter : IDatabaseAdapter
     /// <inheritdoc />
     public ICopySession CreateCopySession() => new CopySessionAdapter(_copyEngine);
 
+    /// <inheritdoc />
+    public ISqlScriptRenderer CreateScriptRenderer() => new PostgreSqlScriptRenderer(Info.Dialect);
+
+    /// <inheritdoc />
+    public IDatabaseReader OpenReader(DatabaseTarget target, ExportOptions options)
+    {
+        var metadataSource = CreateMetadataSource(target);
+        return new PostgreSqlReader(
+            this,
+            target,
+            options,
+            _loggerFactory.CreateLogger<PostgreSqlReader>(),
+            metadataSource);
+    }
+
+    /// <inheritdoc />
+    public IDatabaseWriter OpenWriter(DatabaseTarget target, ImportOptions options)
+    {
+        // The writer answers its "is the target empty?" question from the same metadata role the
+        // reader uses, so the two halves of an import describe the database the same way.
+        var metadataSource = CreateMetadataSource(target);
+        return new PostgreSqlWriter(
+            this,
+            target,
+            options,
+            _loggerFactory.CreateLogger<PostgreSqlWriter>(),
+            metadataSource);
+    }
+
     /// <summary>The internal roles a composed adapter hands to its boundary.</summary>
     private sealed record EngineGraph(
         ICopyEngine CopyEngine,
@@ -110,7 +145,7 @@ public sealed class PostgreSqlAdapter : IDatabaseAdapter
     /// Builds the PostgreSQL object graph by hand — the equivalent of the retired
     /// <c>AddPostgreSqlProvider()</c> registrations, but container-free so a loaded plugin
     /// composes itself. The platform files are read from within <paramref name="pluginDirectory"/>
-    /// so the block resolves its own data, never the application's folder (refactors/09 P3/P5).
+    /// so the block resolves its own data, never the application's folder.
     /// </summary>
     private static EngineGraph ComposeGraph(ILoggerFactory loggerFactory, string pluginDirectory)
     {
@@ -135,22 +170,22 @@ public sealed class PostgreSqlAdapter : IDatabaseAdapter
         [
             new ConnectStage(loggerFactory.CreateLogger<ConnectStage>(), platformResolver),
             new DetectCapabilitiesStage(loggerFactory),
-            new ReadMetadataStage(loggerFactory),
+            new ReadMetadataStage(),
             new AnalyzeDependenciesStage(analyzer),
             new CreateSchemasStage(ddl, loggerFactory),
             new CreateExtensionsStage(loggerFactory),
             new CreateSequencesStage(ddl, loggerFactory),
             new CreateTypesStage(ddl, loggerFactory),
-            new CreateFunctionsStage(ddl, loggerFactory),
+            new CreateFunctionsStage(ddl, executorFactory, connectionProvider, loggerFactory),
             new CreateTablesStage(ddl, executorFactory, loggerFactory),
             new ReconcileColumnsStage(executorFactory, loggerFactory),
             new CopyDataStage(executorFactory, loggerFactory),
             new CreateIndexesStage(ddl, executorFactory, connectionProvider, loggerFactory),
-            new CreateConstraintsStage(ddl, loggerFactory),
+            new CreateConstraintsStage(ddl, executorFactory, connectionProvider, loggerFactory),
             new SyncSequencesStage(ddl, executorFactory, loggerFactory),
-            new RetryFunctionsStage(ddl, loggerFactory),
-            new CreateViewsStage(ddl, loggerFactory),
-            new CreateTriggersStage(ddl, loggerFactory),
+            new RetryFunctionsStage(ddl, executorFactory, connectionProvider, loggerFactory),
+            new CreateViewsStage(ddl, executorFactory, connectionProvider, loggerFactory),
+            new CreateTriggersStage(ddl, executorFactory, connectionProvider, loggerFactory),
             new ValidateStage(executorFactory, loggerFactory),
             new ReCopyMismatchedStage(loggerFactory),
         ];
@@ -158,16 +193,21 @@ public sealed class PostgreSqlAdapter : IDatabaseAdapter
         ICopyPipeline pipeline = new CopyPipeline(stages, loggerFactory.CreateLogger<CopyPipeline>());
         ICopyEngine copyEngine = new PgCopyEngine(pipeline, loggerFactory.CreateLogger<PgCopyEngine>());
 
-        var connectionStringService = new PgConnectionStringService();
+        // The port a connection text does not carry comes from the engine's own data, not
+        // from a literal: defaults.port of the base platform file answers every format that
+        // has to fill one in.
+        var defaultPort = platformResolver.GetConnectionDefaults(null).Port;
+
+        var connectionStringService = new PgConnectionStringService(defaultPort);
         IReadOnlyList<IConnectionTextFormat> formats =
         [
-            new PostgreSqlSupabaseEnvFormat(),
-            new PostgreSqlSupabaseFormat(),
-            new PostgreSqlUriFormat(),
-            new PostgreSqlJdbcFormat(),
-            new PostgreSqlNpgsqlFormat(),
-            new PostgreSqlLibpqFormat(),
-            new PostgreSqlEnvVarFormat(),
+            new PostgreSqlSupabaseEnvFormat(defaultPort),
+            new PostgreSqlSupabaseFormat(defaultPort),
+            new PostgreSqlUriFormat(defaultPort),
+            new PostgreSqlJdbcFormat(defaultPort),
+            new PostgreSqlNpgsqlFormat(defaultPort),
+            new PostgreSqlLibpqFormat(defaultPort),
+            new PostgreSqlEnvVarFormat(defaultPort),
             new PostgreSqlSqlAlchemyFormat(),
             new PostgreSqlPrismaFormat(),
             new PostgreSqlNodeFormat(),

@@ -96,6 +96,51 @@ GRANT CREATE ON SCHEMA my_schema TO my_user;
 
 ---
 
+### Copy complete, but some objects were not created
+
+**Symptoms:** the run ends with a line like
+
+```
+Copy complete in 241.1s — 1 object not created (see the log)
+```
+
+and the log names the object at warning severity.
+
+**Meaning:** the copy finished and its data is in place, but the server refused an object while it was
+being recreated. The number counts **functions, views, materialized views and triggers only** — the objects
+whose refusal costs one object and never fails the run. A table that could not be created, rows that failed
+to copy or validate, and a refused index, sequence or composite type still end the run as failed.
+
+**Where to find the object names:** in the run's warnings. Each refused object is named once, with the
+server's message, right after the stage that tried to create it:
+
+```
+[OK] RetryFunctions: 1 objects in 0.1s
+FAIL: realtime.list_changes: permission denied for function list_changes
+```
+
+The statement the stage ran is in the log file at `Debug` level.
+
+**Solutions:**
+
+1. Fix the cause the server named and re-run the copy in **Full** mode — a re-run creates the object.
+2. `permission denied` for a function that carries a `SET` clause (Supabase's `realtime` and `auth` helpers
+do): the destination user may not set that parameter. The copy already asks for that privilege itself —
+once, before it creates functions — for the five logging parameters a function may declare
+(`log_min_messages`, `log_min_error_statement`, `log_min_duration_statement`, `log_duration`,
+`log_statement`), and logs each grant. A warning that still names a statement means the copy's own role may
+not confer the privilege, so run it on the destination as a superuser:
+   ```sql
+   GRANT SET ON PARAMETER log_min_messages TO your_copy_user;
+   ```
+   The copy never revokes the grant, because the function re-applies its setting every time it runs.
+`GRANT … ON PARAMETER` needs PostgreSQL 15 or later: on an older destination there is no grant to give, so
+either copy without the platform schemas (**Platform Schemas** unchecked) or run the copy as a superuser.
+3. A view refused because it depends on an object that is missing on the destination: create the missing
+object and re-run, or accept the loss — the rest of the copy is complete.
+
+---
+
 ### DDL differences on `realtime.*` or `auth.*` tables after a fresh copy
 
 **Symptoms:** External comparison tools (or an older DbClone version) report differences like:
@@ -187,17 +232,17 @@ If `false`, apply Solution B to `template1` as well.
 
 ## Log Files
 
-DbClone writes detailed logs to a `logs` folder in your roaming profile:
+DbClone writes detailed logs to a `logs` folder in your local profile:
 
 ```
-%APPDATA%\DbClone\logs\
+%LOCALAPPDATA%\DbClone\logs\
 ```
 
-Typical path: `C:\Users\{you}\AppData\Roaming\DbClone\logs\`
+Typical path: `C:\Users\{you}\AppData\Local\DbClone\logs\`
 
 (When running a Debug build from the source tree, logs are written next to the executable instead.)
 
-Log files are rotated daily. Each contains:
+Log files are rotated daily and capped in size: at most ten files of 10 MB each — about 100 MB in total — so a long copy cannot fill the disk. When the cap is reached the oldest file is removed first, and a run that outgrows one file continues in a numbered one. Each file contains:
 
 - Full pipeline execution trace
 - SQL statements executed (in Debug mode)

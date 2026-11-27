@@ -18,9 +18,17 @@ namespace DbAdapter.PostgreSql.Copy;
 /// Uses binary COPY for maximum throughput with INSERT fallback.
 /// Automatically reopens dropped connections and retries failed tables.
 /// </summary>
-public sealed class PgDataCopier : IDataCopier
+public sealed class PgDataCopier : IDataCopier, IAsyncDisposable
 {
     private const int MaxRetriesPerTable = 2;
+
+    /// <summary>
+    /// Minimum time between two row-progress reports. Reporting on every row would flood the
+    /// UI dispatcher; reporting once per COPY batch left every table smaller than one batch
+    /// (5000 rows) with a single report, so the progress panel's row count stood still for
+    /// the whole table. A time interval follows the copy whatever its speed.
+    /// </summary>
+    private const int ProgressIntervalMs = 100;
 
     private readonly string? _destinationConnectionString;
 
@@ -29,6 +37,12 @@ public sealed class PgDataCopier : IDataCopier
     private readonly ILogger<PgDataCopier> _logger;
 
     private readonly string? _sourceConnectionString;
+
+    /// <summary>The connection the engine handed over; the engine disposes it, the copier never does.</summary>
+    private readonly NpgsqlConnection _initialSourceConnection;
+
+    /// <summary>The connection the engine handed over; the engine disposes it, the copier never does.</summary>
+    private readonly NpgsqlConnection _initialDestinationConnection;
 
     private NpgsqlConnection _destinationConnection;
 
@@ -63,6 +77,8 @@ public sealed class PgDataCopier : IDataCopier
             sourceConnection ?? throw new ArgumentNullException(nameof(sourceConnection));
         _destinationConnection = destinationConnection
                                  ?? throw new ArgumentNullException(nameof(destinationConnection));
+        _initialSourceConnection = _sourceConnection;
+        _initialDestinationConnection = _destinationConnection;
         _logger = logger ?? throw new ArgumentNullException(nameof(logger));
         _sourceConnectionString = sourceConnectionString;
         _destinationConnectionString = destinationConnectionString;
@@ -96,6 +112,12 @@ public sealed class PgDataCopier : IDataCopier
                 {
                     // Ensure both connections are alive before each table
                     await EnsureConnectionsOpenAsync(cancellationToken);
+
+                    // A retry follows an attempt that may have committed part of the table before
+                    // the connection died. Copying appends, so the destination is emptied first —
+                    // otherwise the rows the first attempt already wrote would land twice.
+                    if (attempt > 0)
+                        await ClearDestinationTableAsync(table, cancellationToken);
 
                     var (rowsCopied, bytesTransferred) =
                         await CopyTableAsync(table, options, progress, cancellationToken);
@@ -172,6 +194,30 @@ public sealed class PgDataCopier : IDataCopier
             ConstraintsCreated: 0,
             SequencesSynced: 0,
             TablesFailed: _failedTables.Count);
+    }
+
+    /// <summary>
+    /// Empties one table before a retry. <c>DELETE</c> rather than <c>TRUNCATE</c>: in a resume or
+    /// update run the destination already holds the foreign keys that name this table, and
+    /// <c>TRUNCATE</c> would refuse to touch it unless those tables were truncated too.
+    /// </summary>
+    internal static string BuildClearTableSql(string qualifiedName) =>
+        $"DELETE FROM ONLY {qualifiedName}";
+
+    private async Task ClearDestinationTableAsync(
+        TableDefinition table,
+        CancellationToken cancellationToken)
+    {
+        var qualifiedName = PgIdentifierQuoter.QuoteSchemaQualified(table.SchemaName, table.Name);
+        _logger.LogInformation(
+            "Table {Table}: emptying the destination before retrying",
+            qualifiedName);
+
+        await using var command = new NpgsqlCommand(
+            BuildClearTableSql(qualifiedName),
+            _destinationConnection);
+        command.CommandTimeout = 300;
+        await command.ExecuteNonQueryAsync(cancellationToken);
     }
 
     /// <summary>
@@ -252,7 +298,6 @@ public sealed class PgDataCopier : IDataCopier
                        qualifiedName,
                        columnList,
                        copyCommand,
-                       options,
                        totalRows,
                        progress,
                        cancellationToken);
@@ -308,7 +353,6 @@ public sealed class PgDataCopier : IDataCopier
         string qualifiedName,
         string columnList,
         string copyCommand,
-        CopyOptions options,
         long totalRows,
         IProgress<TableCopyProgress>? progress,
         CancellationToken cancellationToken)
@@ -317,6 +361,7 @@ public sealed class PgDataCopier : IDataCopier
         long rowsCopied = 0;
         long bytesTransferred = 0;
         var sw = Stopwatch.StartNew();
+        var lastReport = Stopwatch.GetTimestamp();
 
         await using var sourceCmd = new NpgsqlCommand(selectSql, _sourceConnection);
         sourceCmd.CommandTimeout = 300;
@@ -346,17 +391,7 @@ public sealed class PgDataCopier : IDataCopier
             rowsCopied++;
             bytesTransferred += 100; // Rough estimate since binary size isn't directly available
 
-            // Report progress periodically
-            if (rowsCopied % options.BatchSize == 0)
-            {
-                progress?.Report(
-                    new TableCopyProgress(
-                        table.SchemaName,
-                        table.Name,
-                        rowsCopied,
-                        totalRows,
-                        sw.Elapsed));
-            }
+            ReportProgress(progress, ref lastReport, table, rowsCopied, totalRows, sw.Elapsed);
         }
 
         await writer.CompleteAsync(cancellationToken);
@@ -397,6 +432,7 @@ public sealed class PgDataCopier : IDataCopier
         long rowsCopied = 0;
         long bytesTransferred = 0;
         var sw = Stopwatch.StartNew();
+        var lastReport = Stopwatch.GetTimestamp();
 
         await using var sourceCmd = new NpgsqlCommand(selectSql, _sourceConnection);
         sourceCmd.CommandTimeout = 300;
@@ -420,6 +456,10 @@ public sealed class PgDataCopier : IDataCopier
             rowsCopied++;
             bytesTransferred += 100;
 
+            // Rows are reported as they are read: a table smaller than one batch is still
+            // written at the end, and waiting for the flush kept its panel figure at zero.
+            ReportProgress(progress, ref lastReport, table, rowsCopied, totalRows, sw.Elapsed);
+
             if (batch.Count >= options.BatchSize)
             {
                 await InsertBatchAsync(
@@ -429,14 +469,6 @@ public sealed class PgDataCopier : IDataCopier
                     batch,
                     cancellationToken);
                 batch.Clear();
-
-                progress?.Report(
-                    new TableCopyProgress(
-                        table.SchemaName,
-                        table.Name,
-                        rowsCopied,
-                        totalRows,
-                        sw.Elapsed));
             }
         }
 
@@ -461,6 +493,29 @@ public sealed class PgDataCopier : IDataCopier
                 sw.Elapsed));
 
         return (rowsCopied, bytesTransferred);
+    }
+
+    /// <summary>
+    /// Reports the rows copied so far, at most once per <see cref="ProgressIntervalMs"/>.
+    /// </summary>
+    private static void ReportProgress(
+        IProgress<TableCopyProgress>? progress,
+        ref long lastReportTimestamp,
+        TableDefinition table,
+        long rowsCopied,
+        long totalRows,
+        TimeSpan elapsed)
+    {
+        if (progress is null)
+            return;
+
+        var now = Stopwatch.GetTimestamp();
+        if (now - lastReportTimestamp < ProgressIntervalMs * Stopwatch.Frequency / 1000)
+            return;
+
+        lastReportTimestamp = now;
+        progress.Report(
+            new TableCopyProgress(table.SchemaName, table.Name, rowsCopied, totalRows, elapsed));
     }
 
     private async Task<NpgsqlConnection> EnsureConnectionOpenAsync(
@@ -621,6 +676,35 @@ public sealed class PgDataCopier : IDataCopier
         await using var insertCmd = new NpgsqlCommand(sb.ToString(), _destinationConnection);
         insertCmd.CommandTimeout = 300;
         await insertCmd.ExecuteNonQueryAsync(cancellationToken);
+    }
+
+    /// <summary>
+    /// Disposes only the connections this copier opened itself. The two it was constructed with
+    /// belong to the copy engine, which disposes them when the session ends; a connection opened to
+    /// replace a dropped one belongs to nobody else and would otherwise stay open for the life of
+    /// the process.
+    /// </summary>
+    public async ValueTask DisposeAsync()
+    {
+        await DisposeIfReplacedAsync(_sourceConnection, _initialSourceConnection);
+        await DisposeIfReplacedAsync(_destinationConnection, _initialDestinationConnection);
+    }
+
+    private static async ValueTask DisposeIfReplacedAsync(
+        NpgsqlConnection current,
+        NpgsqlConnection initial)
+    {
+        if (ReferenceEquals(current, initial))
+            return;
+
+        try
+        {
+            await current.DisposeAsync();
+        }
+        catch
+        {
+            /* best effort */
+        }
     }
 
     /// <summary>

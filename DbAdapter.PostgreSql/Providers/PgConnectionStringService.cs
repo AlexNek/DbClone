@@ -7,6 +7,15 @@ namespace DbAdapter.PostgreSql.Providers;
 
 public sealed class PgConnectionStringService
 {
+    private readonly int _defaultPort;
+
+    /// <summary>
+    /// Initializes a new instance. <paramref name="defaultPort"/> is the engine default as
+    /// the platform data defines it (defaults.port of the base engine file), used for the
+    /// port a URI does not carry.
+    /// </summary>
+    public PgConnectionStringService(int defaultPort) => _defaultPort = defaultPort;
+
     public string BuildKeyValue(ConnectionStringFields fields)
     {
         var builder = new NpgsqlConnectionStringBuilder
@@ -53,7 +62,7 @@ public sealed class PgConnectionStringService
         }
     }
 
-    private static bool TryParseUri(string value, out ConnectionStringFields fields)
+    private bool TryParseUri(string value, out ConnectionStringFields fields)
     {
         fields = default!;
 
@@ -69,7 +78,7 @@ public sealed class PgConnectionStringService
 
         fields = new ConnectionStringFields(
             parsed.Host,
-            parsed.Port,
+            parsed.Port ?? _defaultPort,
             parsed.Database,
             parsed.Username ?? "postgres",
             parsed.Password ?? string.Empty,

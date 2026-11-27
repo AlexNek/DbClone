@@ -4,6 +4,7 @@ using Microsoft.Extensions.Logging;
 
 using Npgsql;
 using NpgsqlTypes;
+using DbAdapter.PostgreSql.Execution;
 using CanonicalModel.Enums;
 using CanonicalModel.Models;
 
@@ -173,6 +174,18 @@ public sealed class PgDatabaseCleaner : IDatabaseCleaner
             }
         }
 
+        // ── Database-level content ──────────────────────────────────────────
+        // Extensions and publications belong to the database rather than to a schema, so none of the
+        // drops below reach them, while the emptiness check a restore runs counts both. An extension is
+        // what a database restored from a catalog still carries, because the restore installs every one
+        // the catalog records — so leaving them here made the clean report success and the restore that
+        // followed refuse the very database the user had asked to overwrite.
+        if (!await DropInstalledExtensionsAsync(conn, dbName, logMessage, ct))
+            return false;
+
+        if (!await DropPublicationsAsync(conn, dbName, logMessage, ct))
+            return false;
+
         await using var listCmd = new NpgsqlCommand(
             $"SELECT nspname FROM pg_namespace WHERE nspname NOT IN ({PgSystemSchemas.SqlList}) AND nspname NOT LIKE 'pg_temp_%' AND nspname NOT LIKE 'pg_toast_temp_%'",
             conn);
@@ -186,16 +199,20 @@ public sealed class PgDatabaseCleaner : IDatabaseCleaner
 
         foreach (var schema in schemas.Where(s => s != "public"))
         {
+            // Quoted through the shared quoter: a schema name the server accepted may hold a
+            // double quote, and interpolating it raw would produce a statement naming another
+            // schema — in the one loop that destroys data.
+            var quotedSchema = PgIdentifierQuoter.QuoteIdentifier(schema);
             try
             {
                 await using var dropCmd = new NpgsqlCommand(
-                    $"DROP SCHEMA IF EXISTS \"{schema}\" CASCADE",
+                    $"DROP SCHEMA IF EXISTS {quotedSchema} CASCADE",
                     conn);
                 await dropCmd.ExecuteNonQueryAsync(ct);
             }
             catch (PostgresException ex) when (IsLockOrStatementTimeout(ex))
             {
-                LogLockTimeoutError(logMessage, dbName, $"DROP SCHEMA \"{schema}\"", ex);
+                LogLockTimeoutError(logMessage, dbName, $"DROP SCHEMA {quotedSchema}", ex);
                 return false;
             }
             catch (Exception ex)
@@ -287,27 +304,8 @@ public sealed class PgDatabaseCleaner : IDatabaseCleaner
                 $"Warning: could not drop sequences: {PgExceptionHelper.GetUserMessage(ex)}");
         }
 
-        try
-        {
-            await using var dropFuncs = new NpgsqlCommand(
-                @"DO $$ DECLARE r RECORD; BEGIN
-                    FOR r IN SELECT p.oid::regprocedure AS name FROM pg_proc p JOIN pg_namespace n ON n.oid = p.pronamespace
-                             WHERE n.nspname = 'public' AND p.prokind IN ('f','p')
-                    LOOP EXECUTE 'DROP FUNCTION IF EXISTS ' || r.name || ' CASCADE'; END LOOP;
-                END $$;",
-                conn);
-            await dropFuncs.ExecuteNonQueryAsync(ct);
-        }
-        catch (PostgresException ex) when (IsLockOrStatementTimeout(ex))
-        {
-            LogLockTimeoutError(logMessage, dbName, "DROP FUNCTIONS", ex);
+        if (!await DropRoutinesAsync(conn, dbName, logMessage, ct))
             return false;
-        }
-        catch (Exception ex)
-        {
-            logMessage(
-                $"Warning: could not drop functions: {PgExceptionHelper.GetUserMessage(ex)}");
-        }
 
         try
         {
@@ -755,6 +753,200 @@ public sealed class PgDatabaseCleaner : IDatabaseCleaner
             }
         }
     }
+
+    /// <summary>
+    /// Drops every extension beyond the ones PostgreSQL installs itself, together with what they
+    /// installed.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// An extension is user content of the target: a restore creates one for every extension its
+    /// catalog holds, so a database this role restored still carries them, and the emptiness check a
+    /// restore runs counts them.
+    /// </para>
+    /// <para>
+    /// The drop runs before the schema loop because an extension owns its schema — <c>CASCADE</c>
+    /// takes it, and the loop below then has one fewer schema it could not drop. Subscriptions are
+    /// deliberately not dropped: each names a publisher outside this database, so removing one is the
+    /// user's decision rather than a preparation step, and the restore names it in its refusal
+    /// instead.
+    /// </para>
+    /// </remarks>
+    /// <returns>
+    /// <see langword="false"/> when a drop timed out on a lock; any other failure is logged and the
+    /// clean continues, because what it left behind is reported when the target is checked again.
+    /// </returns>
+    private async Task<bool> DropInstalledExtensionsAsync(
+        NpgsqlConnection conn,
+        string dbName,
+        Action<string> logMessage,
+        CancellationToken ct)
+    {
+        var extensions = new List<string>();
+        await using (var listCmd = new NpgsqlCommand(
+                         $@"SELECT extname FROM pg_extension
+                            WHERE extname NOT IN ({PgBuiltInExtensions.SqlList})
+                            ORDER BY extname",
+                         conn))
+        {
+            await using var reader = await listCmd.ExecuteReaderAsync(ct);
+            while (await reader.ReadAsync(ct))
+                extensions.Add(reader.GetString(0));
+        }
+
+        foreach (var extension in extensions)
+        {
+            try
+            {
+                await using var dropCmd = new NpgsqlCommand(
+                    $"DROP EXTENSION IF EXISTS {QuoteIdent(extension)} CASCADE",
+                    conn);
+                await dropCmd.ExecuteNonQueryAsync(ct);
+            }
+            catch (PostgresException ex) when (IsLockOrStatementTimeout(ex))
+            {
+                LogLockTimeoutError(logMessage, dbName, $"DROP EXTENSION \"{extension}\"", ex);
+                return false;
+            }
+            catch (Exception ex)
+            {
+                logMessage(
+                    $"Warning: could not drop extension {extension}: {PgExceptionHelper.GetUserMessage(ex)}");
+            }
+        }
+
+        return true;
+    }
+
+    /// <summary>
+    /// Drops the target's publications. A publication sits beside the schemas rather than in one, so the
+    /// loops over <c>public</c> never reach it, while the emptiness check a restore runs counts it.
+    /// </summary>
+    /// <returns>
+    /// <see langword="false"/> when a drop timed out on a lock; any other failure is logged and the
+    /// clean continues.
+    /// </returns>
+    private async Task<bool> DropPublicationsAsync(
+        NpgsqlConnection conn,
+        string dbName,
+        Action<string> logMessage,
+        CancellationToken ct)
+    {
+        var publications = new List<string>();
+        await using (var listCmd = new NpgsqlCommand(
+                         "SELECT pubname FROM pg_publication ORDER BY pubname",
+                         conn))
+        {
+            await using var reader = await listCmd.ExecuteReaderAsync(ct);
+            while (await reader.ReadAsync(ct))
+                publications.Add(reader.GetString(0));
+        }
+
+        foreach (var publication in publications)
+        {
+            try
+            {
+                await using var dropCmd = new NpgsqlCommand(
+                    $"DROP PUBLICATION IF EXISTS {QuoteIdent(publication)}",
+                    conn);
+                await dropCmd.ExecuteNonQueryAsync(ct);
+            }
+            catch (PostgresException ex) when (IsLockOrStatementTimeout(ex))
+            {
+                LogLockTimeoutError(logMessage, dbName, $"DROP PUBLICATION \"{publication}\"", ex);
+                return false;
+            }
+            catch (Exception ex)
+            {
+                logMessage(
+                    $"Warning: could not drop publication {publication}: {PgExceptionHelper.GetUserMessage(ex)}");
+            }
+        }
+
+        return true;
+    }
+
+    /// <summary>
+    /// Drops the routines <c>public</c> holds, each with the statement its kind needs.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// The rule that decides a target is empty counts every routine, so this covers every kind that
+    /// count sees — functions, procedures, aggregates and window functions — and leaves extension
+    /// members out for the same reason the count does.
+    /// </para>
+    /// <para>
+    /// The kind is not cosmetic: a procedure answers <c>DROP FUNCTION</c> with an error, and one
+    /// statement used to carry the whole pass, so a single procedure ended the drop and left every
+    /// routine behind it in a database the user had just asked to overwrite — which the restore then
+    /// refused, naming routines the clean had reported as gone.
+    /// </para>
+    /// </remarks>
+    /// <returns>
+    /// <see langword="false"/> when a drop timed out on a lock; any other failure is logged and the
+    /// remaining routines are still dropped.
+    /// </returns>
+    private async Task<bool> DropRoutinesAsync(
+        NpgsqlConnection conn,
+        string dbName,
+        Action<string> logMessage,
+        CancellationToken ct)
+    {
+        var routines = new List<(string Name, string Kind)>();
+        await using (var listCmd = new NpgsqlCommand(
+                         @"SELECT p.oid::regprocedure::text, p.prokind::text
+                           FROM pg_proc p
+                           JOIN pg_namespace n ON n.oid = p.pronamespace
+                           WHERE n.nspname = 'public'
+                             AND p.prokind IN ('f','p','a','w')
+                             AND NOT EXISTS (SELECT 1 FROM pg_depend d
+                                             WHERE d.objid = p.oid AND d.deptype = 'e')
+                           ORDER BY 1",
+                         conn))
+        {
+            await using var reader = await listCmd.ExecuteReaderAsync(ct);
+            while (await reader.ReadAsync(ct))
+                routines.Add((reader.GetString(0), reader.GetString(1)));
+        }
+
+        foreach (var (name, kind) in routines)
+        {
+            try
+            {
+                await using var dropCmd = new NpgsqlCommand(
+                    RoutineDropStatement(name, kind),
+                    conn);
+                await dropCmd.ExecuteNonQueryAsync(ct);
+            }
+            catch (PostgresException ex) when (IsLockOrStatementTimeout(ex))
+            {
+                LogLockTimeoutError(logMessage, dbName, "DROP ROUTINES", ex);
+                return false;
+            }
+            catch (Exception ex)
+            {
+                logMessage(
+                    $"Warning: could not drop routine {name}: {PgExceptionHelper.GetUserMessage(ex)}");
+            }
+        }
+
+        return true;
+    }
+
+    /// <summary>
+    /// Builds the statement that removes one routine, with the verb its kind requires.
+    /// </summary>
+    /// <param name="qualifiedName">
+    /// The routine's identity as PostgreSQL renders it, argument types included.
+    /// </param>
+    /// <param name="prokind">The <c>pg_proc.prokind</c> value: <c>f</c>, <c>p</c>, <c>a</c> or <c>w</c>.</param>
+    internal static string RoutineDropStatement(string qualifiedName, string prokind) =>
+        prokind switch
+        {
+            "p" => $"DROP PROCEDURE IF EXISTS {qualifiedName} CASCADE",
+            "a" => $"DROP AGGREGATE IF EXISTS {qualifiedName} CASCADE",
+            _ => $"DROP FUNCTION IF EXISTS {qualifiedName} CASCADE",
+        };
 
     /// <summary>
     /// Detects PostgreSQL lock_timeout (55P03) and statement_timeout (57014) errors.

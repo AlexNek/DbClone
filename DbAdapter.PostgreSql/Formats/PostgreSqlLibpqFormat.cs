@@ -9,6 +9,16 @@ namespace DbAdapter.PostgreSql.Formats;
 /// </summary>
 public sealed class PostgreSqlLibpqFormat : IConnectionTextFormat
 {
+    private const string DefaultHost = "localhost";
+
+    private readonly int _defaultPort;
+
+    /// <summary>
+    /// Initializes a new instance. <paramref name="defaultPort"/> is the engine default as
+    /// the platform data defines it (defaults.port of the base engine file).
+    /// </summary>
+    public PostgreSqlLibpqFormat(int defaultPort) => _defaultPort = defaultPort;
+
     public int DetectionPriority => 40;
 
     public string DisplayName => "libpq / psql";
@@ -63,8 +73,11 @@ public sealed class PostgreSqlLibpqFormat : IConnectionTextFormat
     {
         var pairs = ParseKeyValuePairs(text);
 
-        var host = GetValue(pairs, "host") ?? "localhost";
-        var port = int.TryParse(GetValue(pairs, "port"), out var p) ? p : 5432;
+        var hostRaw = GetValue(pairs, "host");
+        var hasHost = !string.IsNullOrEmpty(hostRaw);
+        var host = hasHost ? hostRaw! : DefaultHost;
+        var hasPort = int.TryParse(GetValue(pairs, "port"), out var parsedPort);
+        var port = hasPort ? parsedPort : _defaultPort;
         var database = GetValue(pairs, "dbname") ?? string.Empty;
         var username = GetValue(pairs, "user") ?? "postgres";
         var password = GetValue(pairs, "password");
@@ -91,6 +104,15 @@ public sealed class PostgreSqlLibpqFormat : IConnectionTextFormat
             if (!knownKeys.Contains(pair.Key))
                 options[pair.Key] = pair.Value;
         }
+
+        // A libpq string whose port keyword is absent or unusable took the engine default;
+        // record it so the import service can say so.
+        if (!hasPort)
+            options["_defaulted:Port"] = _defaultPort.ToString();
+
+        // Same for the host: no usable host keyword means the local server.
+        if (!hasHost)
+            options["_defaulted:Host"] = DefaultHost;
 
         return new ConnectionStringFields(
             Host: host,

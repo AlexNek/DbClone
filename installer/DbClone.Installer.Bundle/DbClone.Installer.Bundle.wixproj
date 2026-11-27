@@ -22,4 +22,11 @@
     <ProjectReference Include="..\DbClone.Installer.Msi\DbClone.Installer.Msi.wixproj" />
   </ItemGroup>
 
+  <!-- Vendored prerequisites, downloaded once by build-installer-wix.ps1. The bundle
+       build never reaches the network; a missing file is a build error that names
+       the path rather than an installer that silently ships without the runtime. -->
+  <ItemGroup>
+    <BindPath Include="..\..\artifacts\prerequisites" BindName="Prerequisites" />
+  </ItemGroup>
+
 </Project>

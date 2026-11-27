@@ -69,4 +69,18 @@ public sealed record DatabaseModel(
                        Policies = [.. Policies.Where(p => schemas.Contains(p.SchemaName))]
                    };
     }
+
+    /// <summary>
+    /// Returns true when this model holds the table with the given schema and name.
+    /// The single scope test for a reference that can only exist while the table it
+    /// points at does — a foreign key is created with its child and refused without its
+    /// parent. Identity goes through <see cref="TableId"/>, so the lookup is
+    /// case-insensitive the way PostgreSQL folds unquoted identifiers.
+    /// </summary>
+    public bool ContainsTable(string schema, string name)
+    {
+        var id = new TableId(schema, name);
+
+        return Tables.Any(t => new TableId(t.SchemaName, t.Name) == id);
+    }
 }

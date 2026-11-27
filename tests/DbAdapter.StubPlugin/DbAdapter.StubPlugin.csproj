@@ -1,7 +1,7 @@
 <Project Sdk="Microsoft.NET.Sdk">
 
   <!--
-    The P9 proof plugin (refactors/09). A self-contained, driver-free engine adapter compiled as
+    The stub-plugin proof. A self-contained, driver-free engine adapter compiled as
     its own assembly so the plugin catalog can discover it from a folder exactly the way it
     discovers DbAdapter.PostgreSql — in-memory metadata, two pipeline stages, no SQL, no driver.
     It references ONLY the shared contract projects (Definitions + CanonicalModel) plus the logging

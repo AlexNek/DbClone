@@ -242,6 +242,67 @@ public class LogPaneViewModelTests
         vm.LogMessages.Should().HaveCount(2);
     }
 
+    [Fact]
+    public void A_store_restore_that_owns_the_display_takes_the_pane_and_gives_it_back()
+    {
+        // Arrange — the pane knows the two modes and the store/restore state beside them.
+        var copyState = new WorkflowState();
+        var compareState = new WorkflowState();
+        var storeRestoreState = new WorkflowState();
+        copyState.Log("Copy 1");
+        storeRestoreState.Log("Restore failed: 42939");
+
+        var vm = new LogPaneViewModel(
+            new Dictionary<EWorkspaceMode, WorkflowState>
+            {
+                [EWorkspaceMode.Copy] = copyState,
+                [EWorkspaceMode.Compare] = compareState
+            },
+            storeRestoreState);
+
+        // Act — the run takes the pane, then lets go of it.
+        vm.SetActiveStoreRestore(true);
+        var stateWhileRunning = vm.ActiveState;
+        var whileRunning = vm.LogMessages.ToList();
+        vm.SetActiveStoreRestore(false);
+
+        // Assert — the run's own log is readable while it owns the display, and the mode's log
+        // is what the pane shows once it does not.
+        stateWhileRunning.Should().BeSameAs(storeRestoreState, "a run that owns the pane states its own log");
+        whileRunning.Should().ContainSingle().Which.Message.Should().Be("Restore failed: 42939");
+        vm.ActiveState.Should().BeSameAs(copyState);
+        vm.LogMessages.Should().ContainSingle().Which.Message.Should().Be("Copy 1");
+    }
+
+    [Fact]
+    public void Switching_mode_while_a_store_restore_owns_the_pane_keeps_its_log()
+    {
+        // Arrange — a store is running and the user changes the workspace mode under it.
+        var copyState = new WorkflowState();
+        var compareState = new WorkflowState();
+        var storeRestoreState = new WorkflowState();
+        storeRestoreState.Log("Store started");
+
+        var vm = new LogPaneViewModel(
+            new Dictionary<EWorkspaceMode, WorkflowState>
+            {
+                [EWorkspaceMode.Copy] = copyState,
+                [EWorkspaceMode.Compare] = compareState
+            },
+            storeRestoreState);
+        vm.SetActiveStoreRestore(true);
+
+        // Act
+        vm.SetActiveMode(EWorkspaceMode.Compare);
+
+        // Assert — the running operation keeps the pane, and releasing it afterwards returns to
+        // the mode the user last selected rather than to the one the run started in.
+        vm.ActiveState.Should().BeSameAs(storeRestoreState);
+
+        vm.SetActiveStoreRestore(false);
+        vm.ActiveState.Should().BeSameAs(compareState);
+    }
+
     private static (LogPaneViewModel vm, WorkflowState copyState, WorkflowState compareState)
         CreateViewModel()
     {

@@ -3,7 +3,7 @@ namespace DbClone.Application.Exceptions;
 /// <summary>
 /// Thrown when a connection's engine value cannot be matched to exactly one installed adapter:
 /// none is installed, the named engine is unknown, or more than one is installed and the
-/// connection names none. Reported, never guessed (refactors/09 P4/P8).
+/// connection names none. Reported, never guessed.
 /// </summary>
 public sealed class EngineSelectionException : Exception
 {

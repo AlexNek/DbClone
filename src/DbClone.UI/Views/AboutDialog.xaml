@@ -46,7 +46,7 @@
             HorizontalAlignment="Center"
             FontSize="12"
             Foreground="{ui:ThemeResource TextFillColorSecondaryBrush}"
-            Text="Copy PostgreSQL database schemas and data between servers&#x0a;with dependency-aware ordering, verification, and reporting."
+            Text="Copy database schemas and data between servers&#x0a;with dependency-aware ordering, verification, and reporting."
             TextAlignment="Center"
             TextWrapping="Wrap" />
 

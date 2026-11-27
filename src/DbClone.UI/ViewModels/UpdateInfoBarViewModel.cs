@@ -4,6 +4,7 @@ using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
 
 using DbClone.UI.Services;
+using DbClone.UI.Threading;
 
 namespace DbClone.UI.ViewModels;
 
@@ -104,7 +105,7 @@ public sealed partial class UpdateInfoBarViewModel : ObservableObject
 
     private void OnInstallProgressChanged(object? sender, InstallProgressEventArgs e)
     {
-        System.Windows.Application.Current.Dispatcher.InvokeAsync(() =>
+        _ = UiDispatcher.InvokeAsync(() =>
         {
             switch (e.State)
             {

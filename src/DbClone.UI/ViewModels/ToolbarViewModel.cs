@@ -8,7 +8,6 @@ using DbClone.Application.Interfaces;
 using DbClone.UI.Models;
 using DbClone.UI.Services;
 using DbClone.UI.Settings;
-using DbClone.UI.ViewModels.Workspaces.StoreRestore;
 
 using Microsoft.Extensions.Logging;
 
@@ -49,6 +48,8 @@ public sealed partial class ToolbarViewModel : ObservableObject
 
     private readonly IUpdateService _updateService;
 
+    private readonly IDialogService _dialogService;
+
     /// <summary>Compare VM reference for XAML command bindings.</summary>
     public CompareViewModel Compare { get; }
 
@@ -57,9 +58,6 @@ public sealed partial class ToolbarViewModel : ObservableObject
 
     /// <summary>Copy VM reference for XAML command bindings.</summary>
     public CopyOperationViewModel Copy { get; }
-
-    /// <summary>Store/Restore VM reference for XAML command bindings.</summary>
-    public StoreRestoreViewModel StoreRestore { get; }
 
     /// <summary>Log VM reference for XAML command bindings.</summary>
     public LogPaneViewModel Log { get; }
@@ -77,7 +75,6 @@ public sealed partial class ToolbarViewModel : ObservableObject
     public ToolbarViewModel(
         CopyOperationViewModel copy,
         CompareViewModel compare,
-        StoreRestoreViewModel storeRestore,
         LogPaneViewModel log,
         UserSettings settings,
         IConnectionStore connectionStore,
@@ -91,12 +88,12 @@ public sealed partial class ToolbarViewModel : ObservableObject
         ITableCatalogService catalogService,
         IUpdateService updateService,
         IPlatformService platformService,
+        IDialogService dialogService,
         ILogger<ToolbarViewModel> logger,
         OperationContext ctx)
     {
         Copy = copy;
         Compare = compare;
-        StoreRestore = storeRestore;
         Log = log;
         Settings = settings;
         _connectionStore = connectionStore;
@@ -110,6 +107,7 @@ public sealed partial class ToolbarViewModel : ObservableObject
         _catalogService = catalogService;
         _updateService = updateService;
         _platformService = platformService;
+        _dialogService = dialogService;
         _logger = logger;
         _ctx = ctx;
     }
@@ -123,6 +121,20 @@ public sealed partial class ToolbarViewModel : ObservableObject
     private void CheckForUpdates()
     {
         _updateService.CheckForUpdates(reportErrors: true);
+    }
+
+    /// <summary>Shows a folder browser dialog to select the default catalog directory.</summary>
+    [RelayCommand]
+    private void BrowseCatalogDirectory()
+    {
+        var selectedDirectory = _dialogService.BrowseFolder(
+            "Select Default Catalog Directory",
+            Settings.StoreRestore.DefaultCatalogDirectory);
+
+        if (!string.IsNullOrWhiteSpace(selectedDirectory))
+        {
+            Settings.StoreRestore.DefaultCatalogDirectory = selectedDirectory;
+        }
     }
 
     [RelayCommand]

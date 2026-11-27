@@ -106,12 +106,13 @@ public class PostgresUriParserTests
     }
 
     [Fact]
-    public void TryParse_NoPort_DefaultsTo5432()
+    public void TryParse_NoPort_ReportsNoPort()
     {
+        // The parser carries no engine default; the caller supplies one
         var result = PostgresUriParser.TryParse("postgresql://user:pass@host.example.com/mydb");
 
         result.Should().NotBeNull();
-        result!.Port.Should().Be(5432);
+        result!.Port.Should().BeNull();
     }
 
     [Theory]
@@ -281,13 +282,13 @@ public class PostgresUriParserTests
     }
 
     [Fact]
-    public void TryParse_IPv6HostWithoutPort_DefaultsTo5432()
+    public void TryParse_IPv6HostWithoutPort_ReportsNoPort()
     {
         var result = PostgresUriParser.TryParse("postgres://user:pw@[2001:db8::1]/db");
 
         result.Should().NotBeNull();
         result!.Host.Should().Be("2001:db8::1");
-        result.Port.Should().Be(5432);
+        result.Port.Should().BeNull();
     }
 
     [Fact]

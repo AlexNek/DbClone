@@ -9,6 +9,8 @@
 - :material-table-check: **[Table Selection](connections/table-selection.md)** — Choose which tables Copy, Compare, and Backup process
 - :material-database-search: **[Table Overview](connections/table-overview.md)** — Inspect the tables on the destination database
 - :material-compare: **[Comparison](comparison.md)** — Compare two databases side by side
+- :material-database-export: **[Store & Restore](store-restore.md)** — Archive a database to a catalog folder and restore it back
+- :material-graph: **[Relationship View](relationship-view.md)** — Read a database's tables and foreign keys as one picture
 - :material-wrench: **[Troubleshooting](troubleshooting.md)** — Common issues and solutions
 - :material-lightbulb-on: **[Possible Future Features](roadmap.md)** — Ideas that wait for user requirements
 

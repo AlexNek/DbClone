@@ -1,5 +1,5 @@
 name: Setup build environment
-description: Checkout, install GitVersion, resolve the version, install the .NET SDK.
+description: Checkout, install GitVersion, resolve the version, install the .NET SDK, warm the NuGet cache.
 
 outputs:
   version:
@@ -41,3 +41,14 @@ runs:
       uses: actions/setup-dotnet@v5
       with:
         dotnet-version: '10.0.x'
+
+    # setup-dotnet does not cache packages, so every run used to download the whole graph
+    # (WPF-UI, WebView2, Serilog, Npgsql, the test SDKs) from nuget.org before the first compile.
+    # The key is the set of declared packages, so a changed PackageReference starts a fresh cache.
+    - name: Cache NuGet packages
+      uses: actions/cache@v4
+      with:
+        path: ~/.nuget/packages
+        key: nuget-${{ runner.os }}-${{ hashFiles('**/*.csproj', '**/*.props', '**/*.targets') }}
+        restore-keys: |
+          nuget-${{ runner.os }}-

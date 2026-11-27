@@ -36,15 +36,6 @@ public sealed class TableCatalogService : ITableCatalogService
     private IDatabaseAdapter AdapterFor(ConnectionInfo connection) => _catalog.Resolve(connection.Engine);
 
     /// <inheritdoc />
-    public async Task<bool> CheckDestinationHasDataAsync(
-        ConnectionInfo connection,
-        CancellationToken ct)
-    {
-        var admin = AdapterFor(connection).CreateAdmin(_targetFactory.Create(connection));
-        return await admin.HasDataAsync(ct);
-    }
-
-    /// <inheritdoc />
     public async Task<IReadOnlyList<string>> CheckPermissionsAsync(
         ConnectionInfo connection,
         EPermissionCheck checks,
@@ -85,6 +76,17 @@ public sealed class TableCatalogService : ITableCatalogService
     }
 
     /// <inheritdoc />
+    public async Task<bool> CreateRestoreDatabaseAsync(
+        ConnectionInfo connection,
+        string newDbName,
+        Action<string> logMessage,
+        CancellationToken ct)
+    {
+        var admin = AdapterFor(connection).CreateAdmin(_targetFactory.Create(connection));
+        return await admin.CreateDatabaseIfNotExistsAsync(newDbName, logMessage, ct);
+    }
+
+    /// <inheritdoc />
     public async Task<bool> CreateBackupDatabaseAsync(
         ConnectionInfo connection,
         string newDbName,
@@ -119,7 +121,7 @@ public sealed class TableCatalogService : ITableCatalogService
         CancellationToken ct)
     {
         var metadata = AdapterFor(connection).CreateMetadataSource(_targetFactory.Create(connection));
-        var model = await metadata.ReadDatabaseModelAsync(ct: ct);
+        var model = await metadata.ReadDatabaseModelAsync(scope: EMetadataScope.Everything, ct: ct);
 
         return new DatabaseMetadata(
             Tables: model.Tables.Count,
@@ -142,7 +144,7 @@ public sealed class TableCatalogService : ITableCatalogService
         CancellationToken ct)
     {
         var metadata = AdapterFor(connection).CreateMetadataSource(_targetFactory.Create(connection));
-        return await metadata.ReadDatabaseModelAsync(ct: ct);
+        return await metadata.ReadDatabaseModelAsync(scope: EMetadataScope.Everything, ct: ct);
     }
 
     /// <inheritdoc />

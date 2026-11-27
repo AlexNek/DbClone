@@ -167,14 +167,14 @@ public class ConnectionImportServiceTests
         IConnectionTextFormat[] formats =
             [
                 new PostgreSqlNodeFormat(),
-                new PostgreSqlLibpqFormat(),
-                new PostgreSqlUriFormat(),
-                new PostgreSqlEnvVarFormat(),
-                new PostgreSqlSupabaseFormat(),
+                new PostgreSqlLibpqFormat(EngineDefaults.DefaultPort),
+                new PostgreSqlUriFormat(EngineDefaults.DefaultPort),
+                new PostgreSqlEnvVarFormat(EngineDefaults.DefaultPort),
+                new PostgreSqlSupabaseFormat(EngineDefaults.DefaultPort),
                 new PostgreSqlPrismaFormat(),
-                new PostgreSqlJdbcFormat(),
+                new PostgreSqlJdbcFormat(EngineDefaults.DefaultPort),
                 new PostgreSqlSqlAlchemyFormat(),
-                new PostgreSqlNpgsqlFormat()
+                new PostgreSqlNpgsqlFormat(EngineDefaults.DefaultPort)
             ];
         return new ConnectionImportService(formats, NullLogger<ConnectionImportService>.Instance);
     }
@@ -228,11 +228,11 @@ public class ConnectionExportServiceTests
     // registrations it is given rather than against a hard-coded order.
     private static readonly IConnectionTextFormat[] ExportFormats =
         [
-            new PostgreSqlUriFormat(),
-            new PostgreSqlJdbcFormat(),
-            new PostgreSqlNpgsqlFormat(),
-            new PostgreSqlLibpqFormat(),
-            new PostgreSqlEnvVarFormat(),
+            new PostgreSqlUriFormat(EngineDefaults.DefaultPort),
+            new PostgreSqlJdbcFormat(EngineDefaults.DefaultPort),
+            new PostgreSqlNpgsqlFormat(EngineDefaults.DefaultPort),
+            new PostgreSqlLibpqFormat(EngineDefaults.DefaultPort),
+            new PostgreSqlEnvVarFormat(EngineDefaults.DefaultPort),
             new PostgreSqlSqlAlchemyFormat(),
             new PostgreSqlPrismaFormat(),
             new PostgreSqlNodeFormat()

@@ -6,6 +6,8 @@ namespace DbClone.Application.Interchange;
 /// or on a stage/table boundary change.
 /// </summary>
 /// <param name="Stage">Human-readable stage name (e.g. "writing data").</param>
+/// <param name="Percentage">Overall progress (0-100) as the product states it, so a stage that walks
+/// neither tables nor rows still moves the bar.</param>
 /// <param name="TableOrdinal">Zero-based index of the current table within the stage.</param>
 /// <param name="TableTotal">Total number of tables in the current stage.</param>
 /// <param name="CurrentTable">Fully qualified table name (schema.name).</param>
@@ -17,6 +19,7 @@ namespace DbClone.Application.Interchange;
 /// <param name="Remaining">Estimated time remaining, or <c>null</c> when not yet computable.</param>
 public sealed record InterchangeProgressView(
     string Stage,
+    int Percentage,
     int TableOrdinal,
     int TableTotal,
     string CurrentTable,

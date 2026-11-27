@@ -15,7 +15,11 @@ namespace DbAdapter.PostgreSql.Pipeline;
 /// </summary>
 public sealed class CreateTriggersStage : ICopyStage
 {
+    private readonly IPgConnectionProvider _connectionProvider;
+
     private readonly PgDdlGenerator _ddl;
+
+    private readonly IPgExecutorFactory _executorFactory;
 
     private readonly ILoggerFactory _loggerFactory;
 
@@ -25,10 +29,18 @@ public sealed class CreateTriggersStage : ICopyStage
     /// <inheritdoc />
     public int Order => 140;
 
+    public bool IsCritical => false;
+
     /// <summary>Initializes a new instance.</summary>
-    public CreateTriggersStage(PgDdlGenerator ddl, ILoggerFactory loggerFactory)
+    public CreateTriggersStage(
+        PgDdlGenerator ddl,
+        IPgExecutorFactory executorFactory,
+        IPgConnectionProvider connectionProvider,
+        ILoggerFactory loggerFactory)
     {
         _ddl = ddl;
+        _executorFactory = executorFactory;
+        _connectionProvider = connectionProvider;
         _loggerFactory = loggerFactory;
     }
 
@@ -55,8 +67,19 @@ public sealed class CreateTriggersStage : ICopyStage
 
         var model = context.SourceModel!;
         var logger = _loggerFactory.CreateLogger<CreateTriggersStage>();
-        var conn = (NpgsqlConnection)context.DestinationConnection!;
-        var executor = new PgSqlExecutor(conn, _loggerFactory.CreateLogger<PgSqlExecutor>());
+        var conn = await _connectionProvider.GetDestinationConnectionAsync(
+                       context,
+                       logger,
+                       cancellationToken);
+        if (conn is null)
+            return new StageResult(
+                Name,
+                false,
+                TimeSpan.Zero,
+                0,
+                    [StageDetail.ConnectionFailed(ECompareSide.Destination)]);
+
+        var executor = _executorFactory.Create(conn);
 
         // Create each trigger individually so one failure (e.g. missing table or
         // function) does not abort the remaining triggers.
@@ -74,24 +97,26 @@ public sealed class CreateTriggersStage : ICopyStage
             }
             catch (Exception ex)
             {
-                logger.LogError(
+                var userMessage = PgExceptionHelper.GetUserMessage(ex);
+                logger.LogWarning(
                     ex,
                     "Failed to create trigger {Trigger}: {Error}",
                     triggerName,
                     ex.Message);
-                context.Errors.Add(
-                    new CopyError(
+
+                // One refused trigger is one object lost, not a failed run.
+                context.Warnings.Add(
+                    new CopyWarning(
                         Name,
                         EStageMessageKind.Failed,
                         triggerName,
-                        new Dictionary<string, object> { [PropKeys.Reason] = PgExceptionHelper.GetUserMessage(ex) }, ex));
-                details.Add(
-                    StageDetail.Failed(
-                        triggerName, PgExceptionHelper.GetUserMessage(ex)));
+                        new Dictionary<string, object> { [PropKeys.Reason] = userMessage }));
+                details.Add(StageDetail.FailedWarning(triggerName, userMessage));
             }
         }
 
         context.Statistics = context.Statistics with { TriggersCopied = created };
-        return new StageResult(Name, created == stmts.Count, TimeSpan.Zero, created, details);
+        details.Add(StageDetail.Summary(stmts.Count, created, stmts.Count - created));
+        return new StageResult(Name, true, TimeSpan.Zero, created, details);
     }
 }

@@ -41,7 +41,7 @@ Open the **Connection Manager** and add your source and destination databases. Y
 
 ### 3. Configure options (optional)
 
-Toggle what to include: data, indexes, constraints, functions, triggers, views, materialized views, sequences, RLS policies, comments, and platform schemas. The **Connection Type** dropdown auto-detects your platform (Supabase, Aiven, Neon, or vanilla PostgreSQL) from the hostname and pre-fills the correct port and SSL mode. Adjust batch size and parallelism for large databases.
+Toggle what to copy: **Copy Data**, **Copy Indexes**, **Copy Views**, **Copy Functions**, **Copy Triggers**, and whether platform-managed **Platform Schemas** are included. Constraints, sequences, materialized views, RLS policies, and comments are always copied — they have no toggle. The **Connection Type** dropdown auto-detects your platform (Supabase, Aiven, Neon, or vanilla PostgreSQL) from the hostname and pre-fills the correct port and SSL mode. Batch size, command timeouts, and connection keepalive are built-in behaviour rather than settings; see [Options Reference](docs/options.md) for the full list.
 
 ### 4. Run the copy
 
@@ -66,6 +66,16 @@ After the copy, the built-in **validation stage** performs two levels of verific
 1. **Data validation** — compares row counts, checksums, or full content between source and destination (configurable verify mode). Mismatched tables are automatically re-copied.
 2. **Object count validation** — verifies that the expected number of tables, indexes, views, materialized views, sequences, functions, and triggers exist on the destination, catching silent omissions.
 
+### 6. Or move a database through a file (Store / Restore)
+
+**Store** (below the source panel, Ctrl+Shift+S) writes a connected database into a **catalog** — a folder of files on disk: the schema objects, the rows, and each binary (`bytea`) value as its own file. **Restore** (below the destination panel, Ctrl+Shift+R) applies such a folder back to a connected database. Use it to archive a database, to move between machines that cannot reach each other, or to inspect a source before applying anything.
+
+A finished store also leaves beside the catalog a plain-text `summary.md` (statistics, observations, every relation), the catalog's own SQL (`sql/schema.sql` + `sql/data.sql`, loadable through `psql` on a machine with no DbClone), and an HTML picture of the relationships. See [Store & Restore](docs/store-restore.md).
+
+### 7. Look at the relationships
+
+**View relationships** sits under both connection panels and draws a database's tables and foreign keys as one picture — read live from metadata only, so nothing is written back and no rows are counted. The folder button next to the source panel's button opens the same picture for a catalog already on disk, with no connection at all. See [Relationship View](docs/relationship-view.md).
+
 ## Features
 
 - **Full schema cloning** — tables, views, functions, triggers, sequences, enums, domains, composite types, constraints, RLS policies
@@ -74,9 +84,12 @@ After the copy, the built-in **validation stage** performs two levels of verific
 - **Dependency-ordered DDL** — topological sort with cycle detection ensures objects are created in the correct order
 - **Data copy with progress** — row-based progress reporting, ETA calculation, per-table error isolation
 - **Resume & Update modes** — pick up where you left off or sync incremental changes
+- **Store / Restore** — write a database into a portable catalog folder (`schema/`, `data/`, `native/`, `manifest.json`) and restore it into a connected database; beside the catalog, a `summary.md` account, re-runnable SQL scripts, and the relationship picture as one HTML file
+- **Database relationship explorer** — the tables and foreign keys of a live database or of a stored catalog as one pannable, zoomable picture: straight arrows behind the cards, a bar where the keys prove "at most one", a detail panel and a searchable constraint register per table
+- **Engine plugins** — database engines are loaded as plugins from a `plugins` folder next to the application, never compiled into it; adding an engine means dropping its adapter in, with no change to the application or the UI
 - **Enhanced validation** — data verification (row count, checksum, full) plus object count validation for tables, indexes, views, sequences, functions, and triggers
 - **Database comparison** — bidirectional structural comparison with detailed DDL diffing (columns, PKs, FKs, checks, unique constraints, sequences, triggers, views); partition-aware CHECK constraint normalization
-- **Connection manager** — save, organize, color-code, import/export connections; platform type dropdown auto-detects host and fills defaults; one-click **Export All / Import All** backup with optional AES-256 encryption
+- **Connection manager** — save, organize, color-code, import/export connections; pasting a provider's connection text fills what the text omits and reports which value was assumed; platform type dropdown auto-detects host and fills defaults; one-click **Export All / Import All** backup with optional AES-256 encryption
 - **Dark theme** — full light/dark theme support
 - **Auto-update** — checks GitHub Releases on startup; prompts to download and install when a new version is available
 - **Fluent Design UI** — modern WPF interface powered by [WPF-UI](https://github.com/lepoco/wpfui)
@@ -88,7 +101,7 @@ After the copy, the built-in **validation stage** performs two levels of verific
 ## Requirements
 
 - Windows 10/11 (x64)
-- Source and target must be PostgreSQL (any version supported by Npgsql)
+- The engines you can connect to are the adapter plugins installed in the `plugins` folder next to the application — the shipped build carries the PostgreSQL adapter (any version supported by Npgsql)
 - No .NET runtime installation needed — the app ships self-contained
 
 ## Installation
@@ -120,8 +133,12 @@ dotnet run --project src/DbClone.UI
 
 ```powershell
 dotnet test tests/Application.Tests
-dotnet test tests/PostgreSql.Tests
+dotnet test tests/DbAdapter.PostgreSql.Tests
+dotnet test tests/DatabaseInterchange.Tests
+dotnet test tests/UI.Tests
 ```
+
+`tests/Integration.Tests` (plugin-folder discovery and adapter contract checks) exists in the solution but is not run by CI.
 
 ### Build Installer
 
@@ -140,17 +157,24 @@ The script publishes the app, builds the WiX MSI, builds the Burn bundle (`DbClo
 ## Architecture
 
 ```
-DbClone.PostgreSql  →  DbClone.Application  ←  DbClone.UI
-                              (interfaces & DTOs)
+DbClone.UI → DbClone.Application → DbAdapter.Definitions → CanonicalModel
+                (interfaces & DTOs)   (adapter roles, the
+                                      provider-neutral pipeline)
+
+DbAdapter.PostgreSql → DbAdapter.Definitions, CanonicalModel   → published into plugins/postgresql
+src/DatabaseInterchange → the catalog product: store, restore, reports, SQL scripts
 ```
 
 | Project | Responsibility |
 |---------|---------------|
-| `DbClone.Application` | Interfaces, DTOs, models, provider-agnostic orchestration (pipeline) |
-| `DbClone.PostgreSql` | PostgreSQL-specific implementations (Npgsql, DDL generation, metadata) |
-| `DbClone.UI` | WPF desktop app (MVVM, WPF-UI Fluent controls) |
+| `CanonicalModel` | Engine-agnostic schema model, enums, table identity — names no engine |
+| `DbAdapter.Definitions` | The shared boundary: adapter role interfaces, cross-boundary records (`AdapterInfo`, `DatabaseTarget`, `CopyRequest`), the provider-neutral copy pipeline, the platform-file contract — no SQL, no engine name, no driver |
+| `DbClone.Application` | Plugin catalog, DTOs, copy workflow, comparison, selection, settings, reports — provider-agnostic orchestration only |
+| `DbAdapter.PostgreSql` | PostgreSQL implementation of the adapter roles (Npgsql, DDL generation, metadata); an engine **plugin**, published into `plugins/postgresql` and never referenced by the UI at compile time |
+| `src/DatabaseInterchange` | The interchange product behind Store / Restore — catalog format, streaming writer/reader, verification, `summary.md`, SQL scripts |
+| `src/DbClone.UI` | WPF desktop app (MVVM, WPF-UI Fluent controls); the composition root, which registers one adapter catalog over the `plugins` folder next to the executable |
 
-Adding a new database provider only requires implementing the Application interfaces in a new project — no UI changes needed.
+An engine is **discovered** from `plugins/<dialect>` at startup — never constructed by name, registered as a service, or named in UI code. Adding a new database provider means implementing the `DbAdapter.Definitions` roles in a new project and publishing it into that folder: no UI change and no DI registration.
 
 ## Versioning
 

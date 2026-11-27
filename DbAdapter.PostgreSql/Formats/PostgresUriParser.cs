@@ -16,8 +16,6 @@ namespace DbAdapter.PostgreSql.Formats;
 /// </summary>
 internal static partial class PostgresUriParser
 {
-    private const int DefaultPort = 5432;
-
     private const char FragmentSeparator = '#';
 
     private const char IPv6Close = ']';
@@ -48,6 +46,10 @@ internal static partial class PostgresUriParser
 
     private const char UserInfoHostSeparator = '@';
 
+    /// <summary>
+    /// Parses a connection URI. Reports no port (<see cref="ParsedUri.Port"/> is null)
+    /// when the authority omits one; choosing the engine default is the caller's job.
+    /// </summary>
     public static ParsedUri? TryParse(string text)
     {
         if (string.IsNullOrWhiteSpace(text))
@@ -116,7 +118,7 @@ internal static partial class PostgresUriParser
     private static bool IsValidHostStart(string candidate) =>
         !string.IsNullOrEmpty(candidate) && HostPortPattern().IsMatch(candidate);
 
-    private static (string Host, int Port, string Database)? ParseHostPortDatabase(
+    private static (string Host, int? Port, string Database)? ParseHostPortDatabase(
         string hostPortDb)
     {
         var match = HostPortPattern().Match(hostPortDb);
@@ -131,19 +133,21 @@ internal static partial class PostgresUriParser
             host = host[1..^1];
         }
 
-        var port = DefaultPort;
+        int? port = null;
         if (match.Groups["port"].Success)
         {
             if (!int.TryParse(
                     match.Groups["port"].Value,
                     NumberStyles.None,
                     CultureInfo.InvariantCulture,
-                    out port)
-                || port < 1
-                || port > 65535)
+                    out var explicitPort)
+                || explicitPort < 1
+                || explicitPort > 65535)
             {
                 return null;
             }
+
+            port = explicitPort;
         }
 
         var database = string.Empty;

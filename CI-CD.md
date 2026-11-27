@@ -7,7 +7,7 @@ There are three workflows and two shared composite actions.
 
 | Workflow | Trigger | Purpose |
 |----------|---------|---------|
-| `ci.yml` | push/PR to `main` or `develop`, manual | Quality gate: build, test, verify the installer still compiles |
+| `ci.yml` | push/PR to `main` or `develop`, manual | Quality gate: build and test in parallel jobs (quick suites, layout characterization, and on pushes the installer compile check) |
 | `release.yml` | `v*` git tag, manual | Ship: build the final installer and publish a GitHub Release |
 | `docs.yml` | push to `main` touching `docs/**` or `mkdocs.yml` | Build and deploy the MkDocs user manual to GitHub Pages |
 
@@ -28,6 +28,10 @@ Steps:
 2. Run GitVersion to compute the version from git history and branch config
    (`GitVersion.yml`).
 3. Install the .NET SDK (`10.0.x`).
+4. Restore the NuGet package cache (`~/.nuget/packages`), keyed on the
+   declared packages (`**/*.csproj`, `**/*.props`, `**/*.targets`).
+   `actions/setup-dotnet` does not cache packages, so without this every run
+   downloaded the whole package graph before the first compile.
 
 > The workflow must run `actions/checkout@v5` with `fetch-depth: 0` **before**
 > using this action (or any local composite action) — otherwise the
@@ -43,30 +47,62 @@ Builds the WiX installer and optionally uploads the artifacts. Inputs:
 
 Steps:
 
-1. Run `build-installer-wix.ps1 -Version <version>`, which publishes the app,
-   builds the MSI, and builds the Burn bundle (`DbClone-Setup-*.exe`).
+1. Run `build-installer-wix.ps1 -Version <version>`, which fetches the WebView2
+   prerequisite, publishes the app, builds the MSI, and builds the Burn bundle
+   (`DbClone-Setup-*.exe`).
 2. If `upload` is `'true'`, upload `artifacts/DbClone-Setup-*.exe` and
    `artifacts/DbClone-*.msi` as a workflow artifact (7-day retention).
+
+The prerequisite download is the only network step: it must reach
+`go.microsoft.com` (see [WebView2 prerequisite](#webview2-prerequisite)).
 
 ## CI workflow (`ci.yml`)
 
 **When it runs:** every push and pull request to `main` or `develop`, plus
 manual dispatch (`workflow_dispatch`).
 
-**What it does:**
+**What it does — three jobs that run at the same time:**
 
-1. `actions/checkout` with `fetch-depth: 0` — full history (required for both
-   local actions and GitVersion).
-2. `setup-env` — tooling + version.
-3. `dotnet restore` — restore NuGet packages.
-4. `dotnet build` — compile the whole solution in Release.
-5. `dotnet test` — run the `Application.Tests` and `PostgreSql.Tests` suites.
-6. `build-installer` with `upload: 'false'` — verify the installer still
-   builds, but do **not** upload artifacts.
+1. `build-and-test` — the check a reviewer waits for. All jobs start from
+   `actions/checkout` with `fetch-depth: 0` (required for both local actions
+   and GitVersion) and `setup-env` (tooling, version, package cache):
+   - `dotnet restore DbClone.slnx`, then `dotnet build DbClone.slnx -c Release`.
+   - `dotnet test` for `Application.Tests`, `DbAdapter.PostgreSql.Tests`,
+     `DatabaseInterchange.Tests`, and `UI.Tests` filtered to
+     `--filter "Speed!=Slow"`. Every test step passes `--no-build`: the build
+     step compiled these projects already, and without it each suite spent
+     another pass over the graph and re-ran the UI project's post-build
+     publish of the PostgreSQL plugin.
+2. `characterization` — the measured layout acceptance and the big-catalog
+   stress, in two matrix slices (`Speed=Slow` split by test class). These
+   searches are single-threaded and minutes long, and their assertions read
+   the clock: the characterization table's `ElapsedMilliseconds` bounds and the
+   engine's own watchdog behind the `IsDegraded`/`IsRough` flags are only
+   meaningful while nothing else competes for the processor. So they get quiet
+   runners of their own, and the pull request waits for the longest slice
+   instead of for every search in a row. The detailed console logger
+   (`--logger "console;verbosity=detailed"`) is deliberate and load-bearing
+   here: the measured tables the refactor checklists record are written
+   through `ITestOutputHelper`, and MSBuild verbosity alone never puts a
+   passing test's output in the log.
+3. `installer` — `build-installer` with `upload: 'false'`: verify the installer
+   still builds, without uploading artifacts. Skipped on pull requests.
 
-**Why the installer is built here:** it catches packaging breakage on the pull
-request, before a broken package ever reaches a release tag. The artifacts are
-not uploaded because CI is a quality gate, not a delivery — see Release below.
+**Why the installer is not built on a pull request:** it is two self-contained
+publishes and the WiX chain — minutes that a dialog or a query change has to
+wait through, and packaging does not depend on them. It is verified on every
+push to `main`/`master`/`develop`, and built for real with the artifacts
+attached by `release.yml` on a tag, so a broken package still cannot reach a
+release unnoticed. Artifacts are never uploaded from CI: CI is a quality gate,
+not a delivery — see Release below.
+
+**Which tests are `Slow`:** the traits mark the tests that spend their time in
+the layout search (the 1 000- and 2 000-table stress runs, the catalog-shaped
+characterization, the seeded-catalog watchdog checks), not tests that are
+merely numerous. A test carries no trait unless it costs seconds on a quiet
+machine, so `Speed!=Slow` really is the quick path — measured on the same tree:
+the whole `UI.Tests` project, 541 tests, answers in 1 m 2 s, while the 23
+`Speed=Slow` layout searches behind it need roughly 9½ minutes.
 
 ## Release workflow (`release.yml`)
 
@@ -107,6 +143,33 @@ manual dispatch. Runs on `ubuntu-latest`, builds the MkDocs site with
 
 The script publishes the app, builds the MSI, builds the Burn bundle, and
 copies the outputs into `artifacts/`.
+
+## WebView2 prerequisite
+
+The relationship view (`View relationships` under either connection panel) is
+hosted in an in-app window backed by the WebView2 Evergreen runtime. The bundle
+installs it as a **non-vital** prerequisite:
+
+1. `build-installer-wix.ps1` downloads Microsoft's bootstrapper
+   (`MicrosoftEdgeWebView2Setup.exe`, via
+   `https://go.microsoft.com/fwlink/p/?LinkId=2124703`) into
+   `artifacts/prerequisites/` and reuses it when the file is already there.
+2. `installer/DbClone.Installer.Bundle/Bundle.wxs` binds that folder
+   (`!(bindpath.Prerequisites)`) and chains an `ExePackage` **before** the MSI,
+   running `/silent /install`.
+3. Detection reads the client's `pv` value under
+   `HKLM\SOFTWARE\WOW6432Node\Microsoft\EdgeUpdate\Clients\{F3017226-FE2A-4295-8BDF-00C3A9A7E4C5}`
+   or its `HKCU` counterpart, so an already-installed runtime — per-machine or
+   per-user — is not touched.
+4. `Permanent="yes"` keeps the runtime when DbClone is uninstalled (other
+   software shares it). `Vital="no"` means a prerequisite that cannot install
+   does **not** fail the product's install: the app falls back to the system
+   browser and states why.
+
+Because the bundle project binds a downloaded file, the WiX build itself never
+reaches the network, and `artifacts/` is git-ignored — a fresh clone must run
+the script (or the `build-installer` action) rather than build the bundle
+project directly.
 
 ## Versioning
 

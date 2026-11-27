@@ -14,6 +14,7 @@
   <ItemGroup>
     <ProjectReference Include="..\..\CanonicalModel\CanonicalModel.csproj" />
     <ProjectReference Include="..\..\DbAdapter.Definitions\DbAdapter.Definitions.csproj" />
+    <ProjectReference Include="..\DatabaseInterchange\DatabaseInterchange.csproj" />
   </ItemGroup>
 
   <ItemGroup>

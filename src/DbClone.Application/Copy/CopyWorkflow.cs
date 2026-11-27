@@ -64,7 +64,30 @@ public sealed class CopyWorkflow : ICopyWorkflow
         CancellationToken cancellationToken)
     {
         ConnectionInfo? backupDestination = null;
-        var adapter = _targetFactory.ResolveAdapter(source.Engine);
+        var sourceAdapter = _targetFactory.ResolveAdapter(source.Engine);
+        var destinationAdapter = _targetFactory.ResolveAdapter(destination.Engine);
+        if (!string.Equals(sourceAdapter.Info.Dialect, destinationAdapter.Info.Dialect, StringComparison.OrdinalIgnoreCase))
+        {
+            listener.OnPhaseChanged(ECopyOperationPhase.Failed);
+            listener.OnStatusMessageChanged("Source and destination engines must match");
+            listener.OnLogMessage($"Copy rejected: source engine '{sourceAdapter.Info.Dialect}' does not match destination engine '{destinationAdapter.Info.Dialect}'.");
+            return new CopyWorkflowResult { Success = false, ErrorMessage = "Source and destination engines must match" };
+        }
+
+        if (SameDatabase(source, destination))
+        {
+            listener.OnPhaseChanged(ECopyOperationPhase.Failed);
+            listener.OnStatusMessageChanged("Source and destination are the same database");
+            listener.OnLogMessage(
+                $"Copy rejected: '{source.DatabaseName}' on {source.Host}:{source.Port} is both the source and the destination. "
+                + "Nothing was changed. Select a different destination database.");
+            return new CopyWorkflowResult
+                       {
+                           Success = false,
+                           ErrorMessage = "Source and destination are the same database"
+                       };
+        }
+
         try
         {
             _logger.LogInformation("Copy operation started");
@@ -72,10 +95,10 @@ public sealed class CopyWorkflow : ICopyWorkflow
 
             var sourceTarget = _targetFactory.Create(source);
             var destTarget = _targetFactory.Create(destination);
-            var sourceAdmin = adapter.CreateAdmin(sourceTarget);
-            var destAdmin = adapter.CreateAdmin(destTarget);
-            var destCleaner = adapter.CreateCleaner(destTarget);
-            var sourceMetadata = adapter.CreateMetadataSource(sourceTarget);
+            var sourceAdmin = sourceAdapter.CreateAdmin(sourceTarget);
+            var destAdmin = destinationAdapter.CreateAdmin(destTarget);
+            var destCleaner = destinationAdapter.CreateCleaner(destTarget);
+            var sourceMetadata = sourceAdapter.CreateMetadataSource(sourceTarget);
 
             // Step 1: Verify source connection
             listener.OnPhaseChanged(ECopyOperationPhase.CheckingSourceConnection);
@@ -98,6 +121,15 @@ public sealed class CopyWorkflow : ICopyWorkflow
             listener.OnLogMessage(
                 $"Source OK: {sourceAdmin.ProviderName} {sourceVersion}");
 
+            if (!IsEngineVersionSupported(sourceAdapter, sourceVersion))
+            {
+                return RejectVersion(
+                    "Source",
+                    sourceAdapter.Info.EngineVersionRange,
+                    sourceVersion,
+                    listener);
+            }
+
             // Log selected copy options
             listener.OnLogHint(
                 "System-managed objects: presence checked, contents not copied.");
@@ -116,6 +148,7 @@ public sealed class CopyWorkflow : ICopyWorkflow
             // Read metadata to update object counts — BEFORE destination is verified
             var model = await sourceMetadata.ReadDatabaseModelAsync(
                             options.ExcludePlatformSchemas,
+                            EMetadataScope.Everything,
                             cancellationToken);
             var metadata = BuildMetadata(model);
             listener.OnLogMessage($"Source: {metadata.Summary}");
@@ -140,6 +173,15 @@ public sealed class CopyWorkflow : ICopyWorkflow
 
             listener.OnLogMessage(
                 $"Destination OK: {destAdmin.ProviderName} {destVersion}");
+
+            if (!IsEngineVersionSupported(destinationAdapter, destVersion))
+            {
+                return RejectVersion(
+                    "Destination",
+                    destinationAdapter.Info.EngineVersionRange,
+                    destVersion,
+                    listener);
+            }
 
             // Step 3: Check destination permissions
             listener.OnPhaseChanged(ECopyOperationPhase.CheckingPermissions);
@@ -198,7 +240,7 @@ public sealed class CopyWorkflow : ICopyWorkflow
             if (options.CopyMode != ECopyMode.Backup)
             {
                 listener.OnPhaseChanged(ECopyOperationPhase.CheckingDestination);
-                var destHasData = await adapter.CreateAdmin(destTargetToUse).HasDataAsync(cancellationToken);
+                var destHasData = await destinationAdapter.CreateAdmin(destTargetToUse).HasDataAsync(cancellationToken);
 
                 if (destHasData)
                 {
@@ -260,7 +302,7 @@ public sealed class CopyWorkflow : ICopyWorkflow
                     }
 
                     listener.OnPhaseChanged(ECopyOperationPhase.CleaningDestination);
-                    var latestCleaner = adapter.CreateCleaner(destTargetToUse);
+                    var latestCleaner = destinationAdapter.CreateCleaner(destTargetToUse);
                     bool cleaned;
                     if (clearAll)
                     {
@@ -328,7 +370,7 @@ public sealed class CopyWorkflow : ICopyWorkflow
             }
             else
             {
-                await using var session = adapter.CreateCopySession();
+                await using var session = sourceAdapter.CreateCopySession();
                 engineResult = await session.ExecuteAsync(
                                    step.Request!,
                                    progressHandler,
@@ -343,10 +385,7 @@ public sealed class CopyWorkflow : ICopyWorkflow
 
             listener.OnPhaseChanged(
                 result.Success ? ECopyOperationPhase.Completed : ECopyOperationPhase.Failed);
-            listener.OnStatusMessageChanged(
-                result.Success
-                    ? $"Copy complete in {result.TotalDuration.TotalSeconds:F1}s"
-                    : $"Copy failed: {result.Errors.Count} errors");
+            listener.OnStatusMessageChanged(CopyOutcomeSummary.Describe(result));
 
             return new CopyWorkflowResult
                        {
@@ -618,4 +657,59 @@ public sealed class CopyWorkflow : ICopyWorkflow
             EStageMessageKind.Skipped,
             objectName,
             new Dictionary<string, object> { [PropKeys.Reason] = reason });
+
+    /// <summary>
+    /// True when both connections name the same server and database. A full copy cleans the
+    /// destination before it reads the source, so this is the one mistake the workflow must
+    /// refuse outright: the two connections are the same database only when host, port and
+    /// database name all match, compared without regard to case or surrounding space.
+    /// </summary>
+    private static bool SameDatabase(ConnectionInfo source, ConnectionInfo destination) =>
+        string.Equals(source.Host.Trim(), destination.Host.Trim(), StringComparison.OrdinalIgnoreCase)
+        && source.Port == destination.Port
+        && string.Equals(
+            source.DatabaseName.Trim(),
+            destination.DatabaseName.Trim(),
+            StringComparison.OrdinalIgnoreCase);
+
+    /// <summary>
+    /// True when the server version the connection reported satisfies the range the adapter
+    /// declares. A range of "*" accepts every version, and a version string this build cannot
+    /// parse is accepted too — the adapter has already connected successfully, so refusing the
+    /// copy over an unreadable version would be worse than allowing it.
+    /// </summary>
+    private static bool IsEngineVersionSupported(IDatabaseAdapter adapter, string? serverVersion)
+    {
+        var range = adapter.Info.EngineVersionRange;
+        if (string.IsNullOrWhiteSpace(range) || string.IsNullOrWhiteSpace(serverVersion))
+            return true;
+
+        try
+        {
+            return VersionRangeParser.Satisfies(
+                VersionRangeParser.ParseServerVersion(serverVersion),
+                range);
+        }
+        catch (Exception)
+        {
+            return true;
+        }
+    }
+
+    /// <summary>
+    /// Fails the operation because a server version is outside the range its adapter supports.
+    /// </summary>
+    private static CopyWorkflowResult RejectVersion(
+        string side,
+        string supportedRange,
+        string? serverVersion,
+        ICopyProgressSink listener)
+    {
+        var message =
+            $"{side} server version {serverVersion} is outside the range this adapter supports ({supportedRange})";
+        listener.OnPhaseChanged(ECopyOperationPhase.Failed);
+        listener.OnStatusMessageChanged($"{side} version is not supported");
+        listener.OnLogMessage($"Copy rejected: {message}");
+        return new CopyWorkflowResult { Success = false, ErrorMessage = message };
+    }
 }

@@ -28,6 +28,8 @@ public sealed class CreateTablesStage : ICopyStage
     /// <inheritdoc />
     public int Order => 70;
 
+    public bool IsCritical => false;
+
     /// <summary>Initializes a new instance.</summary>
     public CreateTablesStage(PgDdlGenerator ddl, IPgExecutorFactory executorFactory, ILoggerFactory loggerFactory)
     {
@@ -61,7 +63,7 @@ public sealed class CreateTablesStage : ICopyStage
         var logger = _loggerFactory.CreateLogger<CreateTablesStage>();
         var statements = _ddl.GenerateCreateTableStatements(model.Tables);
 
-        var conn = (NpgsqlConnection)context.DestinationConnection!;
+        var conn = PgCopyConnection.Require(context.DestinationConnection, "destination");
         var executor = _executorFactory.Create(conn);
 
         // Create each table individually so one failure (e.g. unsupported type on the

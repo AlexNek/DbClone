@@ -29,6 +29,8 @@ public sealed class CreateSchemasStage : ICopyStage
     /// <inheritdoc />
     public int Order => 50;
 
+    public bool IsCritical => false;
+
     /// <summary>Initializes a new instance.</summary>
     public CreateSchemasStage(PgDdlGenerator ddl, ILoggerFactory loggerFactory)
     {
@@ -43,7 +45,7 @@ public sealed class CreateSchemasStage : ICopyStage
     {
         var logger = _loggerFactory.CreateLogger<CreateSchemasStage>();
 
-        var conn = (NpgsqlConnection)context.DestinationConnection!;
+        var conn = PgCopyConnection.Require(context.DestinationConnection, "destination");
         var executor = new PgSqlExecutor(
             conn,
             _loggerFactory.CreateLogger<PgSqlExecutor>(),

@@ -79,7 +79,7 @@ public sealed partial class ConnectionViewModel : ObservableObject
     /// </summary>
     public TableOverviewPanelViewModel? TableOverview { get; set; }
 
-    /// <summary>The TLS choices the active engine offers, supplied by its adapter (refactors/09 P7).</summary>
+    /// <summary>The TLS choices the active engine offers, supplied by its adapter.</summary>
     public IReadOnlyList<string> SslModeValues { get; }
 
     public string Summary =>
@@ -100,7 +100,7 @@ public sealed partial class ConnectionViewModel : ObservableObject
         SslModeValues = connectionStringService.SecurityOptions;
 
         // A brand-new (unsaved) connection starts from the active engine's platform defaults,
-        // never from an engine value written in the UI (refactors/09 P5).
+        // never from an engine value written in the UI.
         var defaults = platformService.GetConnectionDefaults(_connectionType);
         _port = defaults.Port.ToString();
         _username = defaults.Username;

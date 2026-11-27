@@ -55,6 +55,8 @@ nav:
       - Resume: copy-modes/resume.md
       - Update: copy-modes/update.md
       - Backup: copy-modes/backup.md
+  - Store & Restore: store-restore.md
+  - Relationship View: relationship-view.md
   - Pipeline & Progress:
       - Pipeline Stages: pipeline/stages.md
       - Reading the Progress Panel: pipeline/progress-panel.md

@@ -7,13 +7,9 @@ namespace DbClone.Application.Interchange;
 public sealed record CatalogSummary(
     int FormatVersion,
     string Producer,
-    DateTimeOffset? ExportTime,
     bool IsComplete,
     int Sections,
     int Tables,
     long Rows,
     int Chunks,
-    long Bytes,
-    IReadOnlyDictionary<string, int> PreservationCounts,
-    IReadOnlyDictionary<string, int> SecurityCounts,
-    IReadOnlyList<InterchangeIssueView> ProducerIssues);
+    long Bytes);

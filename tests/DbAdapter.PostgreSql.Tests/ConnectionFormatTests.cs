@@ -13,7 +13,7 @@ namespace DbAdapter.PostgreSql.Tests;
 /// </summary>
 public class PostgreSqlUriFormatTests
 {
-    private readonly PostgreSqlUriFormat _sut = new();
+    private readonly PostgreSqlUriFormat _sut = new(EngineDefaults.DefaultPort);
 
     [Fact]
     public void CanImport_JdbcString_ReturnsFalse()
@@ -160,7 +160,7 @@ public class PostgreSqlUriFormatTests
     }
 
     [Fact]
-    public void Parse_NoPort_DefaultsTo5432()
+    public void Parse_NoPort_DefaultsTo5432AndMarksIt()
     {
         // Arrange
         var input = "postgresql://user:pass@localhost/mydb";
@@ -170,6 +170,22 @@ public class PostgreSqlUriFormatTests
 
         // Assert
         conn.Port.Should().Be(5432);
+        conn.Options.Should().ContainKey("_defaulted:Port").WhoseValue.Should().Be("5432");
+    }
+
+    [Fact]
+    public void Parse_NoPort_AppliesTheDefaultItsCallerSupplies()
+    {
+        // Arrange — the parser reports no port; the default is the caller's platform data,
+        // so handing the format a different number must change what it produces
+        var sut = new PostgreSqlUriFormat(6543);
+
+        // Act
+        var conn = sut.Parse("postgresql://user:pass@localhost/mydb");
+
+        // Assert
+        conn.Port.Should().Be(6543);
+        conn.Options.Should().ContainKey("_defaulted:Port").WhoseValue.Should().Be("6543");
     }
 
     [Theory]
@@ -317,7 +333,7 @@ public class PostgreSqlUriFormatTests
 
 public class PostgreSqlNpgsqlFormatTests
 {
-    private readonly PostgreSqlNpgsqlFormat _sut = new();
+    private readonly PostgreSqlNpgsqlFormat _sut = new(EngineDefaults.DefaultPort);
 
     [Fact]
     public void CanImport_DatabaseKeyWithoutHost_ReturnsTrue()
@@ -483,6 +499,64 @@ public class PostgreSqlNpgsqlFormatTests
     }
 
     [Fact]
+    public void Parse_NoPortKey_DefaultsToEnginePortAndMarksIt()
+    {
+        // Arrange — Neon/Supabase dashboards publish key-value strings without a Port key
+        var input = "Host=test.example.com;Database=testdb;Username=test_user;Password=pass";
+
+        // Act
+        var conn = _sut.Parse(input);
+
+        // Assert
+        conn.Port.Should().Be(5432);
+        conn.Options.Should().ContainKey("_defaulted:Port").WhoseValue.Should().Be("5432");
+    }
+
+    [Fact]
+    public void Parse_NoPortKey_AppliesTheDefaultItsCallerSupplies()
+    {
+        // Arrange — the port default is data the adapter hands the format, not a number
+        // written into it
+        var sut = new PostgreSqlNpgsqlFormat(6543);
+        var input = "Host=test.example.com;Database=testdb;Username=test_user;Password=pass";
+
+        // Act
+        var conn = sut.Parse(input);
+
+        // Assert
+        conn.Port.Should().Be(6543);
+        conn.Options.Should().ContainKey("_defaulted:Port").WhoseValue.Should().Be("6543");
+    }
+
+    [Fact]
+    public void Parse_NoHostKey_DefaultsToLocalhostAndMarksIt()
+    {
+        // Arrange — a string that names no server at all is taken as the local one
+        var input = "Database=testdb;Username=test_user;Password=pass";
+
+        // Act
+        var conn = _sut.Parse(input);
+
+        // Assert
+        conn.Host.Should().Be("localhost");
+        conn.Options.Should().ContainKey("_defaulted:Host").WhoseValue.Should().Be("localhost");
+    }
+
+    [Fact]
+    public void Parse_EmptyHostValue_DefaultsToLocalhostAndMarksIt()
+    {
+        // Arrange — the key is present but carries no usable value
+        var input = "Host=;Database=testdb;Username=test_user;Password=pass";
+
+        // Act
+        var conn = _sut.Parse(input);
+
+        // Assert
+        conn.Host.Should().Be("localhost");
+        conn.Options.Should().ContainKey("_defaulted:Host").WhoseValue.Should().Be("localhost");
+    }
+
+    [Fact]
     public void Parse_NoExtraOptions_OptionsIsEmpty()
     {
         // Arrange
@@ -531,7 +605,7 @@ public class PostgreSqlNpgsqlFormatTests
 
 public class PostgreSqlJdbcFormatTests
 {
-    private readonly PostgreSqlJdbcFormat _sut = new();
+    private readonly PostgreSqlJdbcFormat _sut = new(EngineDefaults.DefaultPort);
 
     [Fact]
     public void CanImport_JdbcPrefix_ReturnsTrue()
@@ -602,6 +676,34 @@ public class PostgreSqlJdbcFormatTests
     }
 
     [Fact]
+    public void Parse_JdbcWithoutPort_DefaultsTo5432AndMarksIt()
+    {
+        // Arrange
+        var input = "jdbc:postgresql://test.example.com/testdb?user=test_user";
+
+        // Act
+        var conn = _sut.Parse(input);
+
+        // Assert
+        conn.Port.Should().Be(5432);
+        conn.Options.Should().ContainKey("_defaulted:Port").WhoseValue.Should().Be("5432");
+    }
+
+    [Fact]
+    public void Parse_JdbcWithoutHost_DefaultsToLocalhostAndMarksIt()
+    {
+        // Arrange — an authority that names no host
+        var input = "jdbc:postgresql:///testdb?user=test_user";
+
+        // Act
+        var conn = _sut.Parse(input);
+
+        // Assert
+        conn.Host.Should().Be("localhost");
+        conn.Options.Should().ContainKey("_defaulted:Host").WhoseValue.Should().Be("localhost");
+    }
+
+    [Fact]
     public void Parse_SslTrueParam_MapsToRequire()
     {
         // Arrange
@@ -630,7 +732,7 @@ public class PostgreSqlJdbcFormatTests
 
 public class PostgreSqlLibpqFormatTests
 {
-    private readonly PostgreSqlLibpqFormat _sut = new();
+    private readonly PostgreSqlLibpqFormat _sut = new(EngineDefaults.DefaultPort);
 
     [Fact]
     public void CanImport_AdoNetUppercase_ReturnsFalse()
@@ -730,6 +832,34 @@ public class PostgreSqlLibpqFormatTests
     }
 
     [Fact]
+    public void Parse_LibpqWithoutPort_DefaultsTo5432AndMarksIt()
+    {
+        // Arrange
+        var input = "host=test.example.com dbname=testdb user=test_user";
+
+        // Act
+        var conn = _sut.Parse(input);
+
+        // Assert
+        conn.Port.Should().Be(5432);
+        conn.Options.Should().ContainKey("_defaulted:Port").WhoseValue.Should().Be("5432");
+    }
+
+    [Fact]
+    public void Parse_LibpqWithoutHost_DefaultsToLocalhostAndMarksIt()
+    {
+        // Arrange — libpq reaches the local server when no host keyword is given
+        var input = "dbname=testdb user=test_user";
+
+        // Act
+        var conn = _sut.Parse(input);
+
+        // Assert
+        conn.Host.Should().Be("localhost");
+        conn.Options.Should().ContainKey("_defaulted:Host").WhoseValue.Should().Be("localhost");
+    }
+
+    [Fact]
     public void Parse_UnknownKeys_PreservedInOptions()
     {
         // Arrange
@@ -748,7 +878,7 @@ public class PostgreSqlSupabaseFormatTests
     private const string SupabaseUri =
         "postgresql://postgres.testrefxyz:secret@aws-0-us-east-1.pooler.supabase.co:6543/postgres";
 
-    private readonly PostgreSqlSupabaseFormat _sut = new();
+    private readonly PostgreSqlSupabaseFormat _sut = new(EngineDefaults.DefaultPort);
 
     [Fact]
     public void CanImport_GenericUri_ReturnsFalse()
@@ -797,7 +927,7 @@ public class PostgreSqlSupabaseFormatTests
 
 public class PostgreSqlSupabaseEnvFormatTests
 {
-    private readonly PostgreSqlSupabaseEnvFormat _sut = new();
+    private readonly PostgreSqlSupabaseEnvFormat _sut = new(EngineDefaults.DefaultPort);
 
     [Fact]
     public void CanExport_AlwaysFalse()
@@ -890,7 +1020,7 @@ public class PostgreSqlSupabaseEnvFormatTests
 
 public class PostgreSqlEnvVarFormatTests
 {
-    private readonly PostgreSqlEnvVarFormat _sut = new();
+    private readonly PostgreSqlEnvVarFormat _sut = new(EngineDefaults.DefaultPort);
 
     [Fact]
     public void CanExport_AlwaysFalse()
@@ -972,6 +1102,34 @@ public class PostgreSqlEnvVarFormatTests
         conn.Database.Should().Be("sales");
         conn.Username.Should().Be("admin");
         conn.Password.Should().Be("s3cret");
+    }
+
+    [Fact]
+    public void Parse_PgEnvVarsWithoutPort_DefaultsTo5432AndMarksIt()
+    {
+        // Arrange
+        var input = "PGHOST=test.example.com\nPGDATABASE=testdb\nPGUSER=test_user";
+
+        // Act
+        var conn = _sut.Parse(input);
+
+        // Assert
+        conn.Port.Should().Be(5432);
+        conn.Options.Should().ContainKey("_defaulted:Port").WhoseValue.Should().Be("5432");
+    }
+
+    [Fact]
+    public void Parse_PgEnvVarsWithoutHost_DefaultsToLocalhostAndMarksIt()
+    {
+        // Arrange — a block with no PGHOST
+        var input = "PGDATABASE=testdb\nPGUSER=test_user";
+
+        // Act
+        var conn = _sut.Parse(input);
+
+        // Assert
+        conn.Host.Should().Be("localhost");
+        conn.Options.Should().ContainKey("_defaulted:Host").WhoseValue.Should().Be("localhost");
     }
 
     [Fact]

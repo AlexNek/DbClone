@@ -19,11 +19,18 @@ public interface IMetadataSource
         CancellationToken ct);
 
     /// <summary>
-    /// Reads the full database model. When <paramref name="excludePlatformSchemas"/>
+    /// Reads the database model. When <paramref name="excludePlatformSchemas"/>
     /// is true, platform-managed schemas are excluded (used by comparison).
     /// Default is false — copy/backup gets everything.
     /// </summary>
+    /// <param name="excludePlatformSchemas">Whether to exclude platform-managed schemas.</param>
+    /// <param name="scope">
+    /// What the caller will do with the model. A scoped request may be answered with more,
+    /// never with less; <see cref="EMetadataScope.Everything"/> is the default.
+    /// </param>
+    /// <param name="ct">Cancellation token.</param>
     Task<DatabaseModel> ReadDatabaseModelAsync(
         bool excludePlatformSchemas = false,
+        EMetadataScope scope = EMetadataScope.Everything,
         CancellationToken ct = default);
 }

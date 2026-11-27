@@ -10,7 +10,7 @@ namespace DbClone.Application.Targets;
 /// The one place that turns a connection into the shape the engine boundary accepts, and the
 /// place that resolves which installed adapter serves it. The text is written by the adapter's
 /// own syntax, so no application file ever spells an engine's connection-string format; the
-/// adapter comes from the catalog by the connection's engine value (refactors/09 P4).
+/// adapter comes from the catalog by the connection's engine value.
 /// </summary>
 public sealed class DatabaseTargetFactory
 {

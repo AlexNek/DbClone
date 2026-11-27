@@ -6,13 +6,13 @@ namespace DbClone.Application.Interfaces;
 /// <summary>
 /// The application's route to the engine's connection-text syntax: whether a piece of
 /// text is a connection string and how to write one. Implemented over the adapter's
-/// syntax role so no UI file names a definitions type (D9, D14).
+/// syntax role so no UI file names a definitions type.
 /// </summary>
 public interface IConnectionTextService
 {
     /// <summary>
     /// The dialect of the active engine, reported by its adapter. Lets the UI stamp a connection's
-    /// provider identity without naming an engine (refactors/09 P5). Throws when no engine is installed.
+    /// provider identity without naming an engine. Throws when no engine is installed.
     /// </summary>
     string Dialect { get; }
 

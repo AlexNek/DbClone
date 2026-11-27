@@ -44,15 +44,33 @@ public sealed partial class ImportConnectionViewModel : ObservableObject
     [ObservableProperty]
     private string _selectedImportAs = NewConnectionOption;
 
-    public bool CanImport =>
-        IsDetected && Preview?.Success == true
-                   && !string.IsNullOrEmpty(Preview.Connection?.Host)
-                   && Preview.Connection?.Port > 0;
+    // Whether a format understood the text is all Import asks. A field the text left out
+    // already arrived with its default and a warning from the import service, so no missing
+    // value may disable the button with nothing to explain why.
+    public bool CanImport => IsDetected && Preview?.Success == true;
 
     /// <summary>Set to true when the user confirms the import (dialog result).</summary>
     public bool Confirmed { get; private set; }
 
     public ObservableCollection<string> ImportAsOptions { get; } = [NewConnectionOption];
+
+    /// <summary>
+    /// Engine-neutral prompt for the paste box. The formats themselves are listed below the
+    /// box from the installed adapters, so no example here names a dialect, a port or a scheme.
+    /// </summary>
+    public string InputPlaceholder =>
+        "Paste a connection string — a URL, key=value pairs, or a JDBC string";
+
+    /// <summary>
+    /// The formats the installed adapters understand, read from the catalog rather than
+    /// repeated here: a hard-coded list would drift the moment a format is added.
+    /// </summary>
+    public string SupportedFormatsDisplay =>
+        "Supported: " + string.Join(
+            " • ",
+            _importService.GetAllFormats()
+                          .Select(f => f.DisplayName)
+                          .Distinct(StringComparer.OrdinalIgnoreCase));
 
     public ImportConnectionViewModel(IConnectionImportService importService)
     {

@@ -12,7 +12,7 @@ namespace DbClone.Application.Adapters;
 /// <see langword="null"/> from <see cref="Load"/> lets the runtime bind them from the default
 /// context, which is what guarantees a loaded adapter implements the host's own
 /// <see cref="DbAdapter.Definitions.IDatabaseAdapter"/> interface (a single type identity across
-/// contexts, refactors/09 P2).
+/// contexts).
 /// </para>
 /// </summary>
 internal sealed class PluginAssemblyLoadContext : AssemblyLoadContext

@@ -14,7 +14,7 @@ public interface IConnectionStringSyntax
 
     /// <summary>
     /// The TLS identifiers this engine offers the connection form, in display order. The product
-    /// shows these verbatim rather than naming any engine's TLS vocabulary (refactors/09 P7).
+    /// shows these verbatim rather than naming any engine's TLS vocabulary.
     /// </summary>
     IReadOnlyList<string> SecurityOptions { get; }
 

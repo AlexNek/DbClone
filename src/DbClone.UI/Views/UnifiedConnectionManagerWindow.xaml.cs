@@ -94,7 +94,8 @@ public partial class UnifiedConnectionManagerWindow : Wpf.Ui.Controls.FluentWind
                                 Title = "Protect Backup File",
                                 Description =
                                     "Optionally enter a password to encrypt the backup file. " +
-                                    "Leave empty to save without encryption.\n\n" +
+                                    "Leave empty to save without encryption — connection passwords are " +
+                                    "then left out of the file.\n\n" +
                                     "Encrypted backups are safe to store or share — passwords cannot be recovered.",
                                 IsConfirmVisible = false
                             };
@@ -110,7 +111,8 @@ public partial class UnifiedConnectionManagerWindow : Wpf.Ui.Controls.FluentWind
             MessageBox.Show(
                 encrypted
                     ? "All connections and groups have been exported and encrypted successfully."
-                    : "All connections and groups have been exported successfully.",
+                    : "All connections and groups have been exported successfully.\n\n" +
+                      "The file is not encrypted, so connection passwords were not included.",
                 "Export Complete",
                 MessageBoxButton.OK,
                 MessageBoxImage.Information);

@@ -25,6 +25,8 @@ public sealed class CreateSequencesStage : ICopyStage
     /// <inheritdoc />
     public int Order => 60;
 
+    public bool IsCritical => false;
+
     /// <summary>Initializes a new instance.</summary>
     public CreateSequencesStage(PgDdlGenerator ddl, ILoggerFactory loggerFactory)
     {
@@ -63,7 +65,7 @@ public sealed class CreateSequencesStage : ICopyStage
         var toCreate = model.Sequences.Where(s => !s.IsIdentity).ToList();
         var statements = _ddl.GenerateCreateSequences(toCreate);
 
-        var conn = (NpgsqlConnection)context.DestinationConnection!;
+        var conn = PgCopyConnection.Require(context.DestinationConnection, "destination");
         var executor = new PgSqlExecutor(conn, _loggerFactory.CreateLogger<PgSqlExecutor>());
         var logger = _loggerFactory.CreateLogger<CreateSequencesStage>();
 

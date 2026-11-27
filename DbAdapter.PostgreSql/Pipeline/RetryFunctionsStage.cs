@@ -16,7 +16,11 @@ namespace DbAdapter.PostgreSql.Pipeline;
 /// </summary>
 public sealed class RetryFunctionsStage : ICopyStage
 {
+    private readonly IPgConnectionProvider _connectionProvider;
+
     private readonly PgDdlGenerator _ddl;
+
+    private readonly IPgExecutorFactory _executorFactory;
 
     private readonly ILoggerFactory _loggerFactory;
 
@@ -26,10 +30,18 @@ public sealed class RetryFunctionsStage : ICopyStage
     /// <inheritdoc />
     public int Order => 115;
 
+    public bool IsCritical => false;
+
     /// <summary>Initializes a new instance.</summary>
-    public RetryFunctionsStage(PgDdlGenerator ddl, ILoggerFactory loggerFactory)
+    public RetryFunctionsStage(
+        PgDdlGenerator ddl,
+        IPgExecutorFactory executorFactory,
+        IPgConnectionProvider connectionProvider,
+        ILoggerFactory loggerFactory)
     {
         _ddl = ddl;
+        _executorFactory = executorFactory;
+        _connectionProvider = connectionProvider;
         _loggerFactory = loggerFactory;
     }
 
@@ -68,8 +80,19 @@ public sealed class RetryFunctionsStage : ICopyStage
 
         var model = context.SourceModel!;
         var logger = _loggerFactory.CreateLogger<RetryFunctionsStage>();
-        var conn = (NpgsqlConnection)context.DestinationConnection!;
-        var executor = new PgSqlExecutor(conn, _loggerFactory.CreateLogger<PgSqlExecutor>());
+        var conn = await _connectionProvider.GetDestinationConnectionAsync(
+                       context,
+                       logger,
+                       cancellationToken);
+        if (conn is null)
+            return new StageResult(
+                Name,
+                false,
+                TimeSpan.Zero,
+                0,
+                    [StageDetail.ConnectionFailed(ECompareSide.Destination)]);
+
+        var executor = _executorFactory.Create(conn);
 
         var stmts = _ddl.GenerateCreateFunctions(model.Functions);
         var created = 0;
@@ -89,13 +112,25 @@ public sealed class RetryFunctionsStage : ICopyStage
             }
             catch (Exception ex)
             {
+                var userMessage = PgSetParameterGrant.DescribeFailure(
+                                      ex,
+                                      model.Functions[idx].SetParameters,
+                                      RefusedStatements(context));
                 logger.LogWarning(
                     ex,
                     "Retry failed for function {Function}: {Error}",
                     functionName,
                     ex.Message);
-                details.Add(
-                    StageDetail.Failed(functionName, PgExceptionHelper.GetUserMessage(ex)));
+
+                // One function the server refused is one object lost, not a failed run:
+                // the warning names it and the run still completes.
+                context.Warnings.Add(
+                    new CopyWarning(
+                        Name,
+                        EStageMessageKind.Failed,
+                        functionName,
+                        new Dictionary<string, object> { [PropKeys.Reason] = userMessage }));
+                details.Add(StageDetail.FailedWarning(functionName, userMessage));
             }
         }
 
@@ -109,13 +144,22 @@ public sealed class RetryFunctionsStage : ICopyStage
         var stillFailed = failedIndices.Count - created;
         details.Add(StageDetail.Summary(failedIndices.Count, created, stillFailed));
 
-        // RetryFunctions is the single source of truth for function creation errors.
-        // Only report failure if functions remain unrecoverable after this final attempt.
+        // RetryFunctions is the single source of truth for function creation losses,
+        // and a loss is reported to the user as a warning naming the function.
         return new StageResult(
             Name,
-            stillFailed == 0,
+            true,
             TimeSpan.Zero,
             created,
             details);
     }
+
+    /// <summary>
+    /// The statements the creating stage kept when it could not win a parameter's privilege, or null
+    /// when it won them all — the retry stage adds the sentence those statements make possible.
+    /// </summary>
+    private static IReadOnlyDictionary<string, string>? RefusedStatements(CopyContext context) =>
+        context.Properties.TryGetValue(PgSetParameterGrant.RefusedSetParametersKey, out var refused)
+            ? refused as IReadOnlyDictionary<string, string>
+            : null;
 }

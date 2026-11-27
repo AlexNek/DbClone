@@ -15,11 +15,6 @@ public interface ITableCatalogService
     /// <summary>Human-readable engine name, e.g. "PostgreSQL".</summary>
     string ProviderName { get; }
 
-    /// <summary>Whether the database holds any user data.</summary>
-    Task<bool> CheckDestinationHasDataAsync(
-        ConnectionInfo connection,
-        CancellationToken ct);
-
     /// <summary>
     /// Checks whether the user has sufficient permissions for the requested operations.
     /// Returns a list of missing permissions/problems. Empty list means all checks passed.
@@ -48,6 +43,13 @@ public interface ITableCatalogService
         ConnectionInfo source,
         ConnectionInfo destination,
         TableSelectionSpec spec,
+        Action<string> logMessage,
+        CancellationToken ct);
+
+    /// <summary>Creates a new database without replacing an existing database.</summary>
+    Task<bool> CreateRestoreDatabaseAsync(
+        ConnectionInfo connection,
+        string newDbName,
         Action<string> logMessage,
         CancellationToken ct);
 

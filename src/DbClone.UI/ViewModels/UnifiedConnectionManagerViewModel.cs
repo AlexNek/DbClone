@@ -1,5 +1,4 @@
 using System.Collections.ObjectModel;
-using System.IO;
 using System.Text.Json;
 
 using CommunityToolkit.Mvvm.ComponentModel;
@@ -33,6 +32,13 @@ public sealed partial class UnifiedConnectionManagerViewModel : ObservableObject
     private static int s_lastTabIndex;
 
     private readonly IBackupEncryptionService _backupEncryptionService;
+
+    /// <summary>
+    /// The only thing this view model writes through. The last parameter of the constructor with a
+    /// fallback to the stateless instance, so the hand-built graphs in tests stay one line: a
+    /// credential export the tests never run does not need a fake.
+    /// </summary>
+    private readonly IFileService _files;
 
     private readonly IConnectionStore _connectionStore;
 
@@ -124,6 +130,13 @@ public sealed partial class UnifiedConnectionManagerViewModel : ObservableObject
     [ObservableProperty]
     private string? _groupValidationError;
 
+    /// <summary>
+    /// What a text/clipboard import had to assume, or why it imported nothing; null when the
+    /// import was complete. Shown under the connection list so an import never ends silently.
+    /// </summary>
+    [ObservableProperty]
+    private string? _importMessage;
+
     [ObservableProperty]
     private bool _isBrowsingDatabases;
 
@@ -176,7 +189,7 @@ public sealed partial class UnifiedConnectionManagerViewModel : ObservableObject
 
     // ── Static data ─────────────────────────────────────────────────────────────
 
-    /// <summary>The TLS choices the active engine offers, supplied by its adapter (refactors/09 P7).</summary>
+    /// <summary>The TLS choices the active engine offers, supplied by its adapter.</summary>
     public IReadOnlyList<string> SslModeValues { get; }
 
     public UnifiedConnectionManagerViewModel(
@@ -191,7 +204,8 @@ public sealed partial class UnifiedConnectionManagerViewModel : ObservableObject
         int initialTab = 0,
         string? selectGroupId = null,
         string? selectConnectionId = null,
-        ISettingsService? settingsService = null)
+        ISettingsService? settingsService = null,
+        IFileService? files = null)
     {
         _connectionStore = connectionStore;
         _groupStore = groupStore;
@@ -202,6 +216,7 @@ public sealed partial class UnifiedConnectionManagerViewModel : ObservableObject
         _settingsService = settingsService;
         _backupEncryptionService = backupEncryptionService;
         _platformService = platformService;
+        _files = files ?? FileService.Instance;
 
         SslModeValues = connectionStringService.SecurityOptions;
 
@@ -220,7 +235,7 @@ public sealed partial class UnifiedConnectionManagerViewModel : ObservableObject
             _selectedTabIndex = initialTab == 0 ? s_lastTabIndex : initialTab;
 
         // Set default form values from the active engine's platform defaults, never an
-        // engine value written in the UI (refactors/09 P5).
+        // engine value written in the UI.
         var connectionDefaults = _platformService.GetConnectionDefaults(defaultPlatformId);
         _formHost = "localhost";
         _formPort = connectionDefaults.Port.ToString();
@@ -302,10 +317,13 @@ public sealed partial class UnifiedConnectionManagerViewModel : ObservableObject
 
     /// <summary>
     /// Exports all connections and groups to a JSON backup file.
-    /// If a password is provided, the file is AES-256 encrypted.
+    /// If a password is provided, the file is AES-256 encrypted. Without one the file is
+    /// plain JSON, so passwords are left out of it: a backup that anyone can open must not
+    /// carry every credential in clear text.
     /// </summary>
     public void ExportAllToPath(string filePath, string? password = null)
     {
+        var encrypted = !string.IsNullOrEmpty(password);
         var connections = _connectionStore.GetAll();
         var groups = _groupStore.GetAll();
 
@@ -322,7 +340,10 @@ public sealed partial class UnifiedConnectionManagerViewModel : ObservableObject
                                                                  Port = c.Port,
                                                                  DatabaseName = c.DatabaseName,
                                                                  Username = c.Username,
-                                                                 Password = c.Password,
+                                                                 Password =
+                                                                     encrypted
+                                                                         ? c.Password
+                                                                         : string.Empty,
                                                                  SslMode = c.SslMode,
                                                                  ConnectionType = c.ConnectionType,
                                                                  Notes = c.Notes,
@@ -345,10 +366,10 @@ public sealed partial class UnifiedConnectionManagerViewModel : ObservableObject
 
         var json = JsonSerializer.Serialize(backup, BackupJsonOptions);
 
-        if (!string.IsNullOrEmpty(password))
-            _backupEncryptionService.WriteEncrypted(filePath, json, password);
+        if (encrypted)
+            _backupEncryptionService.WriteEncrypted(filePath, json, password!);
         else
-            File.WriteAllText(filePath, json);
+            _files.WriteAllText(filePath, json);
     }
 
     /// <summary>Exports the selected connection to a file chosen via SaveFileDialog.</summary>
@@ -366,7 +387,7 @@ public sealed partial class UnifiedConnectionManagerViewModel : ObservableObject
                          };
 
         if (dialog.ShowDialog() == true)
-            File.WriteAllText(dialog.FileName, exported);
+            _files.WriteAllText(dialog.FileName, exported);
     }
 
     /// <summary>
@@ -394,7 +415,12 @@ public sealed partial class UnifiedConnectionManagerViewModel : ObservableObject
                                Port = item.Port,
                                DatabaseName = item.DatabaseName,
                                Username = item.Username,
-                               Password = item.Password ?? string.Empty,
+                               // An unencrypted backup carries no passwords. Keeping the one already
+                               // stored under this Id stops a re-import from wiping credentials the
+                               // file never had a chance to restore.
+                               Password = string.IsNullOrEmpty(item.Password)
+                                              ? _connectionStore.GetById(item.Id)?.Password ?? string.Empty
+                                              : item.Password,
                                SslMode = item.SslMode,
                                ConnectionType = item.ConnectionType,
                                Notes = item.Notes,
@@ -427,26 +453,42 @@ public sealed partial class UnifiedConnectionManagerViewModel : ObservableObject
         return (connCount, groupCount);
     }
 
-    /// <summary>Imports a connection from raw text (used by Import from File / Clipboard).</summary>
+    /// <summary>Imports a connection from raw text (used by Import from File / Clipboard).
+    /// Whatever the import had to assume, or the reason it could not import at all, is put on
+    /// <see cref="ImportMessage"/> — the same report the import dialog shows.</summary>
     public void ImportFromText(string text)
     {
+        ImportMessage = null;
         if (string.IsNullOrWhiteSpace(text)) return;
 
+        ImportResult result;
         try
         {
-            var result = _importService.Import(text);
-            if (result.Success && result.Connection is not null)
-            {
-                var saved = MapToSavedConnection(result.Connection);
-                _connectionStore.Save(saved);
-                SelectedConnection = FilteredConnections.FirstOrDefault(c => c.Id == saved.Id);
-            }
+            result = _importService.Import(text);
         }
         catch
         {
-            // Silently ignore unrecognized content
+            ImportMessage = "No connection string was recognized in the text.";
+            return;
         }
+
+        var report = DescribeWarnings(result);
+
+        if (result.Success && result.Connection is not null)
+        {
+            var saved = MapToSavedConnection(result.Connection);
+            _connectionStore.Save(saved);
+            SelectedConnection = FilteredConnections.FirstOrDefault(c => c.Id == saved.Id);
+        }
+
+        ImportMessage = report;
     }
+
+    /// <summary>The warnings an import produced, as one line of status text, or null if none.</summary>
+    private static string? DescribeWarnings(ImportResult result) =>
+        result.Warnings.Count == 0
+            ? null
+            : string.Join(" ", result.Warnings.Select(w => w.Message));
 
     /// <summary>
     /// Checks whether a backup file is encrypted.
@@ -648,23 +690,7 @@ public sealed partial class UnifiedConnectionManagerViewModel : ObservableObject
     [RelayCommand]
     private void ImportFromClipboard()
     {
-        var text = System.Windows.Clipboard.GetText();
-        if (string.IsNullOrWhiteSpace(text)) return;
-
-        try
-        {
-            var result = _importService.Import(text);
-            if (result.Success && result.Connection is not null)
-            {
-                var saved = MapToSavedConnection(result.Connection);
-                _connectionStore.Save(saved);
-                SelectedConnection = FilteredConnections.FirstOrDefault(c => c.Id == saved.Id);
-            }
-        }
-        catch
-        {
-            // Silently ignore unrecognized clipboard content
-        }
+        ImportFromText(System.Windows.Clipboard.GetText());
     }
 
     private static bool IsPortValid(string portValue)
@@ -899,7 +925,7 @@ public sealed partial class UnifiedConnectionManagerViewModel : ObservableObject
             if (vm.OutputMode == EExportOutputMode.Clipboard)
                 System.Windows.Clipboard.SetText(vm.ExportedString);
             else if (!string.IsNullOrEmpty(vm.FilePath))
-                File.WriteAllText(vm.FilePath, vm.ExportedString);
+                _files.WriteAllText(vm.FilePath, vm.ExportedString);
         }
     }
 

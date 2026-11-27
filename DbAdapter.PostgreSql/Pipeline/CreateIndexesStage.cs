@@ -30,6 +30,8 @@ public sealed class CreateIndexesStage : ICopyStage
     /// <inheritdoc />
     public int Order => 95;
 
+    public bool IsCritical => false;
+
     /// <summary>Initializes a new instance.</summary>
     public CreateIndexesStage(
         PgDdlGenerator ddl,

@@ -27,6 +27,8 @@ public sealed class CopyDataStage : ICopyStage
     /// <inheritdoc />
     public int Order => 90;
 
+    public bool IsCritical => true;
+
     /// <summary>Initializes a new instance.</summary>
     public CopyDataStage(IPgExecutorFactory executorFactory, ILoggerFactory loggerFactory)
     {
@@ -116,11 +118,12 @@ public sealed class CopyDataStage : ICopyStage
                         PgIdentifierQuoter.QuoteSchemaQualified(table.SchemaName, table.Name);
                     try
                     {
+                        var countSql = Copy.PgDataCopier.BuildRowCountSql(qualifiedName);
                         var sourceRows = await sourceExec.ExecuteScalarAsync<long>(
-                                             $"SELECT count(*) FROM {qualifiedName}",
+                                             countSql,
                                              cancellationToken);
                         var destRows = await destExec.ExecuteScalarAsync<long>(
-                                           $"SELECT count(*) FROM {qualifiedName}",
+                                           countSql,
                                            cancellationToken);
 
                         if (sourceRows != destRows)
@@ -207,7 +210,7 @@ public sealed class CopyDataStage : ICopyStage
                 {
                     var qn = PgIdentifierQuoter.QuoteSchemaQualified(t.SchemaName, t.Name);
                     grandTotalRows += await rowCountExec.ExecuteScalarAsync<long>(
-                                          $"SELECT count(*) FROM {qn}",
+                                          Copy.PgDataCopier.BuildRowCountSql(qn),
                                           cancellationToken);
                 }
                 catch
@@ -230,12 +233,12 @@ public sealed class CopyDataStage : ICopyStage
             var stageStartPercent = stageIndex * 100.0 / totalStages;
             var stageBandPercent = 100.0 / totalStages;
 
-            var copier = new Copy.PgDataCopier(
+            await using var copier = new Copy.PgDataCopier(
                 sourceConn,
                 destConn,
                 _loggerFactory.CreateLogger<Copy.PgDataCopier>(),
-                context.SourceConnectionString,
-                context.DestinationConnectionString);
+                (context.SourceConnection as PgCopyConnection)?.ConnectionString,
+                (context.DestinationConnection as PgCopyConnection)?.ConnectionString);
             var tableProgress = new Progress<TableCopyProgress>(tp =>
                 {
                     var tableKey = $"{tp.SchemaName}.{tp.TableName}";
@@ -368,26 +371,16 @@ public sealed class CopyDataStage : ICopyStage
             // Force close and reopen
             try
             {
-                var oldConn = isSource
-                                  ? context.SourceConnection as NpgsqlConnection
-                                  : context.DestinationConnection as NpgsqlConnection;
-                if (oldConn is not null)
-                {
-                    await oldConn.CloseAsync();
-                    await oldConn.DisposeAsync();
-                }
+            var handle = (isSource ? context.SourceConnection : context.DestinationConnection) as PgCopyConnection;
+                if (handle is not null)
+                    await handle.ReopenAsync(ct);
             }
             catch
             {
                 /* best effort */
             }
 
-            // Reset so EnsureOpen creates a fresh connection
-            if (isSource)
-                context.SourceConnection = null;
-            else
-                context.DestinationConnection = null;
-
+            // The adapter-owned handle remains in the context while its provider connection is replaced.
             try
             {
                 return isSource

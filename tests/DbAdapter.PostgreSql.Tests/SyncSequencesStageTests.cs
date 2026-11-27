@@ -122,10 +122,10 @@ public class SyncSequencesStageTests
 
         string? resolveSql = null;
         _destExec
-            .ExecuteScalarAsync<string>(
+            .ExecuteScalarOrNullAsync<string>(
                 Arg.Do<string>(sql => resolveSql = sql),
                 Arg.Any<CancellationToken>())
-            .ThrowsAsync(new InvalidOperationException("Scalar query returned null"));
+            .Returns((string?)null);
 
         var result = await _stage.ExecuteAsync(context);
 
@@ -252,8 +252,8 @@ public class SyncSequencesStageTests
                            model,
                            new CopyOptions(CopyMode: mode)),
                        SourceModel = model,
-                       SourceConnection = SourceConnection,
-                       DestinationConnection = DestinationConnection
+                       SourceConnection = new PgCopyConnection(SourceConnection, string.Empty),
+                       DestinationConnection = new PgCopyConnection(DestinationConnection, string.Empty)
                    };
     }
 
@@ -272,20 +272,10 @@ public class SyncSequencesStageTests
                 Arg.Any<CancellationToken>())
             .Returns(value);
 
-    private void StubSerialSequenceResolution(string? resolved)
-    {
-        var call = _destExec.ExecuteScalarAsync<string>(
-            Arg.Is<string>(sql => sql != null && sql.Contains(SerialResolveSqlMarker, StringComparison.Ordinal)),
-            Arg.Any<CancellationToken>());
-
-        if (resolved is null)
-        {
-            // Mirrors PgSqlExecutor behavior when pg_get_serial_sequence returns NULL
-            call.ThrowsAsync(new InvalidOperationException("Scalar query returned null"));
-        }
-        else
-        {
-            call.Returns(resolved);
-        }
-    }
+    private void StubSerialSequenceResolution(string? resolved) =>
+        _destExec
+            .ExecuteScalarOrNullAsync<string>(
+                Arg.Is<string>(sql => sql != null && sql.Contains(SerialResolveSqlMarker, StringComparison.Ordinal)),
+                Arg.Any<CancellationToken>())
+            .Returns(resolved);
 }

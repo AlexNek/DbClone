@@ -1,0 +1,62 @@
+<ui:FluentWindow
+    x:Class="DbClone.UI.Views.RelationshipViewWindow"
+    xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+    xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+    xmlns:ui="http://schemas.lepo.co/wpfui/2022/xaml"
+    xmlns:wv2="clr-namespace:Microsoft.Web.WebView2.Wpf;assembly=Microsoft.Web.WebView2.Wpf"
+    x:ClassModifier="internal"
+    Title="Relationship view"
+    Width="1180"
+    Height="820"
+    MinWidth="640"
+    MinHeight="480"
+    ExtendsContentIntoTitleBar="True"
+    WindowBackdropType="Mica"
+    WindowStartupLocation="CenterScreen">
+    <Grid Background="{ui:ThemeResource ApplicationBackgroundBrush}">
+        <Grid.RowDefinitions>
+            <RowDefinition Height="Auto" />
+            <RowDefinition Height="Auto" />
+            <RowDefinition Height="*" />
+        </Grid.RowDefinitions>
+
+        <!--  The title names the origin, so the toolbar makes clear which database is on screen (D6)  -->
+        <ui:TitleBar x:Name="Bar" Grid.Row="0" Title="Relationship view" />
+
+        <!--  Three explicit actions: re-read the origin, hand the document to the browser, keep a copy  -->
+        <Border
+            Grid.Row="1"
+            Padding="12,8"
+            Background="{ui:ThemeResource ControlFillColorDefaultBrush}"
+            BorderBrush="{ui:ThemeResource ControlStrokeColorDefaultBrush}"
+            BorderThickness="0,0,0,1">
+            <StackPanel Orientation="Horizontal">
+                <ui:Button
+                    x:Name="RefreshButton"
+                    Margin="0,0,4,0"
+                    Click="OnRefreshClick"
+                    Content="Refresh"
+                    Style="{StaticResource CommandBarButtonStyle}" />
+                <ui:Button
+                    Margin="0,0,4,0"
+                    Click="OnOpenInBrowserClick"
+                    Content="Open in browser"
+                    Style="{StaticResource CommandBarButtonStyle}" />
+                <ui:Button
+                    Margin="0,0,12,0"
+                    Click="OnSaveClick"
+                    Content="Save as HTML..."
+                    Style="{StaticResource CommandBarButtonStyle}" />
+                <TextBlock
+                    x:Name="Status"
+                    VerticalAlignment="Center"
+                    FontSize="12"
+                    Foreground="{ui:ThemeResource TextFillColorSecondaryBrush}"
+                    TextTrimming="CharacterEllipsis" />
+            </StackPanel>
+        </Border>
+
+        <!--  The document is always the light page, so the surface behind it is that page's own background: a dark default shows as dark bands before the first paint and beside it while resizing  -->
+        <wv2:WebView2 x:Name="View" Grid.Row="2" DefaultBackgroundColor="#FFFBFBFD" />
+    </Grid>
+</ui:FluentWindow>

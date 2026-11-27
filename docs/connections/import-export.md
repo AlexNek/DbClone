@@ -17,8 +17,9 @@ To restore, click **Import All**, select your backup file, and enter the passwor
 ### Backup encryption
 
 - Leave the password empty for a plain JSON backup (local use only).
-- Enter a password to encrypt the file with **AES-256** (PBKDF2-SHA256 key derivation). Encrypted backups are safe to store or share.
-- On import, DbClone detects encryption automatically and prompts for the password.
+- Enter a password to encrypt the file with **AES-256-GCM** (PBKDF2-SHA256 key derivation, 600 000 iterations, a fresh salt and nonce per file). The ciphertext is **authenticated**: a backup that was edited, truncated, or corrupted on the way is detected and refused rather than half-imported.
+- On import, DbClone detects encryption automatically and prompts for the password. A wrong password and a tampered file are both reported as a failure to read the backup — nothing is written to your connections.
+- Backups written by older versions (the unauthenticated **version 1** format) still import exactly as before; a file you re-export is written in version 2.
 
 !!! warning "Keep your password safe"
     An encrypted backup **cannot be recovered** without its password. Store the password separately from the backup file.

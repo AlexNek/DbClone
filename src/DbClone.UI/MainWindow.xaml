@@ -25,11 +25,11 @@
             Modifiers="Control+Shift" />
         <KeyBinding
             Key="S"
-            Command="{Binding StoreRestore.StartStoreCommand}"
+            Command="{Binding StartStoreCommand}"
             Modifiers="Control+Shift" />
         <KeyBinding
             Key="R"
-            Command="{Binding StoreRestore.StartRestoreCommand}"
+            Command="{Binding StartRestoreCommand}"
             Modifiers="Control+Shift" />
         <KeyBinding Key="Escape" Command="{Binding StopActiveOperationCommand}" />
         <KeyBinding
@@ -82,7 +82,7 @@
                     <Style TargetType="ui:InfoBar">
                         <Setter Property="DataContext" Value="{Binding DataContext.ActiveState, RelativeSource={RelativeSource AncestorType=Window}}" />
                         <Style.Triggers>
-                            <DataTrigger Binding="{Binding DataContext.StoreRestore.IsRunning, RelativeSource={RelativeSource AncestorType=Window}}" Value="True">
+                            <DataTrigger Binding="{Binding DataContext.IsStoreRestoreDisplayed, RelativeSource={RelativeSource AncestorType=Window}}" Value="True">
                                 <Setter Property="DataContext" Value="{Binding DataContext.StoreRestoreState, RelativeSource={RelativeSource AncestorType=Window}}" />
                             </DataTrigger>
                         </Style.Triggers>
@@ -223,15 +223,22 @@
                     </Grid>
 
                     <!--  Connection panels  -->
-                    <StackPanel Grid.Row="1" Orientation="Horizontal"
-                                IsEnabled="{Binding Context.IsBusy, Converter={StaticResource InvertBoolConverter}}">
+                    <!--  Two equal columns: a horizontal stack sizes each child to its own content, so the
+                          source and the destination never came out the same width or height  -->
+                    <Grid Grid.Row="1"
+                          IsEnabled="{Binding Context.IsBusy, Converter={StaticResource InvertBoolConverter}}">
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="*" />
+                            <ColumnDefinition Width="Auto" />
+                            <ColumnDefinition Width="*" />
+                        </Grid.ColumnDefinitions>
                         <!--  Source panel + Store action button  -->
-                        <StackPanel Orientation="Vertical">
+                        <StackPanel Grid.Column="0" Orientation="Vertical">
                             <views:ConnectionView DataContext="{Binding Context.Source}" MinWidth="300" />
                             <ui:Button
                                 Margin="0,8,0,0"
                                 HorizontalAlignment="Center"
-                                Command="{Binding DataContext.StoreRestore.StartStoreCommand, RelativeSource={RelativeSource AncestorType=Window}}"
+                                Command="{Binding DataContext.StartStoreCommand, RelativeSource={RelativeSource AncestorType=Window}}"
                                 Style="{StaticResource CommandBarPrimaryButtonStyle}"
                                 ToolTip="Store database to catalog (Ctrl+Shift+S)">
                                 <ui:Button.Content>
@@ -241,10 +248,36 @@
                                     </StackPanel>
                                 </ui:Button.Content>
                             </ui:Button>
+
+                            <!--  Relationship view: the source database read live, and any catalog on disk  -->
+                            <StackPanel
+                                Margin="0,8,0,0"
+                                HorizontalAlignment="Center"
+                                Orientation="Horizontal">
+                                <ui:Button
+                                    Appearance="Secondary"
+                                    Command="{Binding DataContext.ViewSourceRelationshipsCommand, RelativeSource={RelativeSource AncestorType=Window}}"
+                                    ToolTip="Open the relationship view of the source database (read live, nothing is written)">
+                                    <ui:Button.Content>
+                                        <StackPanel Orientation="Horizontal">
+                                            <ui:SymbolIcon Symbol="Document16" Margin="0,0,6,0" />
+                                            <TextBlock Text="View relationships" />
+                                        </StackPanel>
+                                    </ui:Button.Content>
+                                </ui:Button>
+                                <ui:Button
+                                    Margin="6,0,0,0"
+                                    Padding="6"
+                                    Appearance="Transparent"
+                                    Command="{Binding DataContext.BrowseRelationshipsCommand, RelativeSource={RelativeSource AncestorType=Window}}"
+                                    ToolTip="Open the relationship view of a stored catalog">
+                                    <ui:SymbolIcon Symbol="FolderOpen16" FontSize="16" />
+                                </ui:Button>
+                            </StackPanel>
                         </StackPanel>
 
                         <!--  Group action buttons  -->
-                        <StackPanel Orientation="Vertical" VerticalAlignment="Center" Margin="8,0" DataContext="{Binding Connections}">
+                        <StackPanel Grid.Column="1" Orientation="Vertical" VerticalAlignment="Center" Margin="8,0" DataContext="{Binding Connections}">
                             <ui:Button
                                 Appearance="Transparent"
                                 Command="{Binding CreateGroupFromCurrentCommand}"
@@ -263,12 +296,12 @@
                         </StackPanel>
 
                         <!--  Destination panel + Restore action button  -->
-                        <StackPanel Orientation="Vertical">
+                        <StackPanel Grid.Column="2" Orientation="Vertical">
                             <views:ConnectionView DataContext="{Binding Context.Destination}" MinWidth="300" />
                             <ui:Button
                                 Margin="0,8,0,0"
                                 HorizontalAlignment="Center"
-                                Command="{Binding DataContext.StoreRestore.StartRestoreCommand, RelativeSource={RelativeSource AncestorType=Window}}"
+                                Command="{Binding DataContext.StartRestoreCommand, RelativeSource={RelativeSource AncestorType=Window}}"
                                 Style="{StaticResource CommandBarPrimaryButtonStyle}"
                                 ToolTip="Restore catalog to database (Ctrl+Shift+R)">
                                 <ui:Button.Content>
@@ -278,10 +311,25 @@
                                     </StackPanel>
                                 </ui:Button.Content>
                             </ui:Button>
-                        </StackPanel>
-                    </StackPanel>
 
-                    <!--  Progress (DataContext switches by mode; StoreRestore takes priority when running)  -->
+                            <!--  Relationship view: the destination database read live  -->
+                            <ui:Button
+                                Margin="0,8,0,0"
+                                HorizontalAlignment="Center"
+                                Appearance="Secondary"
+                                Command="{Binding DataContext.ViewTargetRelationshipsCommand, RelativeSource={RelativeSource AncestorType=Window}}"
+                                ToolTip="Open the relationship view of the destination database (read live, nothing is written)">
+                                <ui:Button.Content>
+                                    <StackPanel Orientation="Horizontal">
+                                        <ui:SymbolIcon Symbol="Document16" Margin="0,0,6,0" />
+                                        <TextBlock Text="View relationships" />
+                                    </StackPanel>
+                                </ui:Button.Content>
+                            </ui:Button>
+                        </StackPanel>
+                    </Grid>
+
+                    <!--  Progress (DataContext switches by mode; StoreRestore takes priority while its state owns the display)  -->
                     <views:ProgressView Grid.Row="2">
                         <views:ProgressView.Style>
                             <Style TargetType="views:ProgressView">
@@ -290,8 +338,8 @@
                                     <DataTrigger Binding="{Binding DataContext.Toolbar.SelectedMode, RelativeSource={RelativeSource AncestorType=Window}}" Value="Compare">
                                         <Setter Property="DataContext" Value="{Binding DataContext.Compare, RelativeSource={RelativeSource AncestorType=Window}}" />
                                     </DataTrigger>
-                                    <DataTrigger Binding="{Binding DataContext.StoreRestore.IsRunning, RelativeSource={RelativeSource AncestorType=Window}}" Value="True">
-                                        <Setter Property="DataContext" Value="{Binding DataContext.StoreRestore, RelativeSource={RelativeSource AncestorType=Window}}" />
+                                    <DataTrigger Binding="{Binding DataContext.IsStoreRestoreDisplayed, RelativeSource={RelativeSource AncestorType=Window}}" Value="True">
+                                        <Setter Property="DataContext" Value="{Binding DataContext.StoreRestoreProgress, RelativeSource={RelativeSource AncestorType=Window}}" />
                                     </DataTrigger>
                                 </Style.Triggers>
                             </Style>
@@ -340,7 +388,7 @@
                         <Setter Property="Visibility" Value="Collapsed" />
                         <Style.Triggers>
                             <!--  Visible when the active workflow's log pane is expanded  -->
-                            <DataTrigger Binding="{Binding DataContext.ActiveState.IsLogPaneExpanded, RelativeSource={RelativeSource AncestorType=Window}}" Value="True">
+                            <DataTrigger Binding="{Binding DataContext.Log.ActiveState.IsLogPaneExpanded, RelativeSource={RelativeSource AncestorType=Window}}" Value="True">
                                 <Setter Property="Visibility" Value="Visible" />
                             </DataTrigger>
                         </Style.Triggers>
@@ -366,7 +414,7 @@
                         <Setter Property="Visibility" Value="Visible" />
                         <Style.Triggers>
                             <!--  Hidden when the active workflow's log pane is expanded  -->
-                            <DataTrigger Binding="{Binding DataContext.ActiveState.IsLogPaneExpanded, RelativeSource={RelativeSource AncestorType=Window}}" Value="True">
+                            <DataTrigger Binding="{Binding DataContext.Log.ActiveState.IsLogPaneExpanded, RelativeSource={RelativeSource AncestorType=Window}}" Value="True">
                                 <Setter Property="Visibility" Value="Collapsed" />
                             </DataTrigger>
                         </Style.Triggers>

@@ -14,6 +14,11 @@ public interface IConfirmationService
     Task<bool> ConfirmAsync(string title, string message);
 
     /// <summary>
+    /// Asks how to proceed when the selected restore target is populated.
+    /// </summary>
+    Task<ERestoreTargetChoice> ConfirmRestoreTargetAsync(string title, string message);
+
+    /// <summary>
     /// Shows a three-choice dialog asking how a populated destination should be
     /// cleaned when a table selection is active.
     /// </summary>

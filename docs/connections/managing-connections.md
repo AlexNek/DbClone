@@ -41,6 +41,7 @@ When you change the **Connection Type** dropdown manually, the port and SSL mode
     ```
     postgres://user:password@host:5432/dbname?sslmode=require
     ```
+    A partial string works too — whatever it omits is filled from the platform's defaults and reported, see [What the Import Fills In and Reports](connection-formats.md#what-the-import-fills-in-and-reports).
 
 ## Testing a Connection
 
@@ -82,4 +83,10 @@ Connections are saved in:
 %LOCALAPPDATA%\DbClone\connections.json
 ```
 
+Alongside them in the same folder: `connection-groups.json`, `table-selection-presets.json`, `settings.json`, and the `logs` folder — see [Troubleshooting](../troubleshooting.md).
+
 Passwords are encrypted using Windows DPAPI (Data Protection API) — they can only be decrypted by the same Windows user on the same machine.
+
+!!! info "A save never leaves a half-written file behind"
+    Each of these files is written to a temporary name and moved into place only once it is complete, so an interrupted save (a crash, a full disk, a killed process) leaves the previous file intact rather than a truncated one.
+    If a file that is already there cannot be read — damaged JSON, or a connection store whose protected data this Windows user cannot open — DbClone does not overwrite it. It moves the file aside as `connections.json.corrupt-<timestamp>.bak` (the same for the other files), starts from an empty list, and writes the reason to the log. Your real file is still in that folder, and renaming it back is a manual step.

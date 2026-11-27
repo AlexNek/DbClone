@@ -207,11 +207,103 @@ public class TableDdlComparerTests
     }
 
     // ─────────────────────────────────────────────────────────────────────────
+    // Compare — foreign key scope
+    // ─────────────────────────────────────────────────────────────────────────
+
+    [Fact]
+    public void Compare_FkParentOutsideBothModels_IsNotice()
+    {
+        // The parent lives in a schema neither read covered: the constraint could not be
+        // compared, so its absence on the destination is not a difference.
+        var source = Model(
+            FkTable("public", "comments", Fk("comments_created_by_fkey", "auth", "users")));
+        var dest = Model(FkTable("public", "comments"));
+
+        var items = _sut.Compare(source, dest, CancellationToken.None);
+
+        items.Should().HaveCount(1);
+        items[0].Status.Should().Be(ECompareStatus.Notice);
+        items[0].Details.Should().Contain(
+            "FK not compared: comments_created_by_fkey (parent auth.users is outside the compared scope)");
+        items[0].Details.Should().NotContain("FK removed");
+    }
+
+    [Fact]
+    public void Compare_FkParentInsideBothModels_RemovedIsStillDifferent()
+    {
+        var source = Model(
+            FkTable("public", "users"),
+            FkTable("public", "orders", Fk("orders_owner_id_fkey", "public", "users")));
+        var dest = Model(
+            FkTable("public", "users"),
+            FkTable("public", "orders"));
+
+        var items = _sut.Compare(source, dest, CancellationToken.None);
+
+        items.Should().HaveCount(1);
+        items[0].Status.Should().Be(ECompareStatus.Different);
+        items[0].Details.Should().Contain("FK removed: orders_owner_id_fkey");
+    }
+
+    [Fact]
+    public void Compare_FkParentOnSourceOnly_IsNoticeNotRemoved()
+    {
+        var source = Model(
+            FkTable("public", "users"),
+            FkTable("public", "orders", Fk("orders_owner_id_fkey", "public", "users")));
+        var dest = Model(FkTable("public", "orders"));
+
+        var items = _sut.Compare(source, dest, CancellationToken.None);
+
+        items.Should().HaveCount(1);
+        items[0].Status.Should().Be(ECompareStatus.Notice);
+        items[0].Details.Should().Contain("FK not compared: orders_owner_id_fkey");
+        items[0].Details.Should().NotContain("FK removed");
+    }
+
+    [Fact]
+    public void Compare_RealDifferenceAndOutOfScopeFk_StaysDifferentAndListsBoth()
+    {
+        var srcTable = new TableDefinition(
+            "public", "orders",
+            Columns: [Col("id"), Col("val", "text", 2)],
+            Indexes: [],
+            ForeignKeys: [Fk("orders_created_by_fkey", "auth", "users")],
+            CheckConstraints: [],
+            UniqueConstraints: [],
+            Comment: null, IsPartitioned: false, PartitionStrategy: null,
+            ParentTable: null);
+        var dstTable = new TableDefinition(
+            "public", "orders",
+            Columns: [Col("id")],
+            Indexes: [],
+            ForeignKeys: [],
+            CheckConstraints: [],
+            UniqueConstraints: [],
+            Comment: null, IsPartitioned: false, PartitionStrategy: null,
+            ParentTable: null);
+
+        var items = _sut.Compare(Model(srcTable), Model(dstTable), CancellationToken.None);
+
+        items.Should().HaveCount(1);
+        items[0].Status.Should().Be(ECompareStatus.Different);
+        items[0].Details.Should().Contain("Columns removed: val");
+        items[0].Details.Should().Contain("FK not compared: orders_created_by_fkey");
+    }
+
+    // ─────────────────────────────────────────────────────────────────────────
     // Helpers
     // ─────────────────────────────────────────────────────────────────────────
 
     private static ColumnDefinition Col(string name, string type = "integer", int ordinal = 1) =>
         new(name, type, ordinal, false, null, false, false, null, null);
+
+    private static ForeignKeyDefinition Fk(string name, string parentSchema, string parentTable) =>
+        new(name, ["owner_id"], parentSchema, parentTable, ["id"], "NO ACTION", "NO ACTION", false, false);
+
+    private static TableDefinition FkTable(
+        string schema, string name, params ForeignKeyDefinition[] foreignKeys) =>
+        new(schema, name, [Col("id")], [], foreignKeys, [], [], null, false, null, null);
 
     private static DatabaseModel Model(params TableDefinition[] tables) =>
         new(

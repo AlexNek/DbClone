@@ -14,4 +14,12 @@ public interface IDialogService
     /// <param name="defaultFileName">Default file name.</param>
     /// <returns>Selected file path, or null if cancelled.</returns>
     string? SaveFile(string filter, string defaultFileName);
+
+    /// <summary>
+    /// Shows a folder browser dialog for selecting a directory.
+    /// </summary>
+    /// <param name="description">Dialog title/description.</param>
+    /// <param name="initialDirectory">Initial directory to show.</param>
+    /// <returns>Selected folder path, or null if cancelled.</returns>
+    string? BrowseFolder(string description, string? initialDirectory = null);
 }

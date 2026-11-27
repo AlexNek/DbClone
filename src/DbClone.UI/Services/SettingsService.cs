@@ -95,6 +95,13 @@ public sealed class SettingsService : ISettingsService
         }
         catch (Exception ex)
         {
+            if (ex is JsonException)
+            {
+                try { AtomicFileWriter.Quarantine(SettingsPath); }
+                catch (Exception quarantineEx) { Log.Warning(quarantineEx, "[SettingsService.Load] Could not quarantine corrupt file {Path}", SettingsPath); }
+                Log.Warning("[SettingsService.Load] Corrupt settings were quarantined at {Path}", SettingsPath);
+            }
+
             Log.Warning(
                 ex,
                 "[SettingsService.Load] Failed to load settings from {Path}",
@@ -113,7 +120,7 @@ public sealed class SettingsService : ISettingsService
                 Directory.CreateDirectory(directory);
 
             var json = JsonSerializer.Serialize(settings, JsonOptions);
-            File.WriteAllText(SettingsPath, json);
+            AtomicFileWriter.WriteAllText(SettingsPath, json);
             Log.Debug("[SettingsService.Save] Written to {Path}", SettingsPath);
         }
         catch (Exception ex)

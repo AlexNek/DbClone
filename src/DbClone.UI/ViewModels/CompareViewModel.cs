@@ -1,5 +1,4 @@
 using System.Collections.ObjectModel;
-using System.IO;
 using System.Windows;
 using System.Windows.Input;
 
@@ -50,7 +49,7 @@ public sealed partial class CompareViewModel : ObservableObject, IWorkflowViewMo
 
     private readonly ILogger<CompareViewModel> _logger;
 
-    private readonly ReportExportService _reportExportService;
+    private readonly IReportExportService _reportExportService;
 
     private readonly SettingsPersistenceManager _settingsPersister;
 
@@ -220,7 +219,7 @@ public sealed partial class CompareViewModel : ObservableObject, IWorkflowViewMo
         IComparisonService comparisonService,
         ITableCatalogService catalogService,
         IDialogService dialogService,
-        ReportExportService reportExportService,
+        IReportExportService reportExportService,
         SettingsPersistenceManager settingsPersister,
         ViewModelStateManager stateManager,
         ITableSelectionService tableSelectionService,
@@ -637,8 +636,7 @@ public sealed partial class CompareViewModel : ObservableObject, IWorkflowViewMo
         var path = _dialogService.SaveFile("HTML File|*.html", "comparison-report.html");
         if (string.IsNullOrEmpty(path)) return;
 
-        var html = _reportExportService.Export(Path.GetExtension(path), BuildReportData());
-        File.WriteAllText(path, html);
+        _reportExportService.ExportToFile(path, BuildReportData());
         _logger.LogInformation("Exported HTML report to {Path}", path);
     }
 
@@ -648,8 +646,7 @@ public sealed partial class CompareViewModel : ObservableObject, IWorkflowViewMo
         var path = _dialogService.SaveFile("JSON File|*.json", "comparison-report.json");
         if (string.IsNullOrEmpty(path)) return;
 
-        var json = _reportExportService.Export(Path.GetExtension(path), BuildReportData());
-        File.WriteAllText(path, json);
+        _reportExportService.ExportToFile(path, BuildReportData());
         _logger.LogInformation("Exported JSON report to {Path}", path);
     }
 
@@ -659,8 +656,7 @@ public sealed partial class CompareViewModel : ObservableObject, IWorkflowViewMo
         var path = _dialogService.SaveFile("Markdown File|*.md", "comparison-report.md");
         if (string.IsNullOrEmpty(path)) return;
 
-        var md = _reportExportService.Export(Path.GetExtension(path), BuildReportData());
-        File.WriteAllText(path, md);
+        _reportExportService.ExportToFile(path, BuildReportData());
         _logger.LogInformation("Exported Markdown report to {Path}", path);
     }
 

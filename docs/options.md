@@ -23,6 +23,12 @@ Toggle which object types to include in the copy:
 |--------|---------|-------------|
 | **Platform Schemas** | ✅ On | Include platform-managed schemas (e.g. Supabase `auth`, `storage`, `realtime`). Uncheck to exclude schemas owned by non-login service roles. System schemas (`pg_catalog`, `information_schema`, `pg_toast`) are always excluded regardless of this setting |
 
+!!! note "Two independent toggles"
+    Copy and Compare each keep their own **Platform Schemas** setting, and both default to on. Unchecking it
+    for a copy while leaving it on for a comparison is supported: the copy then creates only the foreign keys
+    whose parent table it also copies (see [Pipeline Stages](pipeline/stages.md#foreign-keys-and-scope)), and
+    the comparison states the remaining ones as notices instead of differences.
+
 ### Platform-Aware Schema Resolution
 
 DbClone uses **`.platform` definition files** to determine which schemas and extensions belong to each hosting platform. When you connect, DbClone auto-detects the platform from the hostname and resolves the applicable schemas and extensions based on the server version.
@@ -91,6 +97,7 @@ Settings include:
 - Verification mode
 - Object toggles (data, indexes, functions, views, triggers)
 - Platform schemas toggle
+- [Store & Restore](store-restore.md) options (`StoreRestore`: catalog location, subfolder pattern, chunk and row limits, data inclusion, packing, policies)
 - Window position and size
 - Theme preference (light/dark/system)
 - Last used source and destination connections

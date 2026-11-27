@@ -77,6 +77,35 @@ public sealed class PgSqlExecutor : ISqlExecutor, IAsyncDisposable
         Func<ISqlExecutor, Task> action,
         CancellationToken cancellationToken = default)
     {
+        ArgumentNullException.ThrowIfNull(action);
+
+        for (var attempt = 0; ; attempt++)
+        {
+            try
+            {
+                await ExecuteTransactionAttemptAsync(action, cancellationToken);
+                return;
+            }
+            catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+            {
+                throw;
+            }
+            catch (NpgsqlException ex) when (attempt < _maxRetries && IsTransient(ex))
+            {
+                _logger.LogWarning(
+                    ex,
+                    "Transient transaction failure on attempt {Attempt}/{MaxRetries}; retrying the whole transaction",
+                    attempt + 1,
+                    _maxRetries);
+                await Task.Delay(_retryDelays[attempt], cancellationToken);
+            }
+        }
+    }
+
+    private async Task ExecuteTransactionAttemptAsync(
+        Func<ISqlExecutor, Task> action,
+        CancellationToken cancellationToken)
+    {
         await EnsureOpenAsync(cancellationToken);
         await using var transaction = await _connection.BeginTransactionAsync(cancellationToken);
         var txExecutor = new PgSqlExecutor(_connection, _logger, _commandTimeout);
@@ -89,7 +118,7 @@ public sealed class PgSqlExecutor : ISqlExecutor, IAsyncDisposable
         catch
         {
             _logger.LogWarning("Transaction rolling back");
-            await transaction.RollbackAsync(cancellationToken);
+            await transaction.RollbackAsync(CancellationToken.None);
             throw;
         }
     }
@@ -133,10 +162,36 @@ public sealed class PgSqlExecutor : ISqlExecutor, IAsyncDisposable
                            _logger.LogDebug("ExecuteScalar: {Sql}", TruncateSql(sql));
                            var result = await cmd.ExecuteScalarAsync(cancellationToken);
                            if (result is null || result is DBNull)
-                               throw new InvalidOperationException("Scalar query returned null");
+                               throw new InvalidOperationException(
+                                   $"Scalar query returned null: {TruncateSql(sql)}");
                            return (T)Convert.ChangeType(result, typeof(T))!;
                        },
                    "ExecuteScalarAsync",
+                   cancellationToken);
+    }
+
+    /// <inheritdoc />
+    public async Task<T?> ExecuteScalarOrNullAsync<T>(
+        string sql,
+        CancellationToken cancellationToken = default)
+        where T : class
+    {
+        return await RetryAsync(
+                   async () =>
+                       {
+                           await EnsureOpenAsync(cancellationToken);
+                           await using var cmd = new NpgsqlCommand(sql, _connection)
+                                                     {
+                                                         CommandTimeout =
+                                                             (int)_commandTimeout.TotalSeconds
+                                                     };
+                           _logger.LogDebug("ExecuteScalarOrNull: {Sql}", TruncateSql(sql));
+                           var result = await cmd.ExecuteScalarAsync(cancellationToken);
+                           if (result is null || result is DBNull)
+                               return null;
+                           return (T?)Convert.ChangeType(result, typeof(T));
+                       },
+                   "ExecuteScalarOrNullAsync",
                    cancellationToken);
     }
 
@@ -220,7 +275,7 @@ public sealed class PgSqlExecutor : ISqlExecutor, IAsyncDisposable
             }
             catch (Exception ex)
             {
-                _logger.LogError(ex, "Error in {Operation}: {Message}", operationName, ex.Message);
+                _logger.LogDebug(ex, "Error in {Operation}: {Message}", operationName, ex.Message);
                 throw;
             }
         }

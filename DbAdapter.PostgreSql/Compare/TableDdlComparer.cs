@@ -39,7 +39,7 @@ public sealed partial class TableDdlComparer : IModelComparer
 
             CompareColumns(srcTable, dstTable, differences);
             ComparePrimaryKey(srcTable, dstTable, differences);
-            CompareForeignKeys(srcTable, dstTable, differences);
+            CompareForeignKeys(srcTable, dstTable, source, dest, differences, notices);
             CompareCheckConstraints(srcTable, dstTable, differences, notices);
             CompareUniqueConstraints(srcTable, dstTable, differences);
 
@@ -159,7 +159,9 @@ public sealed partial class TableDdlComparer : IModelComparer
     }
 
     private static void CompareForeignKeys(
-        TableDefinition src, TableDefinition dst, List<string> differences)
+        TableDefinition src, TableDefinition dst,
+        DatabaseModel source, DatabaseModel dest,
+        List<string> differences, List<string> notices)
     {
         var srcByName = src.ForeignKeys.ToDictionary(f => f.Name, StringComparer.OrdinalIgnoreCase);
         var dstByName = dst.ForeignKeys.ToDictionary(f => f.Name, StringComparer.OrdinalIgnoreCase);
@@ -172,20 +174,51 @@ public sealed partial class TableDdlComparer : IModelComparer
         var common = srcNames.Intersect(dstNames, StringComparer.OrdinalIgnoreCase).ToList();
 
         foreach (var name in removed)
-            differences.Add($"FK removed: {name}");
+        {
+            var fk = srcByName[name];
+            if (IsParentInScope(fk, source, dest))
+                differences.Add($"FK removed: {name}");
+            else
+                notices.Add(NotCompared(name, fk));
+        }
 
         foreach (var name in added)
         {
             var fk = dstByName[name];
-            differences.Add($"FK added: {name} → {fk.ReferencedSchema}.{fk.ReferencedTable}({string.Join(", ", fk.ReferencedColumns)})");
+            if (IsParentInScope(fk, source, dest))
+                differences.Add($"FK added: {name} → {fk.ReferencedSchema}.{fk.ReferencedTable}({string.Join(", ", fk.ReferencedColumns)})");
+            else
+                notices.Add(NotCompared(name, fk));
         }
 
         foreach (var name in common)
         {
-            if (GetForeignKeySignature(srcByName[name]) != GetForeignKeySignature(dstByName[name]))
+            var srcFk = srcByName[name];
+            var dstFk = dstByName[name];
+
+            if (!IsParentInScope(srcFk, source, dest) || !IsParentInScope(dstFk, source, dest))
+            {
+                notices.Add(NotCompared(name, srcFk));
+                continue;
+            }
+
+            if (GetForeignKeySignature(srcFk) != GetForeignKeySignature(dstFk))
                 differences.Add($"FK modified: {name}");
         }
     }
+
+    /// <summary>
+    /// The one scope test, applied to the compared pair: a constraint is comparable only
+    /// while the table it references is read on both sides. The parent can be missing
+    /// because a platform schema was left out of the read, not because the schema differs,
+    /// so the finding states that the constraint could not be compared.
+    /// </summary>
+    private static bool IsParentInScope(ForeignKeyDefinition fk, DatabaseModel source, DatabaseModel dest) =>
+        source.ContainsTable(fk.ReferencedSchema, fk.ReferencedTable)
+        && dest.ContainsTable(fk.ReferencedSchema, fk.ReferencedTable);
+
+    private static string NotCompared(string name, ForeignKeyDefinition fk) =>
+        $"FK not compared: {name} (parent {fk.ReferencedSchema}.{fk.ReferencedTable} is outside the compared scope)";
 
     private static void CompareCheckConstraints(
         TableDefinition src, TableDefinition dst,

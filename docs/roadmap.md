@@ -14,6 +14,14 @@ This page collects ideas for potential future enhancements — **nothing here is
 
 ---
 
+## Store & Restore
+
+| Feature | Priority | Description |
+|---------|----------|-------------|
+| **Pack catalogs into `.rdbx.zip`** | 💡 Backlog | Implement product-owned, atomic archive creation beside a completed catalog, safe archive restore, verification, cancellation handling, and a Store option that is exposed only after the full round trip works. |
+
+---
+
 ## Copy & Data Transfer
 
 | Feature | Priority | Description |

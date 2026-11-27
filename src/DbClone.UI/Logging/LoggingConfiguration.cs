@@ -50,9 +50,11 @@ public static class LoggingConfiguration
             return null;
         }
 #else
+        // In release, write to the user's local profile: the install folder sits under Program Files
+        // (per-machine MSI) and is not writable by a standard user.
         var appName = AppFolder.Name;
         var primary = Path.Combine(
-            Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData),
+            Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
             appName, "logs");
 
         try

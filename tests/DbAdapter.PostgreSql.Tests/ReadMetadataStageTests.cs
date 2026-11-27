@@ -4,8 +4,6 @@ using DbClone.Application.Copy;
 
 using FluentAssertions;
 
-using Microsoft.Extensions.Logging.Abstractions;
-
 using CanonicalModel.DTOs;
 using CanonicalModel.Enums;
 using CanonicalModel.Models;
@@ -18,7 +16,7 @@ namespace DbAdapter.PostgreSql.Tests;
 /// </summary>
 public class ReadMetadataStageTests
 {
-    private readonly ReadMetadataStage _stage = new(NullLoggerFactory.Instance);
+    private readonly ReadMetadataStage _stage = new();
 
     [Fact]
     public async Task ExecuteAsync_FilteredModel_ReportsTheFilteredCounts()

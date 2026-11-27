@@ -10,8 +10,8 @@ using FluentAssertions;
 namespace Application.Tests;
 
 /// <summary>
-/// Guards the layer facts the adapter refactor (<c>refactors/08</c>) rests on.
-/// Phase 0 records the tree as it stands today; later phases extend the rule set.
+/// Guards the layer facts the adapter boundary rests on: the rule set covers the tree as it
+/// stands today and grows with the boundary.
 /// </summary>
 public class ArchitectureTests
 {
@@ -26,6 +26,18 @@ public class ArchitectureTests
     /// <summary>Gets the directory of the boundary contract, relative to the repository root.</summary>
     private const string DefinitionsDirName = "DbAdapter.Definitions";
 
+    /// <summary>Gets the directory of the application shell, relative to the repository root.</summary>
+    private const string UiDirName = "src/DbClone.UI";
+
+    /// <summary>
+    /// Gets the regular expression matching a word only one engine knows: a driver name, a catalog
+    /// name, a port, a dialect name or a clipboard format id. The UI names none of them — every
+    /// value it shows is resolved from the installed adapter's own platform data.
+    /// </summary>
+    private static readonly Regex EngineVocabulary = new(
+        @"\bpostgres(?:ql)?\b|\bNpgsql\b|\bpg_\w+|\binformation_schema\b|\b5432\b|\bsupabase\b|pg-npgsql",
+        RegexOptions.Compiled | RegexOptions.IgnoreCase);
+
     /// <summary>Gets the source roots the layer rules are measured over.</summary>
     private static readonly string[] SourceRoots = [ModelDirName, DefinitionsDirName, "src", BlockDirName];
 
@@ -34,6 +46,8 @@ public class ArchitectureTests
 
     /// <summary>Gets the regular expression matching a type name from the provider library.</summary>
     private static readonly Regex NpgsqlTypeName = new(@"\bNpgsql\b", RegexOptions.Compiled);
+
+    private static readonly Regex DefinitionsUsing = new(@"^using\s+DbAdapter\.Definitions\s*;$", RegexOptions.Compiled | RegexOptions.Multiline);
 
     [Fact]
     public void NoFileOutsideTheBlockNamesAnNpgsqlType()
@@ -56,7 +70,7 @@ public class ArchitectureTests
     public void ApplicationProjectHasNoProjectReferenceOutsideTheAllowedSet()
     {
         // Arrange
-        var allowed = new[] { "CanonicalModel.csproj", "DbAdapter.Definitions.csproj" };
+        var allowed = new[] { "CanonicalModel.csproj", "DbAdapter.Definitions.csproj", "DatabaseInterchange.csproj" };
 
         // Act
         var references = ProjectReferencesOf("src/DbClone.Application/DbClone.Application.csproj");
@@ -64,7 +78,8 @@ public class ArchitectureTests
         // Assert
         // The shared model is the language every layer speaks and the definitions assembly is
         // the one boundary contract the application may name; a reference to the block or to
-        // the UI would invert the layer.
+        // the UI would invert the layer. The interchange product is the exchange the application
+        // consumes through its facade.
         references.Should().NotContain(
             reference => reference.EndsWith(BlockDirName + ".csproj", StringComparison.Ordinal)
                          || reference.EndsWith("DbClone.UI.csproj", StringComparison.Ordinal),
@@ -108,7 +123,7 @@ public class ArchitectureTests
             .ToList();
 
         // Assert
-        // Table filtering left the pipeline in Phase 3, so every stage now lives in the block.
+        // Table filtering has left the pipeline, so every stage now lives in the block.
         stages.Should().BeEmpty(
             "the pipeline's stages all live in the engine block");
     }
@@ -126,7 +141,7 @@ public class ArchitectureTests
 
         // Act
         // The contract now holds the shared copy runner and the platform reader, so the old
-        // "declarations only" rule is replaced by a narrower, checkable one (refactors/09 P5):
+        // "declarations only" rule is replaced by a narrower, checkable one:
         // no file here writes SQL and no file here names an engine or a driver. Prose is out of
         // scope — the project's existing remarks (in files this refactor does not move) carry
         // engine examples, so the scan runs over code with comments stripped, not raw text.
@@ -138,9 +153,34 @@ public class ArchitectureTests
 
         // Assert
         offenders.Should().BeEmpty(
-            "DbAdapter.Definitions holds no SQL, no engine name and no driver reference in code (refactors/09 P5)");
+            "DbAdapter.Definitions holds no SQL, no engine name and no driver reference in code");
     }
 
+
+    /// <summary>Gets the regular expression matching a direct JSON deserialization of a catalog file.</summary>
+    private static readonly Regex IndependentCatalogDeserialization = new(
+        @"\bJsonSerializer\b|\bJsonDocument\b|\bJsonNode\b|\bUtf8JsonReader\b|\bUtf8JsonWriter\b|\bJsonSerializerOptions\b",
+        RegexOptions.Compiled);
+
+    [Fact]
+    public void InterchangeFacadeDeserializesNoCatalogFileOfItsOwn()
+    {
+        // Arrange — one deserialization path for every catalog read.
+        var facadeRoot = Path.Combine(RepoRoot, "src", "DbClone.Application", "Interchange");
+
+        // Act
+        var offenders = Directory.EnumerateFiles(facadeRoot, "*.cs", SearchOption.AllDirectories)
+            .Where(file => !file.Contains($"{Path.DirectorySeparatorChar}bin{Path.DirectorySeparatorChar}")
+                           && !file.Contains($"{Path.DirectorySeparatorChar}obj{Path.DirectorySeparatorChar}"))
+            .Where(file => IndependentCatalogDeserialization.IsMatch(File.ReadAllText(file)))
+            .Select(file => Path.GetRelativePath(RepoRoot, file))
+            .ToList();
+
+        // Assert — one deserialization path: every catalog read goes through the product's reader, so
+        // restore, verify and the relationship view cannot disagree about whether a catalog is readable.
+        offenders.Should().BeEmpty(
+            "the interchange facade must read a catalog through the product's reader only");
+    }
 
     /// <summary>Gets the regular expression matching a using of a Microsoft.Extensions namespace other than the logging abstraction.</summary>
     private static readonly Regex NonLoggingExtensionsUsing = new(@"^using\s+Microsoft\.Extensions\.(?!Logging[\w.]*\s*;)[\w.]+\s*;$", RegexOptions.Compiled | RegexOptions.Multiline);
@@ -151,7 +191,7 @@ public class ArchitectureTests
     [Fact]
     public void NoSrcFileNamesTheEngineBlockOrAdapter()
     {
-        // Arrange — refactors/09 Phase 4 box 78.
+        // Arrange
         var srcRoot = Path.Combine(RepoRoot, "src");
 
         // Act
@@ -165,13 +205,104 @@ public class ArchitectureTests
         // Assert — only DbClone.UI.csproj may name the adapter project (a build-ordering ProjectReference
         // plus the PublishAdapters target), and only that csproj — no C# file under src.
         offenders.Should().BeEmpty(
-            "no C# file under src may name the engine block or its adapter class (refactors/09 Phase 4)");
+            "no C# file under src may name the engine block or its adapter class");
+    }
+
+    /// <summary>Gets the regular expression matching a name of the interchange product assembly.</summary>
+    private static readonly Regex ProductAssemblyName = new(@"\bDatabaseInterchange\b", RegexOptions.Compiled);
+
+    /// <summary>Gets the text file types under the UI project worth scanning for an assembly name.</summary>
+    private static readonly string[] UiTextFilePatterns = ["*.cs", "*.xaml", "*.csproj"];
+
+    [Fact]
+    public void NoUiFileNamesTheProductAssembly()
+    {
+        // Arrange — the UI half of AC11. The interchange product is consumed through the application's
+        // Interchange/ facade; a UI that could name it could also start reading a catalog by itself.
+        var uiRoot = Path.Combine(RepoRoot, "src", "DbClone.UI");
+
+        // Act
+        var offenders = UiTextFilePatterns
+            .SelectMany(pattern => Directory.EnumerateFiles(uiRoot, pattern, SearchOption.AllDirectories))
+            .Where(file => !file.Contains($"{Path.DirectorySeparatorChar}bin{Path.DirectorySeparatorChar}")
+                           && !file.Contains($"{Path.DirectorySeparatorChar}obj{Path.DirectorySeparatorChar}"))
+            .Where(file => ProductAssemblyName.IsMatch(File.ReadAllText(file)))
+            .Select(file => Path.GetRelativePath(RepoRoot, file))
+            .ToList();
+
+        // Assert — a guard against this feature's own temptation, not a fix: the summary report adds a
+        // product-side artifact whose path the UI is shown, and the shortest wrong answer is to reference
+        // the product from the UI.
+        offenders.Should().BeEmpty("no file under DbClone.UI may name the interchange product");
+        ProjectReferencesOf("src/DbClone.UI/DbClone.UI.csproj").Should().NotContain(
+            reference => reference.EndsWith("DatabaseInterchange.csproj", StringComparison.Ordinal),
+            "the UI reaches the product only through DbClone.Application");
+    }
+
+    [Fact]
+    public void UiDefinitionsImportsStayWithinTheCompositionAndReportAllowList()
+    {
+        var uiRoot = Path.Combine(RepoRoot, UiDirName);
+        var allowed = new HashSet<string>(StringComparer.OrdinalIgnoreCase)
+        {
+            "App.xaml.cs",
+            Path.Combine("Services", "HtmlReportService.cs"),
+            Path.Combine("ViewModels", "CompareViewModel.cs"),
+        };
+
+        var offenders = Directory.EnumerateFiles(uiRoot, "*.cs", SearchOption.AllDirectories)
+            .Where(file => DefinitionsUsing.IsMatch(File.ReadAllText(file)))
+            .Select(file => Path.GetRelativePath(uiRoot, file))
+            .Where(relative => !allowed.Contains(relative))
+            .ToList();
+
+        offenders.Should().BeEmpty(
+            "the UI may import Definitions only in the composition root and the two documented report/compare files");
+    }
+
+    [Fact]
+    public void UiMarkupNamesNoEngineVocabulary()
+    {
+        // A tooltip or a placeholder is copy the user reads, so an engine name there is as much a
+        // leak as a type: it hard-codes the one engine that ships today into a view that has to
+        // work when a second one is installed. The formats and platform names a view needs come
+        // from the adapter catalog.
+        var offenders = UiFiles("*.xaml")
+            .Where(file => EngineVocabulary.IsMatch(StripXmlComments(File.ReadAllText(file))))
+            .Select(file => Path.GetRelativePath(RepoRoot, file))
+            .ToList();
+
+        offenders.Should().BeEmpty("a view may name no engine, catalog, port or format id");
+    }
+
+    [Fact]
+    public void UiCodeNamesNoEngineVocabulary()
+    {
+        // Comments are stripped: prose may explain PostgreSQL, a code path may not depend on it.
+        var offenders = UiFiles("*.cs")
+            .Where(file => EngineVocabulary.IsMatch(StripComments(File.ReadAllText(file))))
+            .Select(file => Path.GetRelativePath(RepoRoot, file))
+            .ToList();
+
+        offenders.Should().BeEmpty("the UI reaches the engine only through the adapter catalog");
+    }
+
+    /// <summary>Strips XML comments, so a markup comment may still explain a decision.</summary>
+    private static string StripXmlComments(string markup) =>
+        Regex.Replace(markup, "<!--.*?-->", string.Empty, RegexOptions.Singleline);
+
+    private static IEnumerable<string> UiFiles(string pattern)
+    {
+        var uiRoot = Path.Combine(RepoRoot, UiDirName.Replace('/', Path.DirectorySeparatorChar));
+
+        return Directory.EnumerateFiles(uiRoot, pattern, SearchOption.AllDirectories)
+            .Where(file => !file.Contains($"{Path.DirectorySeparatorChar}bin{Path.DirectorySeparatorChar}")
+                           && !file.Contains($"{Path.DirectorySeparatorChar}obj{Path.DirectorySeparatorChar}"));
     }
 
     [Fact]
     public void BlockProjectDoesNotReferenceApplication()
     {
-        // Arrange — refactors/09 Phase 4 box 78; the strict one-way layer rule.
         const string blockProject = BlockDirName + "/" + BlockDirName + ".csproj";
 
         // Act
@@ -180,7 +311,7 @@ public class ArchitectureTests
         // Assert — the block depends only on the shared boundary and the shared model.
         references.Should().NotContain(
             reference => reference.Equals("DbClone.Application.csproj", StringComparison.Ordinal),
-            "the engine block must not reference the application (refactors/09 Phase 4)");
+            "the engine block must not reference the application");
     }
 
     [Fact]
@@ -194,7 +325,7 @@ public class ArchitectureTests
         var packageReferences = PackageReferencesOf(definitionsProject);
         // The shared copy runner and platform reader log, so the logging abstraction is now the
         // one package the contract may declare and the one Microsoft.Extensions namespace its code
-        // may reach (refactors/09 P5). Anything beyond logging still fails the rule.
+        // may reach. Anything beyond logging still fails the rule.
         var offenders = ProjectFiles(definitionsProject)
             .Where(file => NonLoggingExtensionsUsing.IsMatch(File.ReadAllText(file)))
             .Select(file => Path.GetRelativePath(RepoRoot, file))

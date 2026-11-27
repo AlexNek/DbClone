@@ -21,7 +21,7 @@ public sealed class ConnectionStore : IConnectionStore
 
     private static readonly JsonSerializerOptions JsonOptions = new() { WriteIndented = true };
 
-    private static readonly string StorePath = Path.Combine(
+    private static readonly string DefaultStorePath = Path.Combine(
         Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
         AppFolder.Name,
         "connections.json");
@@ -30,11 +30,23 @@ public sealed class ConnectionStore : IConnectionStore
 
     private readonly object _lock = new();
 
+    private readonly string _storePath;
+
     /// <summary>
     /// Creates the store and loads existing connections from disk.
     /// </summary>
     public ConnectionStore()
+        : this(DefaultStorePath)
     {
+    }
+
+    /// <summary>
+    /// Creates a store backed by <paramref name="storePath"/>. Tests use this to keep the store
+    /// off the user's real profile; the application always takes the path above.
+    /// </summary>
+    internal ConnectionStore(string storePath)
+    {
+        _storePath = storePath;
         Load();
     }
 
@@ -92,7 +104,7 @@ public sealed class ConnectionStore : IConnectionStore
         [JsonConverter(typeof(ConnectionTypeConverter))]
         public string? ConnectionType { get; set; }
 
-        /// <summary>Engine dialect that selects the adapter (refactors/09 P4). Absent on pre-refactor files.</summary>
+        /// <summary>Engine dialect that selects the adapter. Absent on pre-refactor files.</summary>
         public string? Engine { get; set; }
 
         public string DatabaseName { get; set; } = string.Empty;
@@ -164,10 +176,10 @@ public sealed class ConnectionStore : IConnectionStore
             var plain = ProtectedData.Unprotect(cipher, null, DataProtectionScope.CurrentUser);
             return Encoding.UTF8.GetString(plain);
         }
-        catch
+        catch (Exception ex)
         {
-            // Decryption failure (e.g. data was encrypted on another machine) — return empty
-            return string.Empty;
+            Log.Warning(ex, "[ConnectionStore] DPAPI password decryption failed");
+            throw new CryptographicException("A saved connection password could not be decrypted on this Windows user profile.", ex);
         }
     }
 
@@ -187,9 +199,9 @@ public sealed class ConnectionStore : IConnectionStore
     {
         try
         {
-            if (!File.Exists(StorePath)) return;
+            if (!File.Exists(_storePath)) return;
 
-            var json = File.ReadAllText(StorePath);
+            var json = File.ReadAllText(_storePath);
             var dtos = JsonSerializer.Deserialize<List<ConnectionDto>>(json) ?? [];
 
             lock (_lock)
@@ -201,10 +213,17 @@ public sealed class ConnectionStore : IConnectionStore
         }
         catch (Exception ex)
         {
+            if (ex is JsonException or CryptographicException)
+            {
+                try { AtomicFileWriter.Quarantine(_storePath); }
+                catch (Exception quarantineEx) { Log.Warning(quarantineEx, "[ConnectionStore.Load] Could not quarantine corrupt file {Path}", _storePath); }
+                Log.Warning("[ConnectionStore.Load] Corrupt or unavailable encrypted data was quarantined at {Path}", _storePath);
+            }
+
             Log.Warning(
                 ex,
                 "[ConnectionStore.Load] Failed to load connections from {Path}, starting fresh",
-                StorePath);
+                _storePath);
         }
     }
 
@@ -212,7 +231,7 @@ public sealed class ConnectionStore : IConnectionStore
     {
         try
         {
-            var directory = Path.GetDirectoryName(StorePath);
+            var directory = Path.GetDirectoryName(_storePath);
             if (!string.IsNullOrEmpty(directory) && !Directory.Exists(directory))
                 Directory.CreateDirectory(directory);
 
@@ -221,14 +240,14 @@ public sealed class ConnectionStore : IConnectionStore
                 dtos = _connections.Select(ConnectionDto.FromModel).ToList();
 
             var json = JsonSerializer.Serialize(dtos, JsonOptions);
-            File.WriteAllText(StorePath, json);
+            AtomicFileWriter.WriteAllText(_storePath, json);
         }
         catch (Exception ex)
         {
             Log.Warning(
                 ex,
                 "[ConnectionStore.Persist] Failed to save connections to {Path}",
-                StorePath);
+                _storePath);
         }
     }
 }

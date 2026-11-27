@@ -12,7 +12,7 @@ namespace DbAdapter.PostgreSql.Tests;
 /// </summary>
 public class PgConnectionStringServiceTests
 {
-    private readonly PgConnectionStringService _sut = new();
+    private readonly PgConnectionStringService _sut = new(EngineDefaults.DefaultPort);
 
     [Fact]
     public void TryParse_UriWithoutUserInfo_DefaultsUsernameToPostgres()

@@ -42,8 +42,49 @@
               Value="0"
               Persisted="yes" />
 
+    <!-- WebView2 Evergreen runtime detection (D11). The client's "pv" value under
+         EdgeUpdate is the version the runtime reports; its mere presence means the
+         runtime is installed, which is all the app needs. Two searches because the
+         runtime can be per-machine or per-user: the first key is the documented
+         64-bit location, the second is the un-elevated install. Each writes 1 into a
+         numeric variable that defaults to 0, so the condition below needs no string
+         juggling when a value is absent. -->
+    <Variable Name="WebView2MachineRuntime" Type="numeric" Value="0" />
+    <Variable Name="WebView2UserRuntime" Type="numeric" Value="0" />
+
+    <util:RegistrySearch
+      Id="WebView2MachineRuntimeSearch"
+      Root="HKLM"
+      Key="SOFTWARE\WOW6432Node\Microsoft\EdgeUpdate\Clients\{F3017226-FE2A-4295-8BDF-00C3A9A7E4C5}"
+      Value="pv"
+      Result="exists"
+      Variable="WebView2MachineRuntime" />
+
+    <util:RegistrySearch
+      Id="WebView2UserRuntimeSearch"
+      Root="HKCU"
+      Key="Software\Microsoft\EdgeUpdate\Clients\{F3017226-FE2A-4295-8BDF-00C3A9A7E4C5}"
+      Value="pv"
+      Result="exists"
+      Variable="WebView2UserRuntime" />
+
     <!-- Install chain -->
     <Chain DisableSystemRestore="yes">
+
+      <!-- WebView2 Evergreen runtime, Microsoft's own bootstrapper (fetched by
+           build-installer-wix.ps1 into artifacts\prerequisites; the bundle build
+           never reaches the network). Permanent because uninstalling DbClone must
+           not remove a runtime other software shares, and not vital because the
+           app falls back to the browser without it (D10) - a runtime that cannot
+           be installed must not fail the product's install. -->
+      <ExePackage Id="WebView2Runtime"
+                  SourceFile="!(bindpath.Prerequisites)\MicrosoftEdgeWebView2Setup.exe"
+                  DetectCondition="WebView2MachineRuntime OR WebView2UserRuntime"
+                  InstallArguments="/silent /install"
+                  Protocol="none"
+                  PerMachine="yes"
+                  Permanent="yes"
+                  Vital="no" />
 
       <!-- DbClone MSI -->
       <MsiPackage Id="DbCloneMsi"

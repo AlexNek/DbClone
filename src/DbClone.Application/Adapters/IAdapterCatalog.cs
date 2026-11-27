@@ -7,7 +7,7 @@ namespace DbClone.Application.Adapters;
 /// <summary>
 /// The application's single route to every installed database engine. The catalog is filled
 /// once, at startup, by reading the plugin folder; it is the only place a folder is turned into
-/// an <see cref="IDatabaseAdapter"/>. Nothing else names an engine (refactors/09 P3).
+/// an <see cref="IDatabaseAdapter"/>. Nothing else names an engine.
 /// </summary>
 public interface IAdapterCatalog
 {

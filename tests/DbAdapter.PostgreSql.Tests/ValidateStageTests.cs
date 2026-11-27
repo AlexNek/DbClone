@@ -88,8 +88,8 @@ public class ValidateStageTests
         {
             Request = request,
             SourceModel = model,
-            SourceConnection = SourceConnection,
-            DestinationConnection = DestConnection
+            SourceConnection = new PgCopyConnection(SourceConnection, string.Empty),
+            DestinationConnection = new PgCopyConnection(DestConnection, string.Empty)
         };
     }
 

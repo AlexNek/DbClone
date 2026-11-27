@@ -35,3 +35,6 @@ Regardless of mode, DbClone always:
 - Reports progress per table
 - Isolates errors (one table failing doesn't stop the rest)
 - Runs validation at the end
+
+!!! tip "Copying through a file instead"
+    Every mode above talks to two databases at once. To capture a database as a folder you can keep, copy, or move to another machine, use [Store & Restore](../store-restore.md) instead.

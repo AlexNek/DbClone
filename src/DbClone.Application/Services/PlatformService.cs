@@ -8,7 +8,7 @@ namespace DbClone.Application.Services;
 /// <summary>
 /// Forwards the platform questions to the adapters' platform roles. The list is the union of
 /// every installed adapter's platforms; a specific platform id is resolved through the adapter
-/// that owns it, so nothing here names an engine (refactors/09 P4). With one engine installed the
+/// that owns it, so nothing here names an engine. With one engine installed the
 /// answers are exactly those the single adapter gave before.
 /// </summary>
 public sealed class PlatformService : IPlatformService

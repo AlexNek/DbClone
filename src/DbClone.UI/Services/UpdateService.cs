@@ -2,11 +2,14 @@ using System.Diagnostics;
 using System.IO;
 using System.Net.Http;
 using System.Reflection;
+using System.Security.Cryptography;
 using System.Text.Json;
 using System.Threading.Tasks;
 using System.Xml;
 
 using AutoUpdaterDotNET;
+
+using DbClone.UI.Threading;
 
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.Logging;
@@ -18,7 +21,11 @@ public sealed record UpdateCheckResult(
     bool IsUpdateAvailable,
     Version? Version,
     string? DownloadUrl,
-    string? ChangelogUrl);
+    string? ChangelogUrl)
+{
+    /// <summary>Why the check could not complete, or null when it did.</summary>
+    public string? ErrorMessage { get; init; }
+}
 
 /// <summary>Event args raised when an update check completes.</summary>
 public sealed class UpdateCheckCompletedEventArgs : EventArgs
@@ -81,6 +88,12 @@ public sealed class UpdateService : IUpdateService
 
     private UpdateInfoEventArgs? _lastArgs;
 
+    /// <summary>
+    /// The SHA-256 the feed stated for the installer, or null when the release
+    /// publishes only a `.sha256` file beside it.
+    /// </summary>
+    private string? _expectedSha256;
+
     private bool _reportErrors;
 
     public UpdateService(ILogger<UpdateService> logger, IConfiguration configuration)
@@ -113,6 +126,7 @@ public sealed class UpdateService : IUpdateService
             _updateUrl);
 
         _reportErrors = reportErrors;
+        _expectedSha256 = null;
 
         AutoUpdater.InstalledVersion = GetInstalledVersion();
         AutoUpdater.HttpUserAgent = "DbClone-AutoUpdater";
@@ -176,8 +190,7 @@ public sealed class UpdateService : IUpdateService
             });
 
             // The installer has started — close the app so files can be replaced.
-            await System.Windows.Application.Current.Dispatcher.InvokeAsync(
-                () => System.Windows.Application.Current.Shutdown());
+            await UiDispatcher.InvokeAsync(() => System.Windows.Application.Current.Shutdown());
         }
         catch (Exception ex)
         {
@@ -244,7 +257,49 @@ public sealed class UpdateService : IUpdateService
             }
         }
 
+        await file.FlushAsync().ConfigureAwait(false);
+        file.Close();
+
+        // Prefer the digest the feed stated for this asset: GitHub records one for
+        // every upload, while a release carries a `.sha256` file only from the
+        // version whose workflow started writing it.
+        var expected = _expectedSha256
+                       ?? await DownloadExpectedChecksumAsync(http, url).ConfigureAwait(false);
+
+        await using var downloaded = File.OpenRead(target);
+        var actual = Convert.ToHexStringLower(await SHA256.HashDataAsync(downloaded).ConfigureAwait(false));
+        if (!CryptographicOperations.FixedTimeEquals(
+                Convert.FromHexString(expected),
+                Convert.FromHexString(actual)))
+        {
+            File.Delete(target);
+            throw new CryptographicException("The downloaded installer checksum does not match the release metadata.");
+        }
+
         return target;
+    }
+
+    private static async Task<string> DownloadExpectedChecksumAsync(HttpClient http, string url)
+    {
+        string text;
+        try
+        {
+            text = await http.GetStringAsync(url + ".sha256").ConfigureAwait(false);
+        }
+        catch (HttpRequestException ex)
+        {
+            throw new CryptographicException(
+                "The release publishes no installer checksum, so the download cannot be verified.",
+                ex);
+        }
+
+        var expected = text
+            .Split((char[]?)null, StringSplitOptions.RemoveEmptyEntries)
+            .FirstOrDefault(token => token.Length == 64 && token.All(Uri.IsHexDigit));
+        if (expected is null)
+            throw new CryptographicException("The release did not provide a valid installer SHA-256 checksum.");
+
+        return expected;
     }
 
     private void OnCheckForUpdate(UpdateInfoEventArgs args)
@@ -252,7 +307,10 @@ public sealed class UpdateService : IUpdateService
         if (args.Error is not null)
         {
             _logger.LogWarning(args.Error, "Update check failed");
-            LastCheck = new UpdateCheckResult(false, null, null, null);
+            LastCheck = new UpdateCheckResult(false, null, null, null)
+                            {
+                                ErrorMessage = args.Error.Message
+                            };
             UpdateCheckCompleted?.Invoke(
                 this,
                 new UpdateCheckCompletedEventArgs(LastCheck, _reportErrors, isError: true));
@@ -326,6 +384,9 @@ public sealed class UpdateService : IUpdateService
         var doc = new XmlDocument();
         doc.LoadXml(data);
 
+        // An XML feed states no checksum; the sibling `.sha256` file is used instead.
+        _expectedSha256 = null;
+
         var versionText = doc.SelectSingleNode("//version")?.InnerText ?? "";
         var downloadUrl = doc.SelectSingleNode("//url")?.InnerText ?? "";
         var changelogUrl = doc.SelectSingleNode("//changelog")?.InnerText;
@@ -377,6 +438,7 @@ public sealed class UpdateService : IUpdateService
         // asset matching this process architecture. The default win-x64 build
         // keeps the unsuffixed name, so a plain .exe is the fallback.
         var downloadUrl = "";
+        string? expectedSha256 = null;
         var changelogUrl = root.GetProperty("html_url").GetString() ?? "";
         var platformSuffix = System.Runtime.InteropServices.RuntimeInformation.ProcessArchitecture switch
         {
@@ -389,6 +451,8 @@ public sealed class UpdateService : IUpdateService
         {
             string? matchingUrl = null;
             string? firstExeUrl = null;
+            string? matchingDigest = null;
+            string? firstExeDigest = null;
 
             foreach (var asset in assets.EnumerateArray())
             {
@@ -397,12 +461,22 @@ public sealed class UpdateService : IUpdateService
                     continue;
 
                 var url = asset.GetProperty("browser_download_url").GetString() ?? "";
+                var digest = ReadSha256Digest(asset);
                 if (name.Contains(platformSuffix, StringComparison.OrdinalIgnoreCase))
+                {
                     matchingUrl = url;
-                firstExeUrl ??= url;
+                    matchingDigest = digest;
+                }
+
+                if (firstExeUrl is null)
+                {
+                    firstExeUrl = url;
+                    firstExeDigest = digest;
+                }
             }
 
             downloadUrl = matchingUrl ?? firstExeUrl ?? "";
+            expectedSha256 = matchingUrl is not null ? matchingDigest : firstExeDigest;
         }
 
         if (string.IsNullOrEmpty(downloadUrl))
@@ -411,6 +485,7 @@ public sealed class UpdateService : IUpdateService
             return;
         }
 
+        _expectedSha256 = expectedSha256;
         args.UpdateInfo = new UpdateInfoEventArgs
                               {
                                   CurrentVersion = version.ToString(),
@@ -422,6 +497,22 @@ public sealed class UpdateService : IUpdateService
             "Update info parsed (JSON): version={Version}, url={Url}",
             version,
             downloadUrl);
+    }
+
+    /// <summary>
+    /// Reads the "sha256:…" digest GitHub records for a release asset.
+    /// </summary>
+    private static string? ReadSha256Digest(JsonElement asset)
+    {
+        if (!asset.TryGetProperty("digest", out var digestElement))
+            return null;
+
+        var digest = digestElement.GetString();
+        if (digest is null || !digest.StartsWith("sha256:", StringComparison.OrdinalIgnoreCase))
+            return null;
+
+        var hex = digest["sha256:".Length..];
+        return hex.Length == 64 && hex.All(Uri.IsHexDigit) ? hex.ToLowerInvariant() : null;
     }
 
     /// <summary>

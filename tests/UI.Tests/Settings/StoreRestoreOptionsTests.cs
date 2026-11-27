@@ -1,3 +1,5 @@
+using System.Text.Json;
+
 using DbClone.UI.Settings;
 
 using FluentAssertions;
@@ -18,9 +20,66 @@ public class StoreRestoreOptionsTests
         options.ChunkBytes.Should().Be(8_388_608);
         options.RowsPerChunk.Should().Be(50_000);
         options.IncludeData.Should().BeTrue();
+        options.WriteSummaryMarkdown.Should().BeTrue();
         options.SnapshotConsistency.Should().Be("consistent");
         options.UnsupportedFeaturePolicy.Should().Be("fail");
-        options.PackAfterStore.Should().BeTrue();
+        options.CatalogSubfolderPattern.Should().Be("{Connection}_{timestamp}");
+    }
+
+    [Fact]
+    public void SqlScripts_defaults_on_because_handing_the_catalog_to_any_client_is_the_point()
+    {
+        // The product option defaults off — the pass is asked for — while the user-facing preference
+        // defaults on: a user who never opens the settings still gets the files (FR10).
+        new StoreRestoreOptions().SqlScripts.Should().BeTrue();
+    }
+
+    [Fact]
+    public void SqlScripts_survives_the_round_trip_and_an_older_file_leaves_it_on()
+    {
+        // Arrange — a settings file written before the option existed.
+        const string olderFile = """{ "StoreRestore": { "ChunkBytes": 8388608 } }""";
+
+        // Act
+        var fromOlderFile = JsonSerializer.Deserialize<UserSettings>(olderFile);
+
+        // Assert — an upgrade must not silently turn the new files off for a user who already has settings.
+        fromOlderFile!.StoreRestore.SqlScripts.Should().BeTrue();
+
+        // Act — and an explicit choice travels both ways.
+        var saved = JsonSerializer.Serialize(new StoreRestoreOptions { SqlScripts = false });
+        var reloaded = JsonSerializer.Deserialize<StoreRestoreOptions>(saved);
+
+        // Assert
+        reloaded!.SqlScripts.Should().BeFalse();
+    }
+
+    [Fact]
+    public void SqlScriptsMaxFileMb_defaults_to_a_size_a_client_can_open()
+    {
+        // A beginner who never opens the settings still gets data files an editor can load, rather
+        // than one script the size of the catalog (D11).
+        new StoreRestoreOptions().SqlScriptsMaxFileMb.Should().Be(32);
+    }
+
+    [Fact]
+    public void SqlScriptsMaxFileMb_survives_the_round_trip_and_an_older_file_leaves_the_default()
+    {
+        // Arrange — a settings file written before the size existed.
+        const string olderFile = """{ "StoreRestore": { "SqlScripts": true } }""";
+
+        // Act
+        var fromOlderFile = JsonSerializer.Deserialize<UserSettings>(olderFile);
+
+        // Assert — the upgrade splits at the default rather than writing one unbounded file.
+        fromOlderFile!.StoreRestore.SqlScriptsMaxFileMb.Should().Be(32);
+
+        // Act — "one file" is a real choice and has to come back as one, not as the default.
+        var saved = JsonSerializer.Serialize(new StoreRestoreOptions { SqlScriptsMaxFileMb = 0 });
+        var reloaded = JsonSerializer.Deserialize<StoreRestoreOptions>(saved);
+
+        // Assert
+        reloaded!.SqlScriptsMaxFileMb.Should().Be(0);
     }
 
     [Fact]

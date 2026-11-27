@@ -26,6 +26,23 @@ public sealed class WpfDialogService : IDialogService, IConfirmationService
         return Task.FromResult(result == MessageBoxResult.Yes);
     }
 
+    public Task<ERestoreTargetChoice> ConfirmRestoreTargetAsync(string title, string message)
+    {
+        var result = MessageBox.Show(
+            message + "\n\nYes = Update selected database\nNo = Create new database\nCancel = Stop",
+            title,
+            MessageBoxButton.YesNoCancel,
+            MessageBoxImage.Warning,
+            MessageBoxResult.Cancel);
+
+        return Task.FromResult(result switch
+        {
+            MessageBoxResult.Yes => ERestoreTargetChoice.UpdateSelected,
+            MessageBoxResult.No => ERestoreTargetChoice.CreateNew,
+            _ => ERestoreTargetChoice.Cancel,
+        });
+    }
+
     /// <inheritdoc />
     public Task<ESelectionCleanChoice> ConfirmSelectionCleanAsync(string title, string message)
     {
@@ -49,5 +66,22 @@ public sealed class WpfDialogService : IDialogService, IConfirmationService
                          };
 
         return dialog.ShowDialog() == true ? dialog.FileName : null;
+    }
+
+    /// <inheritdoc />
+    public string? BrowseFolder(string description, string? initialDirectory = null)
+    {
+        var dialog = new OpenFolderDialog
+                         {
+                             Title = description,
+                             Multiselect = false,
+                         };
+
+        if (!string.IsNullOrWhiteSpace(initialDirectory) && System.IO.Directory.Exists(initialDirectory))
+        {
+            dialog.InitialDirectory = initialDirectory;
+        }
+
+        return dialog.ShowDialog() == true ? dialog.FolderName : null;
     }
 }

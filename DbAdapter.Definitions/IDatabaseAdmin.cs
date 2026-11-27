@@ -21,6 +21,12 @@ public interface IDatabaseAdmin
     /// <summary>Whether the target database holds any user data.</summary>
     Task<bool> HasDataAsync(CancellationToken ct);
 
+    /// <summary>Creates a database only if it does not already exist.</summary>
+    Task<bool> CreateDatabaseIfNotExistsAsync(
+        string newDbName,
+        Action<string> logMessage,
+        CancellationToken ct);
+
     /// <summary>Creates <paramref name="newDbName"/> on the server. Logs progress through <paramref name="logMessage"/>.</summary>
     Task<bool> CreateDatabaseAsync(
         string newDbName,

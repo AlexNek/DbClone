@@ -106,6 +106,43 @@ public sealed class PgDatabaseAdmin : IDatabaseAdmin
         }
     }
 
+    public async Task<bool> CreateDatabaseIfNotExistsAsync(
+        string newDbName,
+        Action<string> logMessage,
+        CancellationToken ct)
+    {
+        if (string.IsNullOrWhiteSpace(newDbName) || newDbName.Any(c => !(char.IsLetterOrDigit(c) || c == '_')))
+            throw new ArgumentException("The restore database name contains unsupported characters.", nameof(newDbName));
+
+        try
+        {
+            var builder = PgConnectionStringBuilder.ParseConnectionString(_target);
+            builder.Database = "postgres";
+            await using var conn = new NpgsqlConnection(builder.ConnectionString);
+            await conn.OpenAsync(ct);
+
+            await using var check = new NpgsqlCommand(
+                "SELECT 1 FROM pg_database WHERE datname = @dbName", conn);
+            check.Parameters.AddWithValue("dbName", newDbName);
+            if (await check.ExecuteScalarAsync(ct) is not null)
+            {
+                logMessage($"Database {newDbName} already exists; no database was changed.");
+                return false;
+            }
+
+            await using var create = new NpgsqlCommand(
+                $"CREATE DATABASE \"{newDbName.Replace("\"", "\"\"")}\" TEMPLATE template0", conn);
+            await create.ExecuteNonQueryAsync(ct);
+            return true;
+        }
+        catch (Exception ex)
+        {
+            logMessage($"ERROR creating restore database {newDbName}: {PgExceptionHelper.GetUserMessage(ex)}");
+            _logger.LogError(ex, "Failed to create restore database {DbName}", newDbName);
+            return false;
+        }
+    }
+
     public async Task<bool> CreateDatabaseAsync(
         string newDbName,
         Action<string> logMessage,

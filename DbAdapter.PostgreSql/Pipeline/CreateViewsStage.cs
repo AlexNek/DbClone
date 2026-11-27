@@ -17,7 +17,11 @@ namespace DbAdapter.PostgreSql.Pipeline;
 /// </summary>
 public sealed class CreateViewsStage : ICopyStage
 {
+    private readonly IPgConnectionProvider _connectionProvider;
+
     private readonly PgDdlGenerator _ddl;
+
+    private readonly IPgExecutorFactory _executorFactory;
 
     private readonly ILoggerFactory _loggerFactory;
 
@@ -27,10 +31,18 @@ public sealed class CreateViewsStage : ICopyStage
     /// <inheritdoc />
     public int Order => 120;
 
+    public bool IsCritical => false;
+
     /// <summary>Initializes a new instance.</summary>
-    public CreateViewsStage(PgDdlGenerator ddl, ILoggerFactory loggerFactory)
+    public CreateViewsStage(
+        PgDdlGenerator ddl,
+        IPgExecutorFactory executorFactory,
+        IPgConnectionProvider connectionProvider,
+        ILoggerFactory loggerFactory)
     {
         _ddl = ddl;
+        _executorFactory = executorFactory;
+        _connectionProvider = connectionProvider;
         _loggerFactory = loggerFactory;
     }
 
@@ -57,8 +69,19 @@ public sealed class CreateViewsStage : ICopyStage
 
         var model = context.SourceModel!;
         var logger = _loggerFactory.CreateLogger<CreateViewsStage>();
-        var conn = (NpgsqlConnection)context.DestinationConnection!;
-        var executor = new PgSqlExecutor(conn, _loggerFactory.CreateLogger<PgSqlExecutor>());
+        var conn = await _connectionProvider.GetDestinationConnectionAsync(
+                       context,
+                       logger,
+                       cancellationToken);
+        if (conn is null)
+            return new StageResult(
+                Name,
+                false,
+                TimeSpan.Zero,
+                0,
+                    [StageDetail.ConnectionFailed(ECompareSide.Destination)]);
+
+        var executor = _executorFactory.Create(conn);
 
         var created = 0;
         var details = new List<StageDetail>();
@@ -101,15 +124,16 @@ public sealed class CreateViewsStage : ICopyStage
             pending = retry;
         }
 
-        // Anything still failing after no further progress is a genuine failure.
+        // Anything still failing after no further progress is a genuine loss: the view is
+        // named once, at Warning, and the run still completes.
         foreach (var (viewName, _) in pending)
         {
             var message = lastErrors.GetValueOrDefault(viewName, "unknown error");
-            logger.LogError("Failed to create view {View}: {Error}", viewName, message);
-            context.Errors.Add(
-                new CopyError(Name, EStageMessageKind.Failed, viewName,
-                    new Dictionary<string, object> { [PropKeys.Reason] = message }, null));
-            details.Add(StageDetail.Failed(viewName, message));
+            logger.LogWarning("Failed to create view {View}: {Error}", viewName, message);
+            context.Warnings.Add(
+                new CopyWarning(Name, EStageMessageKind.Failed, viewName,
+                    new Dictionary<string, object> { [PropKeys.Reason] = message }));
+            details.Add(StageDetail.FailedWarning(viewName, message));
         }
 
         // ── Materialized views (after regular views — matviews may reference them) ──
@@ -127,17 +151,18 @@ public sealed class CreateViewsStage : ICopyStage
             catch (Exception ex)
             {
                 var message = PgExceptionHelper.GetUserMessage(ex);
-                logger.LogError(
+                logger.LogWarning(
                     "Failed to create materialized view {MatView}: {Error}", mvName, message);
-                context.Errors.Add(
-                    new CopyError(Name, EStageMessageKind.Failed, mvName,
-                        new Dictionary<string, object> { [PropKeys.Reason] = message }, ex));
-                details.Add(StageDetail.Failed(mvName, message));
+                context.Warnings.Add(
+                    new CopyWarning(Name, EStageMessageKind.Failed, mvName,
+                        new Dictionary<string, object> { [PropKeys.Reason] = message }));
+                details.Add(StageDetail.FailedWarning(mvName, message));
             }
         }
 
         var totalExpected = stmts.Count + matStmts.Count;
         context.Statistics = context.Statistics with { ViewsCopied = created };
-        return new StageResult(Name, created == totalExpected, TimeSpan.Zero, created, details);
+        details.Add(StageDetail.Summary(totalExpected, created, totalExpected - created));
+        return new StageResult(Name, true, TimeSpan.Zero, created, details);
     }
 }

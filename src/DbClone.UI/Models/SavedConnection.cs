@@ -51,7 +51,7 @@ public sealed class SavedConnection : INotifyPropertyChanged
     public string? ConnectionType { get; set; }
 
     /// <summary>
-    /// The engine dialect that selects this connection's adapter (refactors/09 P4). Written when a
+    /// The engine dialect that selects this connection's adapter. Written when a
     /// connection is created or imported from the import/detection result, never from a constant.
     /// Absent (<see langword="null"/>) on files saved before the engine was recorded; the single
     /// installed adapter then serves them.
@@ -80,7 +80,7 @@ public sealed class SavedConnection : INotifyPropertyChanged
     public string Password { get; set; } = string.Empty;
 
     /// <summary>Port number as a string for easy WPF binding. Empty until set; a new connection's
-    /// port comes from the platform defaults, not from an engine value stored here (refactors/09 P5).</summary>
+    /// port comes from the platform defaults, not from an engine value stored here.</summary>
     public string Port { get; set; } = string.Empty;
 
     /// <summary>Gets the parsed port as an integer, or 0 when no port is set.</summary>

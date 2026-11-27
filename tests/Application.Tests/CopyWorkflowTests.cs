@@ -1,6 +1,7 @@
 using DbAdapter.Definitions;
 using DbClone.Application.Copy;
 using DbClone.Application.DTOs;
+using DbClone.Application.Enums;
 using DbClone.Application.Interfaces;
 using DbClone.Application.TableFilter;
 using DbClone.Application.Targets;
@@ -230,12 +231,105 @@ public class CopyWorkflowTests
         step.Request.Target.ConnectionString.Should().Contain("Database=dest_db");
     }
 
+    [Fact]
+    public async Task Execute_SameDatabase_IsRefusedBeforeAnythingIsTouched()
+    {
+        // A full copy cleans the destination before it reads the source, so a copy onto
+        // the source itself must be refused before a connection is opened.
+        // Arrange
+        var workflow = CreateWorkflow(CreateModel(Table("public", "orders")));
+        var listener = Substitute.For<ICopyProgressSink>();
+        var same = Source();
+
+        // Act
+        var result = await workflow.ExecuteAsync(
+            same, same, backupNamePrefix: null, new CopyOptions(), tableSelection: null,
+            listener, CancellationToken.None);
+
+        // Assert
+        result.Success.Should().BeFalse();
+        result.ErrorMessage.Should().Be("Source and destination are the same database");
+        listener.Received(1).OnPhaseChanged(ECopyOperationPhase.Failed);
+        listener.DidNotReceive().OnOperationComplete();
+    }
+
+    [Fact]
+    public async Task Execute_SameDatabaseIgnoringCaseAndSpaces_IsRefused()
+    {
+        // Arrange
+        var workflow = CreateWorkflow(CreateModel(Table("public", "orders")));
+        var listener = Substitute.For<ICopyProgressSink>();
+        var source = new ConnectionInfo("TEST.example.com ", 5432, "Source_DB", "test_user", "pass", "Prefer");
+        var destination = new ConnectionInfo(" test.example.com", 5432, "source_db", "test_user", "pass", "Prefer");
+
+        // Act
+        var result = await workflow.ExecuteAsync(
+            source, destination, null, new CopyOptions(), null, listener, CancellationToken.None);
+
+        // Assert
+        result.Success.Should().BeFalse();
+        result.ErrorMessage.Should().Be("Source and destination are the same database");
+    }
+
+    [Fact]
+    public async Task Execute_DifferentDatabases_PassesTheIdentityGuard()
+    {
+        // The substituted adapter cannot connect, so the run stops at the source connection
+        // check — far enough to prove the identity guard let the pair through.
+        // Arrange
+        var admin = Substitute.For<IDatabaseAdmin>();
+        admin.TestConnectionAsync(Arg.Any<CancellationToken>()).Returns((string?)null);
+
+        var adapter = Substitute.For<IDatabaseAdapter>();
+        adapter.CreateAdmin(Arg.Any<DatabaseTarget>()).Returns(admin);
+
+        var workflow = CreateWorkflow(CreateModel(Table("public", "orders")), adapter);
+        var listener = Substitute.For<ICopyProgressSink>();
+
+        // Act
+        var result = await workflow.ExecuteAsync(
+            Source(), Destination(), null, new CopyOptions(), null, listener, CancellationToken.None);
+
+        // Assert
+        result.Success.Should().BeFalse();
+        result.ErrorMessage.Should().Be("Cannot connect to source");
+    }
+
+    [Fact]
+    public async Task Execute_ServerVersionOutsideAdapterRange_IsRefused()
+    {
+        // The adapter says which servers it can work with; a server outside that range must be
+        // refused before the copy touches the destination, not after it has started writing.
+        // Arrange
+        var admin = Substitute.For<IDatabaseAdmin>();
+        admin.TestConnectionAsync(Arg.Any<CancellationToken>()).Returns("17.2");
+
+        var adapter = Substitute.For<IDatabaseAdapter>();
+        adapter.CreateAdmin(Arg.Any<DatabaseTarget>()).Returns(admin);
+
+        var workflow = CreateWorkflow(
+            CreateModel(Table("public", "orders")), adapter, ">=15.0 <17.0");
+        var listener = Substitute.For<ICopyProgressSink>();
+
+        // Act
+        var result = await workflow.ExecuteAsync(
+            Source(), Destination(), null, new CopyOptions(), null, listener, CancellationToken.None);
+
+        // Assert
+        result.Success.Should().BeFalse();
+        result.ErrorMessage.Should().Contain("outside the range this adapter supports");
+        result.ErrorMessage.Should().Contain(">=15.0 <17.0");
+    }
+
     // ── Fixture helpers ────────────────────────────────────────────────────────
 
-    private static CopyWorkflow CreateWorkflow(DatabaseModel model)
+    private static CopyWorkflow CreateWorkflow(
+        DatabaseModel model,
+        IDatabaseAdapter? adapter = null,
+        string engineVersionRange = "*")
     {
         var filterApplier = new TableFilterApplier();
-        var targetFactory = CreateTargetFactory();
+        var targetFactory = CreateTargetFactory(adapter, engineVersionRange);
         var confirmationService = Substitute.For<IConfirmationService>();
 
         return new CopyWorkflow(
@@ -245,15 +339,18 @@ public class CopyWorkflowTests
             NullLogger<CopyWorkflow>.Instance);
     }
 
-    private static DatabaseTargetFactory CreateTargetFactory()
+    private static DatabaseTargetFactory CreateTargetFactory(
+        IDatabaseAdapter? adapter = null,
+        string engineVersionRange = "*")
     {
         var syntax = Substitute.For<IConnectionStringSyntax>();
         syntax.BuildKeyValue(Arg.Any<ConnectionStringFields>())
             .Returns(call => "Host=test.example.com;Port=5432;Database="
                              + call.Arg<ConnectionStringFields>()?.Database);
 
-        var adapter = Substitute.For<IDatabaseAdapter>();
-        adapter.Info.Returns(new AdapterInfo("test.postgresql", "postgresql", "*", "1.0.0"));
+        adapter ??= Substitute.For<IDatabaseAdapter>();
+        adapter.Info.Returns(
+            new AdapterInfo("test.postgresql", "postgresql", engineVersionRange, "1.0.0"));
         adapter.Syntax.Returns(syntax);
 
         var catalog = Substitute.For<DbClone.Application.Adapters.IAdapterCatalog>();

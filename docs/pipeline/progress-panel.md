@@ -52,6 +52,9 @@ A horizontal strip of category chips along the top of the content area (right of
 - ✅ Done
 - Count of objects in each category
 
+A chip turns ✅ Done when its stage finished, not when every object of that kind exists: a view the server
+refused leaves the **View** chip green and is named in the warnings instead.
+
 ### 5. Elapsed Time
 
 Total elapsed time since the operation started.
@@ -65,8 +68,13 @@ Below the progress panel, a scrolling log shows detailed messages:
 [14:30:01] [OK] CreateExtensions: 2 objects in 0.5s
 [14:30:02] [OK] CreateTypes: 8 objects in 0.3s
 [14:30:15] [OK] CopyData: 45 objects in 12.8s
-[14:30:15] [FAIL] CreateViews: 0 objects — view "reports.monthly" depends on missing function
+[14:30:15] [OK] CreateViews: 3 objects in 0.4s
+[14:30:15] FAIL: reports.monthly: relation "public.events" does not exist
 ```
+
+The last two lines belong together: **CreateViews** finished, and one of its views was not created. The
+`[FAIL]` badge belongs to a stage that failed; a refused object is a `FAIL:` detail written at warning
+severity, and the stage still reports `[OK]`.
 
 !!! tip "Expand the log"
     Click the expand toggle (▼) to see the full log with per-object details.
@@ -77,7 +85,7 @@ When the operation finishes, the progress panel shows:
 
 - **Total duration**
 - **Objects copied** (tables, functions, views, etc.)
-- **Warnings** (non-fatal issues)
+- **Warnings** (non-fatal issues — including objects the server refused, each named once)
 - **Errors** (stages that failed)
 
 The log is preserved until you start a new operation.

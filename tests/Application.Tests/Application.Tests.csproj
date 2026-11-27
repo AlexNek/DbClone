@@ -25,7 +25,7 @@
     <ProjectReference Include="..\..\src\DbClone.Application\DbClone.Application.csproj" />
     <ProjectReference Include="..\..\DbAdapter.PostgreSql\DbAdapter.PostgreSql.csproj" />
     <!--
-      The P9 proof plugin (refactors/09). ReferenceOutputAssembly=false keeps the stub assembly out
+      The stub-plugin proof. ReferenceOutputAssembly=false keeps the stub assembly out
       of this test's compile surface and out of its default load context — the catalog must bind it
       from a folder in its own PluginAssemblyLoadContext to prove single type identity across
       contexts. The reference exists only to guarantee the stub is built before this project's

@@ -17,6 +17,8 @@ public sealed class AnalyzeDependenciesStage : ICopyStage
     /// <inheritdoc />
     public int Order => 40;
 
+    public bool IsCritical => false;
+
     /// <summary>Initializes a new instance.</summary>
     public AnalyzeDependenciesStage(DependencyAnalysis.PgDependencyAnalyzer analyzer) =>
         _analyzer = analyzer;

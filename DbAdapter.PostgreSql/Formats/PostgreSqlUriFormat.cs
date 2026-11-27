@@ -9,6 +9,15 @@ namespace DbAdapter.PostgreSql.Formats;
 /// </summary>
 public sealed class PostgreSqlUriFormat : IConnectionTextFormat
 {
+    private readonly int _defaultPort;
+
+    /// <summary>
+    /// Initializes a new instance. <paramref name="defaultPort"/> is the engine default as
+    /// the platform data defines it (defaults.port of the base engine file), never a literal
+    /// written into a format.
+    /// </summary>
+    public PostgreSqlUriFormat(int defaultPort) => _defaultPort = defaultPort;
+
     public int DetectionPriority => 10;
 
     public string DisplayName => "PostgreSQL URI";
@@ -60,9 +69,14 @@ public sealed class PostgreSqlUriFormat : IConnectionTextFormat
             }
         }
 
+        // A URI with no port in its authority (Neon and Supabase dashboards publish them
+        // this way) took the engine default; record it so the import service can say so.
+        if (parsed.Port is null)
+            options["_defaulted:Port"] = _defaultPort.ToString();
+
         return new ConnectionStringFields(
             Host: parsed.Host,
-            Port: parsed.Port,
+            Port: parsed.Port ?? _defaultPort,
             Database: parsed.Database,
             Username: parsed.Username ?? "postgres",
             Password: parsed.Password ?? string.Empty,

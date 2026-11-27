@@ -1,5 +1,6 @@
 using CanonicalModel.DTOs;
 using CanonicalModel.Enums;
+using CanonicalModel.Interchange;
 using CanonicalModel.Models;
 using CanonicalModel.Platforms;
 
@@ -10,7 +11,7 @@ using Microsoft.Extensions.Logging;
 namespace DbAdapter.StubPlugin;
 
 /// <summary>
-/// The P9 proof adapter (refactors/09). A second "engine" that ships as nothing but this assembly,
+/// The stub-plugin proof adapter. A second "engine" that ships as nothing but this assembly,
 /// so the plugin catalog can be shown to discover an adapter from a folder, select it by its dialect
 /// and run a copy to completion without any change to a production file. It holds in-memory metadata
 /// and two pipeline stages — no SQL, no driver — and reads its platform data from the folder it was
@@ -39,6 +40,7 @@ public sealed class StubAdapter : IDatabaseAdapter
         _loggerFactory = loggerFactory ?? throw new ArgumentNullException(nameof(loggerFactory));
         Platform = new StubPlatformResolver(loggerFactory, pluginDirectory);
         Syntax = new StubSyntax();
+        Capabilities = new StubCapabilities();
         Info = new AdapterInfo(
             Id: "org.dbclone.stub",
             Dialect: Dialect,
@@ -57,6 +59,9 @@ public sealed class StubAdapter : IDatabaseAdapter
 
     /// <inheritdoc />
     public IPlatformResolver Platform { get; }
+
+    /// <inheritdoc />
+    public IDatabaseCapabilities Capabilities { get; }
 
     /// <inheritdoc />
     public IMetadataSource CreateMetadataSource(DatabaseTarget target) =>
@@ -79,6 +84,18 @@ public sealed class StubAdapter : IDatabaseAdapter
 
     /// <inheritdoc />
     public ICopySession CreateCopySession() => new StubCopySession(_loggerFactory);
+
+    /// <inheritdoc />
+    public ISqlScriptRenderer CreateScriptRenderer() =>
+        throw new NotSupportedException("The stub adapter writes no SQL scripts.");
+
+    /// <inheritdoc />
+    public IDatabaseReader OpenReader(DatabaseTarget target, ExportOptions options) =>
+        throw new NotSupportedException("The stub adapter does not support interchange operations.");
+
+    /// <inheritdoc />
+    public IDatabaseWriter OpenWriter(DatabaseTarget target, ImportOptions options) =>
+        throw new NotSupportedException("The stub adapter does not support interchange operations.");
 
     /// <summary>
     /// The connection-text role. The catalog only enumerates <see cref="Formats"/> (which is empty — the
@@ -113,7 +130,7 @@ public sealed class StubAdapter : IDatabaseAdapter
     /// <summary>
     /// The platform role, reading <c>.platform</c> files from <c>&lt;pluginDirectory&gt;/platforms/&lt;dialect&gt;</c>
     /// — the folder the catalog handed this adapter, never the application's folder. The proof asserts the
-    /// platform the catalog lists comes from that file (refactors/09 P3/P9).
+    /// platform the catalog lists comes from that file.
     /// </summary>
     private sealed class StubPlatformResolver : IPlatformResolver
     {
@@ -164,7 +181,10 @@ public sealed class StubAdapter : IDatabaseAdapter
         public Task<IReadOnlyList<TableSizeInfo>> GetTableSizesAsync(CancellationToken ct) =>
             Task.FromResult<IReadOnlyList<TableSizeInfo>>([]);
 
-        public Task<DatabaseModel> ReadDatabaseModelAsync(bool excludePlatformSchemas = false, CancellationToken ct = default) =>
+        public Task<DatabaseModel> ReadDatabaseModelAsync(
+            bool excludePlatformSchemas = false,
+            EMetadataScope scope = EMetadataScope.Everything,
+            CancellationToken ct = default) =>
             Task.FromResult(EmptyModel());
 
         private static DatabaseModel EmptyModel() => new(
@@ -188,7 +208,7 @@ public sealed class StubAdapter : IDatabaseAdapter
 
     /// <summary>
     /// A copy session that runs the shared <see cref="CopyPipeline"/> over two trivial stages. It supplies
-    /// stages, not a runner — the point of moving the loop into the definitions (refactors/09 P5).
+    /// stages, not a runner — the point of moving the loop into the definitions.
     /// </summary>
     private sealed class StubCopySession : ICopySession
     {
@@ -233,7 +253,35 @@ public sealed class StubAdapter : IDatabaseAdapter
 
         public int Order => _order;
 
+        public bool IsCritical => false;
+
         public Task<StageResult> ExecuteAsync(CopyContext context, CancellationToken cancellationToken = default) =>
             Task.FromResult(new StageResult(Name, Success: true, TimeSpan.FromMilliseconds(1), ObjectsProcessed: 0, Details: []));
+    }
+
+    /// <summary>Stub capabilities — refuses everything.</summary>
+    private sealed class StubCapabilities : IDatabaseCapabilities
+    {
+        public bool CanRead(EObjectKind kind) => false;
+
+        public bool CanPreserve(EObjectKind kind) => false;
+
+        public bool CanCreate(EObjectKind kind) => false;
+
+        public bool CanRestoreData => false;
+
+        public bool CanRestoreSecurity => false;
+
+        public IReadOnlyList<ESnapshotConsistency> SupportedSnapshotModes => [];
+
+        public bool SupportsTransactionalImport => false;
+
+        public bool SupportsExistingTarget => false;
+
+        public IReadOnlyList<ERowOrder> SupportedRowOrders => [];
+
+        public IReadOnlyList<SchemaStage> SupportedSchemaStages => [];
+
+        public IReadOnlyList<ESecurityStage> SupportedSecurityStages => [];
     }
 }

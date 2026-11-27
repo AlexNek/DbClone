@@ -118,6 +118,7 @@ public sealed class PgTableInfoProvider : IMetadataSource
     /// <inheritdoc />
     public async Task<DatabaseModel> ReadDatabaseModelAsync(
         bool excludePlatformSchemas = false,
+        EMetadataScope scope = EMetadataScope.Everything,
         CancellationToken ct = default)
     {
         var builder = PgConnectionStringBuilder.ParseConnectionString(_target);
@@ -131,6 +132,6 @@ public sealed class PgTableInfoProvider : IMetadataSource
         var reader = new PgMetadataReader(
             executor,
             _loggerFactory.CreateLogger<PgMetadataReader>());
-        return await reader.ReadDatabaseModelAsync(excludePlatformSchemas, resolution, ct);
+        return await reader.ReadDatabaseModelAsync(excludePlatformSchemas, resolution, scope, ct);
     }
 }

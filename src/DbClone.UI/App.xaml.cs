@@ -10,10 +10,12 @@ using DbClone.Application.Copy;
 using DbClone.Application.Enums;
 using DbClone.Application.Interchange;
 using DbClone.Application.Interfaces;
+using DbClone.Application.Relationship;
 using DbClone.Application.TableFilter;
 using DbClone.Application.Targets;
 using DbClone.UI.Logging;
 using DbClone.UI.Services;
+using DbClone.UI.Services.Relationship;
 using DbClone.UI.ViewModels;
 
 using Microsoft.Extensions.Configuration;
@@ -29,6 +31,8 @@ namespace DbClone.UI;
 
 public partial class App : System.Windows.Application, IDisposable
 {
+    private static bool _unhandledReported;
+
     private bool _disposed;
 
     private IHost? _host;
@@ -48,6 +52,8 @@ public partial class App : System.Windows.Application, IDisposable
     {
         Log.Information("**** DbClone shutting down ****");
         Log.Debug("OnExit: stopping host and disposing services");
+
+        RelationshipViewFile.TryDelete();
 
         if (_host is not null)
         {
@@ -83,7 +89,14 @@ public partial class App : System.Windows.Application, IDisposable
             // Set up Serilog BEFORE building the host
             Log.Logger = LoggingConfiguration.CreateLogger();
 
-            _host = BuildHost();
+            // A UI-thread exception nobody caught terminates the process with no window and no log
+            // line, so the app simply vanishes — the crash this handler turns into something findable.
+            DispatcherUnhandledException += (_, args) => ReportUnhandled(args.Exception);
+
+            // D10: the fallback's single file never outlives the session that wrote it.
+            RelationshipViewFile.TryDelete();
+
+            _host = BuildHost(settingsService);
 
             Log.Information("**** DbClone starting up ****");
             _host.StartAsync().GetAwaiter().GetResult();
@@ -103,12 +116,7 @@ public partial class App : System.Windows.Application, IDisposable
         }
         catch (Exception ex)
         {
-            var crashDir = Path.Combine(
-                Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
-                AppFolder.Name);
-            Directory.CreateDirectory(crashDir);
-            var crashLog = Path.Combine(crashDir, "crash.log");
-            File.WriteAllText(crashLog, $"CRASH at {DateTime.Now:O}\n{ex}");
+            var crashLog = WriteCrashLog(ex, $"CRASH at {DateTime.Now:O}");
 
             var logDir = LoggingConfiguration.GetLogDirectory();
             var msg =
@@ -122,9 +130,40 @@ public partial class App : System.Windows.Application, IDisposable
         }
     }
 
-    private static IHost BuildHost()
+    /// <summary>
+    /// Records what killed the process before it dies. The exception is not marked handled: after an
+    /// uncaught exception the UI state is undefined, so the process still ends — but now with a logged
+    /// trace, a readable crash file and one window that says so instead of a silent disappearance.
+    /// </summary>
+    private static void ReportUnhandled(Exception exception)
     {
+        if (_unhandledReported) return;
+        _unhandledReported = true;
+
+        Log.Error(exception, "Unhandled exception on the UI thread");
+
+        var crashLog = WriteCrashLog(exception, $"CRASH (unhandled) at {DateTime.Now:O}");
+        MessageBox.Show(
+            $"DbClone hit an unexpected error and has to close.\n\n{exception.GetType().Name}: {exception.Message}\n\nCrash details: {crashLog}",
+            "DbClone Crash");
+    }
+
+    private static string WriteCrashLog(Exception exception, string heading)
+    {
+        var crashDir = Path.Combine(
+            Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
+            AppFolder.Name);
+        Directory.CreateDirectory(crashDir);
+        var crashLog = Path.Combine(crashDir, "crash.log");
+        File.WriteAllText(crashLog, $"{heading}\n{exception}");
+        return crashLog;
+    }
+
+    private static IHost BuildHost(SettingsService settingsService)
+    {
+        ArgumentNullException.ThrowIfNull(settingsService);
         return Host.CreateDefaultBuilder()
+            .UseContentRoot(AppContext.BaseDirectory)
             .UseEnvironment(
 #if DEBUG
                 "Development"
@@ -132,17 +171,22 @@ public partial class App : System.Windows.Application, IDisposable
                 "Production"
 #endif
             )
-            .ConfigureAppConfiguration((context, config) =>
-                {
-                    config.SetBasePath(AppContext.BaseDirectory);
-                    config.AddJsonFile("appsettings.json", optional: false, reloadOnChange: true);
-                })
-            .UseSerilog(Log.Logger)
+.ConfigureLogging(logging =>
+    {
+        // The host's logging factory is replaced, not extended: without this the
+        // services' own ILogger lines never reached the Serilog file and existed
+        // only on the console and in the Windows event log. That event-log
+        // provider is dropped with the rest because it throws when the app may
+        // not open its source — a log call that throws aborts whatever it was
+        // reporting, which is how an update check once ended with no result.
+        logging.ClearProviders();
+        logging.AddSerilog(Log.Logger, dispose: false);
+    })
             .ConfigureServices((_, services) =>
                 {
-                    // The plugin catalog is the single route from a connection to an adapter
-                    // (refactors/09 P2/P3). It scans the publish folder's plugins/ directory; the
-                    // engine is discovered there, never registered by name in this file.
+                    // The plugin catalog is the single route from a connection to an adapter.
+                    // It scans the publish folder's plugins/ directory; the engine is
+                    // discovered there, never registered by name in this file.
                     services.AddSingleton<IAdapterCatalog>(sp =>
                         new DatabaseAdapterCatalog(
                             Path.Combine(AppContext.BaseDirectory, "plugins"),
@@ -170,7 +214,42 @@ public partial class App : System.Windows.Application, IDisposable
                     services.AddSingleton<ITableFilterApplier, TableFilterApplier>();
                     services.AddSingleton<ITableSelectionPresetNameValidator, TableSelectionPresetNameValidator>();
                     services.AddSingleton<IBackupEncryptionService, BackupEncryptionService>();
+                    services.AddSingleton<IFileService, FileService>();
                     services.AddSingleton<DatabaseTargetFactory>();
+
+                    // Store/Restore workflow services
+                    services.AddTransient<StoreRestore.Workflows.IWorkflowService<StoreRestore.Workflows.StoreRequest, StoreRestore.Workflows.StoreResult>, StoreRestore.Workflows.StoreWorkflowService>();
+                    services.AddTransient<StoreRestore.Workflows.IWorkflowService<StoreRestore.Workflows.RestoreRequest, StoreRestore.Workflows.RestoreResult>, StoreRestore.Workflows.RestoreWorkflowService>();
+                    services.AddSingleton<StoreRestore.Handlers.IWorkflowResultHandler, StoreRestore.Handlers.WorkflowResultHandler>();
+                    services.AddSingleton<StoreRestore.Validators.IWorkflowValidator, StoreRestore.Validators.WorkflowValidator>();
+                    services.AddSingleton<StoreRestore.Services.ICatalogPathResolver, StoreRestore.Services.CatalogPathResolver>();
+
+                    // Feature 11: the relationship view. One graph service reads a catalog folder or a live
+                    // database; one builder renders it; one presenter shows it. No view writes a file — the
+                    // document is a string in memory, and only the store-time picture touches disk.
+                    // A missing registration here is a startup failure, not a feature that fails when clicked.
+                    services.AddSingleton<IRelationshipGraphService, RelationshipGraphService>();
+                    services.AddSingleton<Services.CatalogGraphAnalyzer>();
+                    services.AddSingleton<Services.GraphLayout.GraphLayoutEngine>();
+                    services.AddSingleton<Services.CatalogGraphHtmlRenderer>();
+                    services.AddSingleton<RelationshipDocumentBuilder>();
+                    services.AddSingleton<StoreRestore.Services.RelationshipPictureWriter>();
+                    services.AddSingleton<Services.IHtmlFileOpener, Services.WpfHtmlFileOpener>();
+
+                    // How a document is shown is decided once per request: the in-app window when the
+                    // runtime answers and none is open yet, the browser otherwise (D4).
+                    services.AddSingleton<BrowserRelationshipPresenter>();
+                    services.AddSingleton<WebViewRelationshipPresenter>();
+                    services.AddSingleton<IInAppRelationshipPresenter>(
+                        sp => sp.GetRequiredService<WebViewRelationshipPresenter>());
+                    services.AddSingleton<IWebViewRuntimeProbe, WebViewRuntimeProbe>();
+                    services.AddSingleton<Services.Relationship.IWaitCursor, Services.Relationship.WaitCursorService>();
+                    services.AddSingleton<IRelationshipViewPresenter>(sp => new RelationshipViewPresenterResolver(
+                        sp.GetRequiredService<IWebViewRuntimeProbe>(),
+                        sp.GetRequiredService<IInAppRelationshipPresenter>(),
+                        sp.GetRequiredService<BrowserRelationshipPresenter>()));
+                    services.AddSingleton<StoreRestore.Handlers.IRelationshipViewHandler, StoreRestore.Handlers.RelationshipViewHandler>();
+
                     services.AddTransient<ITableCatalogService, TableCatalogService>();
                     services.AddTransient<IComparisonService, ComparisonService>();
                     services.AddTransient<ICopyWorkflow, CopyWorkflow>();
@@ -189,9 +268,9 @@ public partial class App : System.Windows.Application, IDisposable
                     services.AddTransient<IModelComparer, TriggerComparer>();
                     services.AddTransient<IModelComparer, TypeComparer>();
 
-                    services.AddSingleton<ISettingsService, SettingsService>();
+                    services.AddSingleton<ISettingsService>(settingsService);
                     services.AddReportGenerators();
-                    services.AddSingleton<ReportExportService>();
+                    services.AddSingleton<IReportExportService, ReportExportService>();
                     services.AddSingleton<IUpdateService, UpdateService>();
                     services.AddTransient<UnifiedConnectionManagerViewModel>();
                     services.AddTransient<MainViewModel>();

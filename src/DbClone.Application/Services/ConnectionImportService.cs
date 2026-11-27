@@ -19,6 +19,9 @@ namespace DbClone.Application.Services;
 /// </summary>
 public sealed class ConnectionImportService : IConnectionImportService
 {
+    /// <summary>The highest port a TCP server can listen on — a protocol limit, not an engine default.</summary>
+    private const int MaxTcpPort = 65535;
+
     private readonly IReadOnlyList<IConnectionTextFormat> _formats;
 
     private readonly ILogger<ConnectionImportService> _logger;
@@ -135,22 +138,8 @@ public sealed class ConnectionImportService : IConnectionImportService
         var warnings = new List<ImportWarning>();
 
         if (string.IsNullOrEmpty(connection.Password))
-        {
-            if (connection.Options.ContainsKey("SupabaseProjectRef"))
-            {
-                var projectRef = connection.Options["SupabaseProjectRef"];
-                warnings.Add(
-                    new ImportWarning(
-                        EWarningLevel.Warning,
-                        $"Password is missing. Find it in Supabase Dashboard → Settings → Database → Connection string (https://supabase.com/dashboard/project/{projectRef}/settings/database)",
-                        "Password"));
-            }
-            else
-            {
-                warnings.Add(
-                    new ImportWarning(EWarningLevel.Warning, "Password is missing.", "Password"));
-            }
-        }
+            warnings.Add(
+                new ImportWarning(EWarningLevel.Warning, "Password is missing.", "Password"));
 
         if (string.IsNullOrEmpty(connection.Database))
             warnings.Add(
@@ -175,10 +164,35 @@ public sealed class ConnectionImportService : IConnectionImportService
             }
         }
 
+        // Values the format had to take from the engine defaults because the text omitted
+        // them (a Neon or Supabase string carries no Port key, for example)
+        foreach (var option in connection.Options)
+        {
+            if (!option.Key.StartsWith("_defaulted:", StringComparison.Ordinal))
+                continue;
+
+            var defaultedField = option.Key["_defaulted:".Length..];
+            warnings.Add(
+                new ImportWarning(
+                    EWarningLevel.Warning,
+                    $"{defaultedField} is not specified; the default {option.Value} will be used.",
+                    defaultedField));
+        }
+
+        // A port the text supplied but no server can listen on is kept as given and
+        // reported — the user decides what to do with it, the import does not swallow it.
+        if (connection.Port is < 1 or > MaxTcpPort)
+            warnings.Add(
+                new ImportWarning(
+                    EWarningLevel.Warning,
+                    $"Port {connection.Port} is outside the range 1-{MaxTcpPort}.",
+                    "Port"));
+
         // Remove internal markers from Options so they don't leak into the connection model
-        var invalidMarkers = connection.Options.Keys
-            .Where(k => k.StartsWith("_invalid:", StringComparison.Ordinal)).ToList();
-        foreach (var key in invalidMarkers)
+        var internalMarkers = connection.Options.Keys
+            .Where(k => k.StartsWith("_invalid:", StringComparison.Ordinal)
+                        || k.StartsWith("_defaulted:", StringComparison.Ordinal)).ToList();
+        foreach (var key in internalMarkers)
             connection.Options.Remove(key);
 
         return warnings;

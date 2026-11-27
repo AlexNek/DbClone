@@ -41,7 +41,7 @@
         <!-- Paste field -->
         <ui:TextBox Grid.Row="2"
                     Text="{Binding InputText, UpdateSourceTrigger=PropertyChanged}"
-                    PlaceholderText="postgresql://user:password@host:5432/database?sslmode=require"
+                    PlaceholderText="{Binding InputPlaceholder}"
                     AcceptsReturn="True" TextWrapping="Wrap"
                     MinHeight="72" MaxHeight="100"
                     VerticalScrollBarVisibility="Auto"
@@ -190,6 +190,6 @@
         <TextBlock Grid.Row="7" FontSize="10"
                    Foreground="{DynamicResource TextFillColorTertiaryBrush}"
                    TextWrapping="Wrap"
-                   Text="Supported: Npgsql/.NET • PostgreSQL URI • libpq/psql • JDBC • SQLAlchemy • Prisma • Node.js • Supabase • Environment Variables"/>
+                   Text="{Binding SupportedFormatsDisplay}" />
     </Grid>
 </ui:FluentWindow>
