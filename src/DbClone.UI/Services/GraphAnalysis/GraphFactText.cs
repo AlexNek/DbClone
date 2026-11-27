@@ -42,12 +42,13 @@ internal static class GraphFactText
     /// <summary>
     /// The card's second line: the row count, the absence of data, or the fact that the catalog does
     /// not hold the table at all. A table the catalog does not hold is never given a figure it does not
-    /// have (FR4, D7). An origin that states no row figure at all returns an empty line, which the
-    /// writer prints nowhere rather than as whitespace (plan D1, D3).
+    /// have (FR4, D7). An origin that states no row figure for any table says nothing there — the header
+    /// carries the reason once — so the line states the figure the read did measure for that one table:
+    /// the relations that meet it (plan D1, D3).
     /// </summary>
     /// <param name="node">The table.</param>
     /// <param name="words">The origin's words.</param>
-    /// <returns>The one line printed under the table's name, or an empty string when there is none.</returns>
+    /// <returns>The one line printed under the table's name.</returns>
     internal static string NodeFacts(CatalogGraphNode node, GraphOriginWords words)
     {
         if (!node.IsCaptured)
@@ -57,15 +58,22 @@ internal static class GraphFactText
 
         if (node.RowCount is not { } rows)
         {
-            return words.RowsNote;
+            return words.RowsNote.Length > 0 ? words.RowsNote : Degrees(node);
         }
 
         return $"{Rows(rows)} {Count(rows, "row", "rows")}";
     }
 
+    /// <summary>Writes both direction counts of a table, which are never merged into one figure (FR12, D7).</summary>
+    /// <param name="node">The table.</param>
+    /// <returns>The two counts in words.</returns>
+    internal static string Degrees(CatalogGraphNode node) =>
+        $"references {node.DegreeOut}, referenced by {node.DegreeIn}";
+
     /// <summary>
     /// The card's tooltip: the name, the facts, both direction counts, which are never merged into one
-    /// figure (FR12, D7), and the words that name a link table, marked as the inference it is (D14.3).
+    /// figure and never said twice (FR12, D7), and the words that name a link table, marked as the
+    /// inference it is (D14.3).
     /// A fact the origin states nowhere is left out of the sentence rather than printed as an empty
     /// place between two separators.
     /// </summary>
@@ -75,8 +83,11 @@ internal static class GraphFactText
     internal static string NodeTitle(CatalogGraphNode node, GraphOriginWords words)
     {
         var facts = NodeFacts(node, words);
+        var degrees = Degrees(node);
+        // Where the card already prints the two counts, the tooltip says them once rather than twice.
+        var counts = facts.Contains(degrees, StringComparison.Ordinal) ? string.Empty : $" \u2014 {degrees}";
         var join = node.JoinTableBetween is null ? string.Empty : $" \u2014 {node.JoinTableBetween} (inferred)";
-        return $"{node.DisplayName}{Segment(facts)} \u2014 references {node.DegreeOut}, referenced by {node.DegreeIn}{join}";
+        return $"{node.DisplayName}{Segment(facts)}{counts}{join}";
     }
 
     /// <summary>Opens a tooltip segment with its separator, or says nothing when the segment is empty.</summary>

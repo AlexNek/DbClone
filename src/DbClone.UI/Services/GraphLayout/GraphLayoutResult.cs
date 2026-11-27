@@ -12,7 +12,8 @@ internal sealed class GraphLayoutResult
         GraphLayoutFailure? failure,
         bool isDegraded,
         bool isRough,
-        GraphLayoutFacts? facts)
+        GraphLayoutFacts? facts,
+        bool wasTimeSliced)
     {
         if ((layout is null) == (failure is null))
         {
@@ -24,6 +25,7 @@ internal sealed class GraphLayoutResult
         IsDegraded = isDegraded;
         IsRough = isRough;
         Facts = facts;
+        WasTimeSliced = wasTimeSliced;
     }
 
     /// <summary>Gets the finished picture; <see langword="null"/> when there is none.</summary>
@@ -54,6 +56,15 @@ internal sealed class GraphLayoutResult
     /// </summary>
     public bool IsRough { get; }
 
+    /// <summary>
+    /// Gets whether one of the search's clock-sliced passes — the refining search or the post-selection beauty
+    /// pass — gave up mid-work because its own slice expired, while the request as a whole stayed inside
+    /// <see cref="GraphSearchBudget.MaximumElapsedLayoutTime"/>. The picture is complete and valid; what the
+    /// search did not reach depends on how busy the machine was, so its counts and its coordinates are the
+    /// answer of an unfinished search rather than the proof a finished one gives.
+    /// </summary>
+    public bool WasTimeSliced { get; }
+
     /// <summary>Gets whether a picture was drawn.</summary>
     public bool IsSuccess => Layout is not null;
 
@@ -62,16 +73,18 @@ internal sealed class GraphLayoutResult
     /// <param name="isDegraded">Whether the watchdog cut the refining short and the picture is the cheap one.</param>
     /// <param name="isRough">Whether the picture is the arrangement of last resort.</param>
     /// <param name="facts">What the arrangement decided, when the search measured it.</param>
+    /// <param name="wasTimeSliced">Whether a clock slice cut a pass short before it finished its work.</param>
     /// <returns>The successful result.</returns>
     public static GraphLayoutResult Success(
         CatalogGraphLayout layout,
         bool isDegraded = false,
         bool isRough = false,
-        GraphLayoutFacts? facts = null) =>
-        new(layout, null, isDegraded, isRough, facts);
+        GraphLayoutFacts? facts = null,
+        bool wasTimeSliced = false) =>
+        new(layout, null, isDegraded, isRough, facts, wasTimeSliced);
 
     /// <summary>No picture, and the reason.</summary>
     /// <param name="failure">What ended the request without a valid layout.</param>
     /// <returns>The failed result.</returns>
-    public static GraphLayoutResult Failed(GraphLayoutFailure failure) => new(null, failure, false, false, null);
+    public static GraphLayoutResult Failed(GraphLayoutFailure failure) => new(null, failure, false, false, null, false);
 }

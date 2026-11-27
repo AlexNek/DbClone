@@ -76,11 +76,20 @@ internal sealed class GraphLayoutEngine
             return GraphLayoutResult.Failed(new GraphLayoutFailure(kind, outcome.Reports, outcome.GeometryEvaluations));
         }
 
+        // The arrows are placed by the picture's own rules; the words a reader reveals come after them, because
+        // a label answers to the ink around it and to nothing else. No port, route or crossing moves here.
+        var routes = GraphLabelPlacement.Place(
+            best.Layout.Nodes,
+            best.Routes,
+            profile.Edges,
+            [.. model.Edges.Select(edge => edge.PictureLabel)]);
+
         return GraphLayoutResult.Success(
-            new CatalogGraphLayout(best.Layout.Nodes, best.Routes, best.Layout.Width, best.Layout.Height),
+            new CatalogGraphLayout(best.Layout.Nodes, routes, best.Layout.Width, best.Layout.Height),
             outcome.IsDegraded,
             outcome.IsRough,
-            GraphLayoutFacts.Of(best, profile, model, ends, outcome));
+            GraphLayoutFacts.Of(best, profile, model, ends, outcome),
+            outcome.WasTimeSliced);
     }
 
     /// <summary>How many arrow ends meet each card, counted as the border is dealt out to them.</summary>

@@ -33,7 +33,7 @@ public sealed class GraphLayoutQualityTests(ITestOutputHelper output)
         var validity = AssertComplete(fixture, model, profile, outcome, budget);
         var candidate = outcome.Best!;
         var signature = GraphQualitySignature.Of(candidate.Layout.Nodes, candidate.Routes, candidate.Layout.Width, candidate.Layout.Height);
-        AssertReplay(fixture, signature, budget, watch.Elapsed);
+        AssertReplay(fixture, signature, outcome.WasTimeSliced, budget);
         var json = Snapshot(fixture, model, profile, candidate, validity, budget, watch.Elapsed);
         using var document = JsonDocument.Parse(json);
         var summary = document.RootElement.EnumerateObject().Where(property => property.Name is not ("Nodes" or "Routes" or "RouteLengths" or "RouteToDirectRatios"))
@@ -129,30 +129,31 @@ public sealed class GraphLayoutQualityTests(ITestOutputHelper output)
     }
 
     /// <summary>
-    /// The picture is the same under another culture, and so is the number of operations that drew it —
-    /// for a catalog the search finishes by itself. The beauty pass after the search is sliced by the clock
-    /// (<see cref="GraphSearchBudget.MaximumElapsedLayoutTime"/> is the engine's own idea of a request that
-    /// finishes by itself), so a catalog that runs past it stopped where the clock said, which differs
-    /// between machines and runs. What every request promises either way is that no count passes its
-    /// budget, which <see cref="AssertComplete"/> asserts for every fixture, and that the picture is the same.
+    /// The picture is the same under another culture, and so is the number of operations that drew it — as long as
+    /// no clock slice cut the work that spends them. The selector hands the refining search and the post-selection
+    /// beauty pass a slice of the time left to the request each, two and six seconds, so a catalog whose improving
+    /// passes need more than that stops where the clock said. Which improvements a slice leaves untried depends on
+    /// the machine and on what else is running on it, so such a request's counts are not a reproducible quantity;
+    /// <see cref="GraphSelectionOutcome.WasTimeSliced"/> is the engine saying so, and it is the only honest
+    /// predicate here — the 20-second watchdog is reached long after both slices. What every request promises
+    /// either way is the picture, which is what the signature is, and that no count passes its budget, which
+    /// <see cref="AssertComplete"/> asserts for every fixture.
     /// </summary>
-    private static void AssertReplay(string fixture, string signature, GraphEvaluationBudget firstBudget, TimeSpan firstElapsed)
+    private void AssertReplay(string fixture, string signature, bool wasTimeSliced, GraphEvaluationBudget firstBudget)
     {
         var previous = CultureInfo.CurrentCulture;
         try
         {
             CultureInfo.CurrentCulture = new CultureInfo("de-DE");
             var budget = new GraphEvaluationBudget(GraphSearchBudget.MaximumGeometryEvaluations);
-            var watch = Stopwatch.StartNew();
             var replay = new GraphLayoutSelector().Select(Profile(GraphQualityFixtures.Model(fixture)), budget, timeLimit: Limit);
-            watch.Stop();
             replay.IsSuccess.Should().BeTrue();
             replay.IsDegraded.Should().BeFalse();
             var best = replay.Best!;
             GraphQualitySignature.Of(best.Layout.Nodes, best.Routes, best.Layout.Width, best.Layout.Height).Should().Be(signature);
-            if (firstElapsed >= GraphSearchBudget.MaximumElapsedLayoutTime
-                || watch.Elapsed >= GraphSearchBudget.MaximumElapsedLayoutTime)
+            if (wasTimeSliced || replay.WasTimeSliced)
             {
+                output.WriteLine($"{fixture}: counts not compared, a slice cut the work (first run sliced: {wasTimeSliced}, replay sliced: {replay.WasTimeSliced}).");
                 return;
             }
 

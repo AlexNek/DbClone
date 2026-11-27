@@ -976,9 +976,10 @@ public sealed class CatalogGraphHtmlRendererTests
         // it once and no card repeats it (plan D1, D2).
         rendered.Document.Should().Contain("postgresql \u00b7 read 2026-11-10 16:00 \u00b7 rows are not counted here</p>");
         Count(rendered.Document, "rows are not counted here").Should().Be(1);
-        // The line a card does carry is the per-table one: which tables the read did not return (D4). One
-        // count line is printed in this document, and it is the outside table's.
-        Count(rendered.Document, "class=\"count\" x=").Should().Be(1);
+        // The line a captured card carries is the figure the read measured for that one table: the
+        // relations that meet it. A table the read did not return states what makes it outside instead
+        // (D4), so this document prints one count line per card.
+        Count(rendered.Document, "class=\"count\" x=").Should().Be(3);
         rendered.Document.Should().Contain(">not in this view</text>");
         rendered.Document.Should().Contain("outside this view");
         rendered.Document.Should().Contain("the table it points at is not in this view");
@@ -993,7 +994,7 @@ public sealed class CatalogGraphHtmlRendererTests
     }
 
     [Fact]
-    public void A_live_card_prints_no_second_line_and_is_measured_by_its_name()
+    public void A_live_card_states_the_relations_that_meet_it_and_is_measured_by_those_words()
     {
         // Arrange — the shape the live read of an auth schema drew: names of 14 to 23 characters, none of
         // them a table whose rows were counted.
@@ -1003,12 +1004,18 @@ public sealed class CatalogGraphHtmlRendererTests
             .Table("public", "customers", columns: Column("id", "bigint", isPrimaryKey: true)));
         var document = rendered.Document;
 
-        // Assert — nothing is printed where a figure would be, and nothing is printed as whitespace.
-        Count(document, "class=\"count\"").Should().Be(0, "a live card states no figure about its rows");
-        document.Should().NotContain("<text class=\"count\"></text>", "an origin that says nothing writes no node");
+        // Assert — no rows were counted for any table, which is a fact about the origin and stays in the
+        // header; what the read did measure for one table is how many relations meet it, and the card
+        // prints that (plan D1, D2).
+        Count(document, "class=\"count\"")
+            .Should().Be(2, "a live card states the figure the read measured for that one table");
+        document.Should().Contain(">references 0, referenced by 0</text>");
+        Count(document, "rows are not counted here").Should().Be(1, "the reason is stated once, off the cards");
         document.Should().NotContain("\u2014 \u2014", "the tooltip leaves no empty place between two separators");
+        document.Should().NotContain(
+            "references 0, referenced by 0 \u2014 references", "the two counts are never said twice on one card");
 
-        // Assert — the card is as wide as its name, not as wide as the sentence the header now carries.
+        // Assert — the card is as wide as the longer of the two lines it prints.
         var card = document[document.IndexOf("<g class=\"node", StringComparison.Ordinal)..];
         var box = Regex.Match(card, "<rect x=\"(?<x>[0-9.]+)\" y=\"(?<y>[0-9.]+)\" width=\"(?<w>[0-9.]+)\"");
         var name = Regex.Match(card, "<text class=\"name\"[^>]*>(?<text>[^<]*)</text>");
@@ -1016,8 +1023,8 @@ public sealed class CatalogGraphHtmlRendererTests
         box.Success.Should().BeTrue("a table is drawn as a rectangle");
         name.Success.Should().BeTrue("the table's name is on the picture");
         Number(box, "w").Should().Be(
-            GraphCard.Width(name.Groups["text"].Value, string.Empty),
-            "the card is measured by the only line it prints");
+            GraphCard.Width(name.Groups["text"].Value, "references 0, referenced by 0"),
+            "the card is measured by the words it prints");
     }
 
     /// <summary>How wide one mark is drawn in the picture, in pixels, ink and all.</summary>

@@ -14,13 +14,19 @@ namespace DbClone.UI.Services.GraphLayout;
 /// drawn from port to port without the promise that a stroke clears a card. Such a picture is always a
 /// warning beside a picture, never a silent substitute for a valid one.
 /// </param>
+/// <param name="WasTimeSliced">
+/// Whether the refining search or the beauty pass ran out of its own time slice, so the improvements left
+/// untried — and with them the operation counts — depend on the machine. A false here means the request spent
+/// only what its operation budgets asked for, and answers with the same counts every time it is re-run.
+/// </param>
 internal sealed record GraphSelectionOutcome(
     GraphLayoutCandidate? Best,
     IReadOnlyList<GraphSeedReport> Reports,
     int GeometryEvaluations,
     bool WasCancelled,
     bool WasTimedOut,
-    bool IsRough = false)
+    bool IsRough = false,
+    bool WasTimeSliced = false)
 {
     /// <summary>Gets whether a valid layout was chosen.</summary>
     public bool IsSuccess => Best is not null;

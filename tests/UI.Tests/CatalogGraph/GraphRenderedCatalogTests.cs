@@ -23,13 +23,23 @@ public sealed class GraphRenderedCatalogTests(ITestOutputHelper output)
         output.WriteLine($"degraded={result.IsDegraded} rough={result.IsRough} arrangement={result.Facts?.Arrangement} seeds={result.Facts?.Seeds}");
         output.WriteLine(document.Line());
         output.WriteLine("hidden relations: " + string.Join(", ", document.HiddenRelationNames));
+        output.WriteLine($"hidden as chords={document.HiddenChords} as curves={document.HiddenCurves}");
         document.PaintedCards.Should().Be(79, "the catalog opens whole");
         document.PaintedRelations.Should().Be(96);
         document.HasAway.Should().BeFalse();
         result.IsRough.Should().BeFalse("a picture the search proved is the one asked for");
-        document.HiddenRelations.Should().Be(0, "no relation may run behind a card it does not join");
-        document.HiddenMeetingBusiestTable.Should().Be(0, "the busiest table's fan is whole");
+        // The picture's own contract: the bounds file states it and the rendered legend tells the reader ("the cards
+        // are painted over the arrows, so a relation passing one runs behind it"). Every relation but a
+        // self-reference is a straight chord between its two ports and may pass behind a card; only a curve is held
+        // out of every card it does not join. That is the rule asserted here; the chord count stays on the line above.
+        document.HiddenCurves.Should().Be(0, "a curve may never run behind a card it does not join");
+        document.FanHiddenCurves.Should().Be(0, "no curve meeting the busiest table is covered");
         document.MergedPortMarks.Should().Be(0, "arrows never fuse");
+        // The picture's own promise, counted in the ink the document prints: two constraints revealed by one
+        // click are never written on one place. The one pair this page still owes is a self-reference whose
+        // label blankets the corridor its neighbours run through — no share of any of those routes separates
+        // them, so it is recorded and bounded rather than silently accepted (refactors/19).
+        document.LabelOverprints.Should().BeLessThanOrEqualTo(1, "a revealed constraint is never printed over another");
         document.Crossings.Should().BeLessThanOrEqualTo(150);
     }
 

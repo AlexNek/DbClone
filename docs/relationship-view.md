@@ -35,7 +35,9 @@ On a machine without the runtime the picture opens in your browser instead, and 
 
 ## The card: the name, and the count the origin states
 
-Every table is one card, and its facts are printed **inside** it: the table's name on the first line, and on the second what the origin states about that table's rows — the count a store captured, or that the store captured no rows. A live read counted no rows for any table, so it prints no second line: the card is sized by its name alone and the header states once, for the whole picture, that rows are not counted. A card never prints a figure its origin did not measure, and never leaves an empty line where one would sit. The card is exactly as wide as the longer of its lines, so `ai_chat_provider_configuration` gets a wider card than `orders` — and no name is ever cut, wrapped or pushed outside the shape.
+Every table is one card, and its facts are printed **inside** it: the table's name on the first line, and on the second what the origin states about that table — the count a store captured, or that the store captured no rows. A live read counted no rows for any table, which is a fact about the whole read, so the header says it once and the card prints the figure the read did measure for that one table instead: how many relations leave it and how many point at it, as in `references 2, referenced by 7`. A card never prints a figure its origin did not measure, and never leaves an empty line where one would sit. The card is exactly as wide as the longer of its lines, so `ai_chat_provider_configuration` gets a wider card than `orders` — and no name is ever cut, wrapped or pushed outside the shape.
+
+The words on a card are also what the picture is built around: the arrangement spaces the tables and routes the arrows against the shape those words produce, so a card that printed nothing below a short name would be given room for a short name and nothing more.
 
 No dimension states a figure. Every card has the same height and a width that follows its own text, so a larger shape never means "a larger table": any figure the origin states is read in words inside the card, not off its size, and no colour carries a number either.
 
@@ -46,7 +48,7 @@ No dimension states a figure. Every card has the same height and a width that fo
 | `no data captured` | The structure was captured but not the rows — table data was switched off |
 | `not in this catalog` | A constraint points at this table and the store did not capture it |
 | `not in this view` | A live view: a constraint points at a table the read did not return |
-| nothing under the name | A live view: the read measured no row count, and the header says so once |
+| `references 2, referenced by 7` | A live view: the relations that leave this table and the relations that point at it — no row count was measured, and the header says so once |
 
 ## What the arrows say
 
@@ -64,7 +66,7 @@ The parent end carries no mark because it cannot vary: a foreign key always refe
 
 Many-to-many is not an arrow, because no engine declares one. It is a table that points through two others, and when its key is exactly the columns it points through, the panel names it: `issue_labels · join table of issues and labels — inferred`. The word *inferred* is deliberate — a link table carrying a surrogate key or a discriminator column is not named at all rather than guessed at.
 
-No encoding stands for two facts, and no fact has two encodings. The columns a constraint joins are never printed along its arrow: they are written beside it and appear when you point at the arrow or select it, so a corridor carries its line and nothing else and two routes that converge never stack their text on each other. Selecting an arrow does not ask you to land on its line — a wide invisible band follows every arrow, so a point a few pixels to the side of a line reveals and selects that constraint, and two parallel arrows stay separately selectable because each keeps its own band. A constraint loses nothing by that — it keeps its arrow, its tooltip, its row in the register and its place in the panel, where its columns are printed in full without touching anything. Two constraints between the same pair of tables stay two arrows you can select one at a time.
+No encoding stands for two facts, and no fact has two encodings. The columns a constraint joins are never printed along its arrow: they are written beside it and appear when you point at the arrow or select it, so a corridor carries its line and nothing else and two routes that converge never stack their text on each other. Where that text stands is settled after the arrows are drawn, by the words themselves: every label is measured at the size the page prints it and set at the point of its own arrow where the ink around it leaves room, so the two constraints joining one pair of tables read as two lines one above the other instead of one printed over the other. Nothing moves to make that room — when a label settles, no port, no route and no crossing changes; only the word does. Selecting an arrow does not ask you to land on its line — a wide invisible band follows every arrow, so a point a few pixels to the side of a line reveals and selects that constraint, and two parallel arrows stay separately selectable because each keeps its own band. A constraint loses nothing by that — it keeps its arrow, its tooltip, its row in the register and its place in the panel, where its columns are printed in full without touching anything. Two constraints between the same pair of tables stay two arrows you can select one at a time.
 
 ## How the cards are arranged
 

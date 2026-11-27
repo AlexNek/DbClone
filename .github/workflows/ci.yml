@@ -8,7 +8,100 @@ on:
   workflow_dispatch:
 
 jobs:
+  # The path a reviewer waits for: every suite that answers in seconds. The layout searches that
+  # keep the reader's picture honest need minutes of CPU on a machine nobody else is using, so they
+  # are the `characterization` job running beside this one instead of a step at the end of it.
   build-and-test:
+    runs-on: windows-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v5
+        with:
+          fetch-depth: 0
+
+      - name: Setup environment
+        uses: ./.github/actions/setup-env
+
+      - name: Restore
+        run: dotnet restore DbClone.slnx
+
+      - name: Build
+        run: dotnet build DbClone.slnx -c Release --no-restore
+
+      # Separate steps, so a failure in one suite names itself instead of hiding the suites behind it.
+      # --no-build: the step above built these projects already, and each suite's own build pass both
+      # re-walked the graph (measured 27 s against 5 s on an up-to-date tree) and re-ran the UI
+      # project's post-build publish of the PostgreSQL plugin.
+      # The UI suite is filtered to the fast traits; the Slow traits are this job's sibling.
+      - name: Test
+        run: |
+          dotnet test tests/Application.Tests --no-restore --no-build -c Release --verbosity minimal
+          dotnet test tests/DbAdapter.PostgreSql.Tests --no-restore --no-build -c Release --verbosity minimal
+
+      - name: Test (interchange)
+        run: >
+          dotnet test tests/DatabaseInterchange.Tests
+          --no-restore --no-build -c Release --verbosity minimal
+
+      - name: Test (UI)
+        run: >
+          dotnet test tests/UI.Tests
+          --no-restore --no-build -c Release --verbosity minimal
+          --filter "Speed!=Slow"
+
+  # The measured acceptance and the big-catalog stress. The characterization table's elapsed bounds,
+  # and the engine's own watchdog behind the degraded/rough flags, are only meaningful while nothing
+  # else competes for the processor — which is why they keep runners of their own rather than sharing
+  # one with the fast suites. The detailed console logger is deliberate and load-bearing: the fixture
+  # tables the checklists record are written through ITestOutputHelper, and without it a passing test's
+  # output never reaches the log (measured — `-v normal` alone printed the counts and none of the tables).
+  #
+  # The run is sliced in two because the Slow work is one long line of single-threaded searches: the
+  # 1 000- and 2 000-table engine stress (the slowest tests in the repository) on one side, the
+  # catalog-shaped characterization on the other. Each slice gets a quiet runner, so the split costs
+  # nothing in trust and takes the pull request's wall time off the sum of the searches.
+  characterization:
+    runs-on: windows-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - slice: big-catalog and long-chain stress
+            filter: Speed=Slow&FullyQualifiedName~GraphLayoutEngineTests
+          - slice: measured characterization
+            filter: Speed=Slow&FullyQualifiedName!~GraphLayoutEngineTests
+    name: Characterization (${{ matrix.slice }})
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v5
+        with:
+          fetch-depth: 0
+
+      - name: Setup environment
+        uses: ./.github/actions/setup-env
+
+      - name: Restore
+        run: dotnet restore tests/UI.Tests/UI.Tests.csproj
+
+      # Only what this slice runs: the solution's other projects, including the packaging, are the
+      # first job's and the installer job's business.
+      - name: Build
+        run: dotnet build tests/UI.Tests/UI.Tests.csproj -c Release --no-restore
+
+      - name: Test
+        run: >
+          dotnet test tests/UI.Tests
+          --no-restore --no-build -c Release --verbosity minimal
+          --logger "console;verbosity=detailed"
+          --filter "${{ matrix.filter }}"
+
+  # Packaging is verified here on the branches it ships from, and for real — with the artifacts
+  # uploaded — by Release Installer on a tag. A pull request does not wait on two self-contained
+  # publishes and the WiX chain to review a dialog or a query change.
+  installer:
+    if: github.event_name != 'pull_request'
     runs-on: windows-latest
 
     steps:
@@ -20,26 +113,6 @@ jobs:
       - name: Setup environment
         id: setup-env
         uses: ./.github/actions/setup-env
-
-      - name: Restore
-        run: dotnet restore DbClone.slnx
-
-      - name: Build
-        run: dotnet build DbClone.slnx -c Release --no-restore
-
-      - name: Test
-        run: |
-          dotnet test tests/Application.Tests --no-restore -c Release --verbosity normal
-          dotnet test tests/DbAdapter.PostgreSql.Tests --no-restore -c Release --verbosity normal
-
-      # Separate steps, so a failure in one suite names itself instead of hiding the suites behind it.
-      - name: Test (interchange)
-        run: >
-          dotnet test tests/DatabaseInterchange.Tests
-          --no-restore -c Release --verbosity normal
-
-      - name: Test (UI)
-        run: dotnet test tests/UI.Tests --no-restore -c Release --verbosity normal
 
       - name: Build and verify installer
         uses: ./.github/actions/build-installer

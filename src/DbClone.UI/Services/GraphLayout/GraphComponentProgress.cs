@@ -28,4 +28,13 @@ internal sealed class GraphComponentProgress
 
     /// <summary>Gets or sets how many relations that seed could not route.</summary>
     public int NearestFailures { get; set; } = int.MaxValue;
+
+    /// <summary>
+    /// Gets or sets whether one of this component's clock-sliced passes — the refining search or the
+    /// post-selection beauty pass — gave up mid-work because its own slice expired while the request as a whole
+    /// stayed inside <see cref="GraphSearchBudget.MaximumElapsedLayoutTime"/>. Which improvements a slice leaves
+    /// untried depends on the machine, so the operation counts of such a request are not a reproducible quantity
+    /// even when its picture is.
+    /// </summary>
+    public bool WasSliceCut { get; set; }
 }

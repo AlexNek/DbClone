@@ -49,6 +49,7 @@ public sealed class GraphLayoutShapeTests
 
     [Theory]
     [MemberData(nameof(Seeds))]
+    [Trait("Speed", "Slow")]
     public void A_generated_catalog_always_ends_with_a_whole_picture(int seed)
     {
         var profile = GraphQualityFixtures.Profile(Shapes.Nodes, Shapes.Edges(seed));

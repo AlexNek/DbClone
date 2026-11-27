@@ -1,13 +1,14 @@
 using System.Globalization;
+using System.Net;
 using System.Text.Json;
 using System.Text.RegularExpressions;
 using DbClone.UI.Services.GraphLayout;
 namespace UI.Tests.CatalogGraph;
 /// <summary>
 /// The picture a reader gets, read back from the document the application writes: the card rectangles, the
-/// painted strokes, the label anchors and the JSON island that states which two cards each relation joins.
-/// Nothing here asks the layout engine; every term is taken from the markup, so no exemption in the validator
-/// can turn a covered relation into a reported zero.
+/// painted strokes, the labels with the ink they print in, and the JSON island that states which two cards each
+/// relation joins. Nothing here asks the layout engine; every term is taken from the markup, so no exemption in
+/// the validator can turn a covered relation into a reported zero.
 /// </summary>
 internal sealed partial class GraphRenderedDocument
 {
@@ -15,10 +16,11 @@ internal sealed partial class GraphRenderedDocument
     private const double BorderTolerance = 1.0;
     private readonly List<NodePlacement> _cards = [];
     private readonly List<bool> _cardAway = [];
-    private readonly List<(int Index, string D, bool Away)> _strokes = [];
-    private readonly List<(int Index, GraphPoint Anchor, bool Away)> _labels = [];
+    private readonly List<(int Index, string D, bool Away, GraphPoint Shift)> _strokes = [];
+    private readonly List<(int Index, GraphPoint Anchor, string Text)> _labels = [];
     private readonly Dictionary<int, (int Child, int Parent, bool Self)> _relations = [];
     private readonly Dictionary<int, string> _names = [];
+    private readonly List<string> _overprints = [];
     private IReadOnlyList<(int Edge, IReadOnlyList<GraphPoint> Points, bool Chord)> _lines = [];
     private GraphRenderedDocument()
     {
@@ -29,6 +31,10 @@ internal sealed partial class GraphRenderedDocument
     public int PaintedRelations => _lines.Count;
     /// <summary>Gets the relations whose stroke passes a painted card they do not join, self-references apart.</summary>
     public int HiddenRelations { get; private set; }
+    /// <summary>Gets the hidden relations drawn as a straight chord: the case the measurement contract says the cards are painted over.</summary>
+    public int HiddenChords { get; private set; }
+    /// <summary>Gets the hidden relations drawn as a curve: the case the engine's hard rule holds out of every card it does not join.</summary>
+    public int HiddenCurves { get; private set; }
     /// <summary>Gets the self-references whose loop passes a painted card.</summary>
     public int HiddenLoops { get; private set; }
     /// <summary>Gets the relation/card occlusion pairs.</summary>
@@ -39,6 +45,8 @@ internal sealed partial class GraphRenderedDocument
     public int BusiestTable { get; private set; } = -1;
     /// <summary>Gets how many painted relations meet the busiest table.</summary>
     public int BusiestTableRelations { get; private set; }
+    /// <summary>Gets the hidden strokes meeting the busiest table that are curves — the part of its fan a card must not cover.</summary>
+    public int FanHiddenCurves { get; private set; }
     /// <summary>Gets the hidden relations among those that meet the busiest table.</summary>
     public int HiddenMeetingBusiestTable { get; private set; }
     /// <summary>Gets the crossings between two straight strokes.</summary>
@@ -49,6 +57,10 @@ internal sealed partial class GraphRenderedDocument
     public int MergedPortMarks { get; private set; }
     /// <summary>Gets the painted relation labels whose anchor lies strictly inside a painted card.</summary>
     public int LabelsOnCards { get; private set; }
+    /// <summary>Gets the pairs of labels that would print on one place if the reader revealed them together.</summary>
+    public int LabelOverprints { get; private set; }
+    /// <summary>Gets one evidence line per overprinting pair, naming the two constraints and where they stand.</summary>
+    public IReadOnlyList<string> OverprintReport => _overprints;
     /// <summary>Gets the strokes drawn over 600 px.</summary>
     public int LongStrokes { get; private set; }
     /// <summary>Gets the distinct card rows (distinct top y) of the painted cards.</summary>
@@ -85,7 +97,7 @@ internal sealed partial class GraphRenderedDocument
     /// <returns>The line.</returns>
     public string Line() =>
         string.Create(CultureInfo.InvariantCulture,
-            $"cards={PaintedCards} relations={PaintedRelations} hidden={HiddenRelations} fan={HiddenMeetingBusiestTable}/{BusiestTableRelations} crossings={Crossings} all={AllCrossings} merged={MergedPortMarks} labels={LabelsOnCards} rows={Rows} widest={WidestRow} canvas={CanvasWidth:F0}x{CanvasHeight:F0} ink={CardInkFraction:P1} loops={HiddenLoops}");
+            $"cards={PaintedCards} relations={PaintedRelations} hidden={HiddenRelations} fan={HiddenMeetingBusiestTable}/{BusiestTableRelations} crossings={Crossings} all={AllCrossings} merged={MergedPortMarks} labels={LabelsOnCards} overprints={LabelOverprints} rows={Rows} widest={WidestRow} canvas={CanvasWidth:F0}x{CanvasHeight:F0} ink={CardInkFraction:P1} loops={HiddenLoops}");
     private void ReadIsland(string html)
     {
         var start = html.IndexOf("id=\"data\">", StringComparison.Ordinal);
@@ -114,9 +126,14 @@ internal sealed partial class GraphRenderedDocument
                 _cards.Add(new NodePlacement(_cards.Count, default, 0, 0));
                 _cardAway.Add(true);
             }
+            // A table the reader carried by hand keeps its written rect and gains a translate on its group: the
+            // card he sees stands where the rect and that shift add up, and the arrows were reflowed to it.
+            var shift = TranslatePattern().Match(node.Groups["attrs"].Value);
             _cards[index] = new NodePlacement(
                 index,
-                new GraphPoint(Number(rect, "x"), Number(rect, "y")),
+                new GraphPoint(
+                    Number(rect, "x") + (shift.Success ? Num(shift.Groups["dx"].Value) : 0),
+                    Number(rect, "y") + (shift.Success ? Num(shift.Groups["dy"].Value) : 0)),
                 Number(rect, "w"),
                 Number(rect, "h"));
             _cardAway[index] = HasClass(node.Groups["class"].Value, "away") || HasClass(node.Groups["class"].Value, "off");
@@ -131,10 +148,13 @@ internal sealed partial class GraphRenderedDocument
             {
                 continue;
             }
+            // A loop that followed a card the reader carried is moved by a translate on the path, not rewritten in d.
+            var shift = TranslatePattern().Match(stroke.Groups["attrs"].Value);
             _strokes.Add((
                 int.Parse(stroke.Groups["e"].Value, CultureInfo.InvariantCulture),
                 stroke.Groups["d"].Value,
-                HasClass(classes, "away") || HasClass(classes, "off")));
+                HasClass(classes, "away") || HasClass(classes, "off"),
+                shift.Success ? new GraphPoint(Num(shift.Groups["dx"].Value), Num(shift.Groups["dy"].Value)) : default));
         }
     }
     private void ReadLabels(string html)
@@ -144,7 +164,7 @@ internal sealed partial class GraphRenderedDocument
             _labels.Add((
                 int.Parse(label.Groups["e"].Value, CultureInfo.InvariantCulture),
                 new GraphPoint(Num(label.Groups["x"].Value), Num(label.Groups["y"].Value)),
-                false));
+                WebUtility.HtmlDecode(label.Groups["text"].Value)));
         }
     }
     private void Measure()
@@ -152,7 +172,7 @@ internal sealed partial class GraphRenderedDocument
         var painted = _cards.Where((_, index) => !_cardAway[index]).ToArray();
         MeasureGround(painted);
         _lines = _strokes.Where(stroke => !stroke.Away)
-            .Select(stroke => (stroke.Index, Points: Flatten(stroke.D), Chord: !stroke.D.Contains('C', StringComparison.Ordinal)))
+            .Select(stroke => (stroke.Index, Points: Flatten(stroke.D, stroke.Shift), Chord: !stroke.D.Contains('C', StringComparison.Ordinal)))
             .ToArray();
         MeasureOcclusion(painted);
         MeasureCrossings();
@@ -161,7 +181,45 @@ internal sealed partial class GraphRenderedDocument
         LabelsOnCards = _labels.Count(label => paintedRelations.Contains(label.Index)
             && painted.Any(card => label.Anchor.X > card.TopLeft.X && label.Anchor.X < card.Right
                 && label.Anchor.Y > card.TopLeft.Y && label.Anchor.Y < card.Bottom));
+        MeasureOverprints(paintedRelations);
         LongStrokes = _lines.Count(line => GraphGeometry.ArcLength(line.Points) > 600);
+    }
+    /// <summary>
+    /// Counts the labels that would print on one place in a single reveal — the reader selects a table and every
+    /// relation meeting it speaks at once, so two whose ink overlaps read as one garbled constraint. The width is
+    /// the document's own <c>.elabel</c> ink, taken from the text it wrote beside the anchor.
+    /// </summary>
+    private void MeasureOverprints(HashSet<int> painted)
+    {
+        var ink = new List<(int Index, GraphLabelInk Band)>();
+        foreach (var label in _labels.Where(label => painted.Contains(label.Index)))
+        {
+            if (!_relations.TryGetValue(label.Index, out var joined))
+            {
+                continue;
+            }
+            ink.Add((label.Index, GraphLabelInk.Around(label.Anchor, label.Text, joined.Child, joined.Parent)));
+        }
+        for (var first = 0; first < ink.Count; first++)
+        {
+            for (var second = first + 1; second < ink.Count; second++)
+            {
+                if (ink[first].Band.RevealedWith(ink[second].Band) && ink[first].Band.Meets(ink[second].Band))
+                {
+                    LabelOverprints++;
+                    _overprints.Add(Overprint(ink[first], ink[second]));
+                }
+            }
+        }
+    }
+    private string Overprint((int Index, GraphLabelInk Band) first, (int Index, GraphLabelInk Band) second)
+    {
+        var (left, right) = (_labels.Single(label => label.Index == first.Index), _labels.Single(label => label.Index == second.Index));
+        var tables = $"{_names.GetValueOrDefault(first.Index, "?")} | {_names.GetValueOrDefault(second.Index, "?")}";
+
+        return string.Create(
+            CultureInfo.InvariantCulture,
+            $"{tables}: '{left.Text}' at ({left.Anchor.X:F0},{left.Anchor.Y:F0}) over '{right.Text}' at ({right.Anchor.X:F0},{right.Anchor.Y:F0})");
     }
     private void MeasureGround(NodePlacement[] painted)
     {
@@ -205,10 +263,13 @@ internal sealed partial class GraphRenderedDocument
                 continue;
             }
             hidden.Add(line.Edge);
+            HiddenChords += line.Chord ? 1 : 0;
+            HiddenCurves += line.Chord ? 0 : 1;
             occluders.UnionWith(blockers);
             if (child == BusiestTable || parent == BusiestTable)
             {
                 HiddenMeetingBusiestTable++;
+                FanHiddenCurves += line.Chord ? 0 : 1;
             }
         }
         HiddenRelations = hidden.Count;
@@ -325,6 +386,14 @@ internal sealed partial class GraphRenderedDocument
         }
         return false;
     }
+    /// <summary>Reads the stroke where the browser paints it: the written path, moved by the translate on it.</summary>
+    private static IReadOnlyList<GraphPoint> Flatten(string d, GraphPoint shift)
+    {
+        var written = Flatten(d);
+        return shift.X == 0 && shift.Y == 0
+            ? written
+            : written.Select(point => new GraphPoint(point.X + shift.X, point.Y + shift.Y)).ToArray();
+    }
     private static IReadOnlyList<GraphPoint> Flatten(string d)
     {
         var numbers = NumberPattern().Matches(d).Select(match => Num(match.Value)).ToArray();
@@ -353,13 +422,15 @@ internal sealed partial class GraphRenderedDocument
     private static bool HasClass(string classes, string name) => classes.Split(' ').Contains(name, StringComparer.Ordinal);
     private static double Number(Match rect, string group) => Num(rect.Groups[group].Value);
     private static double Num(string text) => double.Parse(text, CultureInfo.InvariantCulture);
-    [GeneratedRegex("""<g class="(?<class>node[^"]*)" data-n="(?<n>\d+)"[^>]*>(?<body>.*?)</g>""", RegexOptions.Singleline)]
+    [GeneratedRegex("""<g class="(?<class>node[^"]*)" data-n="(?<n>\d+)"(?<attrs>[^>]*)>(?<body>.*?)</g>""", RegexOptions.Singleline)]
     private static partial Regex NodePattern();
+    [GeneratedRegex("transform=\"translate\\((?<dx>[-\\d.]+)[ ,]+(?<dy>[-\\d.]+)\\)\"")]
+    private static partial Regex TranslatePattern();
     [GeneratedRegex("""<rect x="(?<x>[-\d.]+)" y="(?<y>[-\d.]+)" width="(?<w>[-\d.]+)" height="(?<h>[-\d.]+)""")]
     private static partial Regex RectPattern();
-    [GeneratedRegex("""<path class="(?<class>edge[^"]*)" data-e="(?<e>\d+)" d="(?<d>[^"]*)""")]
+    [GeneratedRegex("""<path class="(?<class>edge[^"]*)" data-e="(?<e>\d+)" d="(?<d>[^"]*)"(?<attrs>[^>]*)""")]
     private static partial Regex StrokePattern();
-    [GeneratedRegex("""<text class="elabel[^"]*" data-e="(?<e>\d+)" x="(?<x>[-\d.]+)" y="(?<y>[-\d.]+)""")]
+    [GeneratedRegex("""<text class="elabel[^"]*" data-e="(?<e>\d+)" x="(?<x>[-\d.]+)" y="(?<y>[-\d.]+)">(?<text>[^<]*)</text>""")]
     private static partial Regex LabelPattern();
     [GeneratedRegex(@"-?\d+(?:\.\d+)?")]
     private static partial Regex NumberPattern();

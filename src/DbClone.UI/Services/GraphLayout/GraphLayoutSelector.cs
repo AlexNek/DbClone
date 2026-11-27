@@ -110,6 +110,7 @@ internal sealed class GraphLayoutSelector
         var parts = new List<(GraphSubgraph, GraphLayoutCandidate)>();
         var watch = Stopwatch.StartNew();
         var degraded = false;
+        var sliced = false;
         var failed = false;
         var nearest = -1;
         var nearestFailures = int.MaxValue;
@@ -146,6 +147,8 @@ internal sealed class GraphLayoutSelector
                     reports.RemoveAll(report => report.Component == component);
                     best = SolveComponent(sub, component, budget, reports, progress, cancellation, refine: false, TimeSpan.Zero, clustering);
                 }
+
+                sliced |= progress.WasSliceCut;
 
                 if (progress.NearestFailures < nearestFailures)
                 {
@@ -187,7 +190,7 @@ internal sealed class GraphLayoutSelector
                 ? GraphRoughLayout.Of(profile)
                 : GraphRoughLayout.Of(profile, GraphDraftSeeds.Generate(profile, default, nearest + 1, clustering: false)[nearest]);
 
-            return new GraphSelectionOutcome(plain, reports, budget.Used, false, degraded, IsRough: true);
+            return new GraphSelectionOutcome(plain, reports, budget.Used, false, degraded, IsRough: true, WasTimeSliced: sliced);
         }
 
         var assembled = GraphLayoutAssembler.Assemble(profile, parts, parts.Count == 1 ? parts[0].Item2.Name : "assembled", budget.Used);
@@ -199,7 +202,7 @@ internal sealed class GraphLayoutSelector
             return new GraphSelectionOutcome(null, reports, budget.Used, true, false);
         }
 
-        return new GraphSelectionOutcome(assembled, reports, budget.Used, false, degraded);
+        return new GraphSelectionOutcome(assembled, reports, budget.Used, false, degraded, WasTimeSliced: sliced);
     }
 
     private GraphLayoutCandidate? SolveComponent(
@@ -337,6 +340,8 @@ internal sealed class GraphLayoutSelector
                 catch (OperationCanceledException) when (!cancellation.IsCancellationRequested)
                 {
                     // Keep every complete improvement already reported, even when a later trial was interrupted.
+                    // The slice, not the request, expired: what the search did not reach depends on this machine.
+                    progress.WasSliceCut = true;
                 }
                 finally
                 {
@@ -381,6 +386,7 @@ internal sealed class GraphLayoutSelector
             catch (OperationCanceledException) when (!cancellation.IsCancellationRequested)
             {
                 // A later interrupted trial cannot discard a complete, guarded improvement.
+                progress.WasSliceCut = true;
             }
             finally
             {

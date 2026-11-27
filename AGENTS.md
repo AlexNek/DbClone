@@ -198,3 +198,11 @@ Services (interfaces, injected)
 - Make surgical edits only: change exactly what the task requires.
 - Never refactor, "simplify", or restructure adjacent working code unless explicitly asked.
 - If a change seems to require touching unrelated structure, stop and ask first.
+
+## Plan implementation authorization (MANDATORY)
+
+- ❌ NEVER implement a plan (write production code, tests, workflow edits, or change a bound/constant) without a clear, explicit task authorizing that implementation.
+- ✅ A request to review, validate, audit, verify or "correct the findings" a plan is authorization for the review-record work only — it is never a green light to implement the plan.
+- ✅ Even a review verdict of PASS does not by itself authorize coding; implementation begins only on a direct "implement this / execute phase N" instruction.
+- ✅ Authorizations are literal and narrow: "validate errors and correct valid" covers validating and correcting the reported findings in the records, nothing else.
+- ✅ Status and review reports must state the actual chronology. If code was found already implemented without a recorded task, report it as a process defect plainly — never gloss it as "errors were caught first".

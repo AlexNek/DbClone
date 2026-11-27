@@ -72,6 +72,14 @@ internal static class GraphQualityFixtures
     public static GraphLayoutProfile Profile(string name) => Sized(Model(name));
 
     /// <summary>
+    /// The layout facts of an analyzed catalog, sized exactly as the engine sizes them. A test that wants one
+    /// arrangement rather than the contest's answer asks for its facts with this.
+    /// </summary>
+    /// <param name="model">The analyzed graph.</param>
+    /// <returns>The graph facts the seeds work on.</returns>
+    public static GraphLayoutProfile Profile(CatalogGraphModel model) => Sized(model);
+
+    /// <summary>
     /// The layout facts of an arbitrary shape, sized exactly as the engine sizes them, built from a bare list
     /// of relations instead of a named fixture. This is what lets a test ask about a catalog nobody wrote down.
     /// </summary>

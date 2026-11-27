@@ -75,6 +75,7 @@ public sealed class GraphLayoutIntegrationTests
     }
 
     [Fact]
+    [Trait("Speed", "Slow")]
     public void A_catalog_taken_from_a_report_always_ends_with_a_whole_picture()
     {
         var profile = GraphQualityFixtures.Profile(GraphQualityFixtures.Catalog);
